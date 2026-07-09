@@ -9,7 +9,7 @@ Human setup:
   paxm setup  # choose providers and agent hooks interactively
 
 Agent active recall:
-  paxm recall --query "what did we decide?" --json
+  paxm recall --query "what did we decide?" --limit 10 --json
 
 Hook passive recall:
   installed hook shim -> paxm __hook -> in-memory buffer daemon
@@ -82,7 +82,7 @@ recall_profiles:
       - name: local
         required: true
         weight: 1
-    max_results: 8
+    max_results: 3
     thresholds:
       min_relevance: 0.25
       min_score: 0.25
@@ -183,7 +183,9 @@ telemetry:
 
 Multiple enabled providers are supported by configuration. Recall profiles decide
 which providers are read, how provider relevance is weighted, and what
-thresholds are applied. Write profiles decide which providers are written.
+thresholds are applied. The default active recall profile returns 3 memories;
+pass `--limit N` to `paxm recall` to request more for a specific query. Write
+profiles decide which providers are written.
 Optional provider failures are returned as provider errors; required provider
 failures fail the command.
 

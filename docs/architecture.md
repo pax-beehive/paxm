@@ -94,7 +94,7 @@ Each shim calls a hidden internal hook entrypoint. The public CLI surface stays:
 
 ```text
 paxm [--config PATH] setup
-paxm [--config PATH] recall --query TEXT [--json]
+paxm [--config PATH] recall --query TEXT [--limit N] [--json]
 paxm [--config PATH] remember --text TEXT
 paxm [--config PATH] history [--days N] [--json]
 paxm [--config PATH] config doctor

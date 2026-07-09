@@ -29,6 +29,10 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	active := cfg.RecallProfiles["default"]
+	if active.MaxResults != 3 {
+		t.Fatalf("default active recall should return 3 results: %#v", active)
+	}
 	passive := cfg.RecallProfiles["passive"]
 	if passive.MaxResults != 2 || passive.Thresholds.MinRelevance != 0.75 || passive.Thresholds.MinScore != 0.75 {
 		t.Fatalf("unexpected passive profile: %#v", passive)

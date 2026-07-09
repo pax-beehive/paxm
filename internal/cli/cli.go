@@ -286,7 +286,9 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		}
 	}
 	for name, profile := range defaultCfg.RecallProfiles {
-		if _, ok := cfg.RecallProfiles[name]; !ok {
+		if existing, ok := cfg.RecallProfiles[name]; ok {
+			cfg.RecallProfiles[name] = mergeRecallProfileDefaults(name, existing, profile)
+		} else {
 			if name == "passive" {
 				cfg.RecallProfiles[name] = passiveProfileFrom(cfg.RecallProfiles["default"])
 			} else {
@@ -320,6 +322,17 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		cfg.Agents[name] = existing
 	}
 	return cfg, nil
+}
+
+func mergeRecallProfileDefaults(name string, current, defaults config.RecallProfileConfig) config.RecallProfileConfig {
+	if name == "default" && current.MaxResults == 8 && defaults.MaxResults == 3 && isDefaultRecallThreshold(current.Thresholds) {
+		current.MaxResults = defaults.MaxResults
+	}
+	return current
+}
+
+func isDefaultRecallThreshold(threshold config.RecallThresholdConfig) bool {
+	return threshold.MinRelevance == 0.25 && threshold.MinScore == 0.25
 }
 
 func mergeTelemetryDefaults(current, defaults config.TelemetryConfig) config.TelemetryConfig {
@@ -924,7 +937,7 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout)
 	fmt.Fprintln(r.stdout, "Usage:")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--json]")
+	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--limit N] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --text TEXT")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
@@ -1813,6 +1826,15 @@ func writeRecallMarkdown(w io.Writer, result facade.RecallResult) {
 	}
 	for i, hit := range result.Hits {
 		fmt.Fprintf(w, "### Memory %d (%s)\n", i+1, hit.Provider)
+		fmt.Fprintf(w, "Score: %.4f\n", hit.Score)
+		fmt.Fprintf(w, "Relevance: %.4f\n", hit.Relevance)
+		if hit.RawScore != nil {
+			if hit.RawScoreKind != "" {
+				fmt.Fprintf(w, "Raw score: %.4f (%s)\n", *hit.RawScore, hit.RawScoreKind)
+			} else {
+				fmt.Fprintf(w, "Raw score: %.4f\n", *hit.RawScore)
+			}
+		}
 		if hit.Source != "" {
 			fmt.Fprintf(w, "Source: %s\n\n", hit.Source)
 		} else {

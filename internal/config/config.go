@@ -201,7 +201,7 @@ func DefaultConfig(configPath string) Config {
 				Providers: []ProviderRouteConfig{
 					{Name: "local", Required: true, Weight: 1},
 				},
-				MaxResults: 8,
+				MaxResults: 3,
 				Thresholds: RecallThresholdConfig{
 					MinRelevance: 0.25,
 					MinScore:     0.25,
@@ -444,7 +444,7 @@ func legacyJSONPath(path string) string {
 
 func normalizeRecallProfile(profile RecallProfileConfig) RecallProfileConfig {
 	if profile.MaxResults == 0 {
-		profile.MaxResults = 8
+		profile.MaxResults = 3
 	}
 	if profile.Thresholds == (RecallThresholdConfig{}) {
 		profile.Thresholds = RecallThresholdConfig{
@@ -582,7 +582,7 @@ func legacyRecallProfile(providers map[string]ProviderConfig) RecallProfileConfi
 	}
 	return normalizeRecallProfile(RecallProfileConfig{
 		Providers:  routes,
-		MaxResults: 8,
+		MaxResults: 3,
 		Thresholds: RecallThresholdConfig{
 			MinRelevance: 0.25,
 			MinScore:     0.25,

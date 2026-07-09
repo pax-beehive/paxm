@@ -11,6 +11,8 @@ import (
 
 	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
 	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/memory-adaptor/internal/facade"
+	"github.com/pax-beehive/memory-adaptor/internal/memory"
 )
 
 func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
@@ -260,6 +262,27 @@ func TestSetupBaseConfigMergesLegacyHookWriteDefaults(t *testing.T) {
 	}
 }
 
+func TestSetupBaseConfigMigratesOldDefaultRecallLimit(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	profile := cfg.RecallProfiles["default"]
+	profile.MaxResults = 8
+	cfg.RecallProfiles["default"] = profile
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := setupBaseConfig(configPath, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.RecallProfiles["default"].MaxResults != 3 {
+		t.Fatalf("old default recall limit should migrate to 3: %#v", merged.RecallProfiles["default"])
+	}
+}
+
 func TestSetupRemovesLegacyHookShim(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
@@ -278,6 +301,37 @@ func TestSetupRemovesLegacyHookShim(t *testing.T) {
 	}
 	if _, err := os.Stat(legacyShim); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("legacy shim should be removed, stat err: %v", err)
+	}
+}
+
+func TestWriteRecallMarkdownShowsScores(t *testing.T) {
+	t.Parallel()
+
+	rawScore := 0.42
+	var stdout bytes.Buffer
+	writeRecallMarkdown(&stdout, facade.RecallResult{
+		Hits: []memory.MemoryHit{
+			{
+				Provider:     "local",
+				Text:         "Todd memory",
+				Score:        0.87654,
+				Relevance:    0.76543,
+				RawScore:     &rawScore,
+				RawScoreKind: "keyword_ratio",
+				Source:       "cli",
+			},
+		},
+	})
+	output := stdout.String()
+	for _, expected := range []string{
+		"Score: 0.8765",
+		"Relevance: 0.7654",
+		"Raw score: 0.4200 (keyword_ratio)",
+		"Source: cli",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("recall markdown missing %q: %s", expected, output)
+		}
 	}
 }
 

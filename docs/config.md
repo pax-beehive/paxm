@@ -38,7 +38,7 @@ recall_profiles:
       - name: local
         required: true
         weight: 1.0
-    max_results: 8
+    max_results: 3
     thresholds:
       min_relevance: 0.25
       min_score: 0.25
@@ -168,7 +168,8 @@ already exist.
 
 The default config separates explicit and passive recall:
 
-- `default` is used by active `paxm recall` and can be broader.
+- `default` is used by active `paxm recall` and returns 3 memories by default.
+  Use `paxm recall --limit N` to request more for a specific query.
 - `passive` is used by Codex `UserPromptSubmit` and is intentionally narrower,
   with higher thresholds and fewer results.
 
