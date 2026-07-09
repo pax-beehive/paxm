@@ -18,10 +18,37 @@ Useful overrides:
 
 ```bash
 # Install a specific version.
-curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_VERSION=v0.1.1 bash
+curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_VERSION=v0.1.2 bash
 
 # Install somewhere other than the default writable bin directory.
 curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_INSTALL_DIR="$HOME/go/bin" bash
+```
+
+## Agent Skill
+
+This repo includes a bundled agent skill at [skills/paxm/SKILL.md](skills/paxm/SKILL.md).
+The skill teaches an agent to actively call `paxm recall`, `paxm remember`, and
+`paxm history` while respecting user-owned setup and provider configuration.
+
+Install the CLI first, then run one interactive setup pass:
+
+```bash
+paxm setup
+paxm config doctor
+```
+
+`paxm setup` is where the user chooses memory providers and agent hooks. Active
+recall requires at least one enabled readable provider. The local provider works
+without an API key; remote providers such as Zep require the user to provide
+their API key during setup.
+
+To install the skill for Codex, ask an agent to read this repository, inspect
+`skills/paxm/SKILL.md`, and install the `paxm` skill into the active Codex skill
+directory. A direct local install looks like:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skills/paxm "${CODEX_HOME:-$HOME/.codex}/skills/paxm"
 ```
 
 ## V1 Shape
@@ -58,7 +85,7 @@ cmd/paxm
 Manual install from a GitHub release:
 
 ```bash
-VERSION=v0.1.1
+VERSION=v0.1.2
 curl -L "https://github.com/pax-beehive/memory-adaptor/releases/download/${VERSION}/paxm_${VERSION}_darwin_arm64.tar.gz" -o /tmp/paxm.tar.gz
 tar -xzf /tmp/paxm.tar.gz -C /tmp
 install /tmp/paxm_${VERSION}_darwin_arm64/paxm ~/go/bin/paxm

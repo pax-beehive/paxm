@@ -1,0 +1,4 @@
+interface:
+  display_name: "paxm"
+  short_description: "Recall and record agent memory with paxm"
+  default_prompt: "Use $paxm to recall relevant memory before answering."
