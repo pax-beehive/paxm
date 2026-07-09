@@ -14,10 +14,16 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("\n\n\n\n\n\n")
+	setupInput := strings.NewReader("\n\n\n\n\n")
 	code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Select memory providers to enable") {
+		t.Fatalf("setup did not show provider selector: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Select agent hooks to install") {
+		t.Fatalf("setup did not show hook selector: %s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "installed hook shim") {
 		t.Fatalf("setup did not install hook shim: %s", stdout.String())
@@ -62,9 +68,12 @@ func TestCLISetupInteractiveProviderChoices(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("y\n/custom/memory.jsonl\nn\ny\ny\nn\n")
+	setupInput := strings.NewReader("1\n/custom/memory.jsonl\n3\n1\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "installed hook shim") {
+		t.Fatalf("setup installed hook despite none selection: %s", stdout.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
@@ -82,6 +91,22 @@ func TestCLISetupInteractiveProviderChoices(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("config output missing %q: %s", want, output)
 		}
+	}
+}
+
+func TestCLISetupRequiresAProvider(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	setupInput := strings.NewReader("none\n")
+
+	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code == 0 {
+		t.Fatalf("setup unexpectedly succeeded: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "setup requires at least one memory provider") {
+		t.Fatalf("unexpected setup error: %s", stderr.String())
 	}
 }
 

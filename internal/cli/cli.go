@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pax-beehive/memory-adaptor/internal/adapters"
@@ -100,53 +102,80 @@ func (r runner) runSetup(args []string) error {
 		}
 	}
 	cfg := config.DefaultConfig(path)
-	local := cfg.Providers["local"]
-	enableLocal := true
-	installCodexHook := true
+	selectedProviders := defaultSelections(providerOptions(cfg), cfgProviderEnabled(cfg))
+	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
 	if !*yes {
 		var err error
-		enableLocal, err = promptBool(promptReader, r.stdout, "Enable local memory provider?", true)
+		selectedProviders, err = promptMultiSelect(promptReader, r.stdout, "Select memory providers to enable", providerOptions(cfg), selectedProviders)
 		if err != nil {
 			return err
 		}
-		if enableLocal {
+		if selectedProviders["local"] {
+			local := cfg.Providers["local"]
 			local.Path, err = promptString(promptReader, r.stdout, "Local memory path", local.Path)
 			if err != nil {
 				return err
 			}
-			local.Read, err = promptBool(promptReader, r.stdout, "Read from local provider?", true)
+			mode, err := promptSingleSelect(promptReader, r.stdout, "Local provider mode", []setupOption{
+				{ID: "read_write", Label: "read and write"},
+				{ID: "read_only", Label: "read only"},
+				{ID: "write_only", Label: "write only"},
+			}, "read_write")
 			if err != nil {
 				return err
 			}
-			local.Write, err = promptBool(promptReader, r.stdout, "Write to local provider?", true)
+			switch mode {
+			case "read_write":
+				local.Read = true
+				local.Write = true
+			case "read_only":
+				local.Read = true
+				local.Write = false
+			case "write_only":
+				local.Read = false
+				local.Write = true
+			}
+			policy, err := promptSingleSelect(promptReader, r.stdout, "Local provider failure policy", []setupOption{
+				{ID: "required", Label: "required"},
+				{ID: "best_effort", Label: "best effort"},
+			}, "required")
 			if err != nil {
 				return err
 			}
-			local.Required, err = promptBool(promptReader, r.stdout, "Require local provider to succeed?", true)
-			if err != nil {
-				return err
-			}
+			local.Required = policy == "required"
+			cfg.Providers["local"] = local
 		}
-		installCodexHook, err = promptBool(promptReader, r.stdout, "Install Codex passive recall hook shim?", true)
+		selectedHooks, err = promptMultiSelect(promptReader, r.stdout, "Select agent hooks to install", hookOptions(cfg), selectedHooks)
 		if err != nil {
 			return err
 		}
 	}
-	local.Enabled = enableLocal
-	cfg.Providers["local"] = local
-	codexHook := cfg.Hooks["codex"]
-	codexHook.Enabled = installCodexHook
-	if eventCfg, ok := codexHook.Events["user_prompt"]; ok {
-		eventCfg.Recall.Enabled = installCodexHook
-		codexHook.Events["user_prompt"] = eventCfg
+	if !anySelected(selectedProviders) {
+		return errors.New("setup requires at least one memory provider")
 	}
-	cfg.Hooks["codex"] = codexHook
+
+	for name, provider := range cfg.Providers {
+		provider.Enabled = selectedProviders[name]
+		cfg.Providers[name] = provider
+	}
+	for name, hook := range cfg.Hooks {
+		enabled := selectedHooks[name]
+		hook.Enabled = enabled
+		for eventName, eventCfg := range hook.Events {
+			eventCfg.Recall.Enabled = enabled
+			hook.Events[eventName] = eventCfg
+		}
+		cfg.Hooks[name] = hook
+	}
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
 	fmt.Fprintf(r.stdout, "created config: %s\n", path)
-	if installCodexHook {
-		scriptPath, err := installHookShim(path, "codex", "user_prompt")
+	for _, name := range sortedSelected(selectedHooks) {
+		if !selectedHooks[name] {
+			continue
+		}
+		scriptPath, err := installHookShim(path, name, "user_prompt")
 		if err != nil {
 			return err
 		}
@@ -348,6 +377,84 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
 }
 
+type setupOption struct {
+	ID    string
+	Label string
+}
+
+func providerOptions(cfg config.Config) []setupOption {
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	options := make([]setupOption, 0, len(names))
+	for _, name := range names {
+		provider := cfg.Providers[name]
+		label := name
+		if provider.Type != "" && provider.Type != name {
+			label = fmt.Sprintf("%s (%s)", name, provider.Type)
+		}
+		options = append(options, setupOption{ID: name, Label: label})
+	}
+	return options
+}
+
+func hookOptions(cfg config.Config) []setupOption {
+	names := make([]string, 0, len(cfg.Hooks))
+	for name := range cfg.Hooks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	options := make([]setupOption, 0, len(names))
+	for _, name := range names {
+		options = append(options, setupOption{ID: name, Label: name})
+	}
+	return options
+}
+
+func cfgProviderEnabled(cfg config.Config) map[string]bool {
+	selected := make(map[string]bool)
+	for name, provider := range cfg.Providers {
+		selected[name] = provider.Enabled
+	}
+	return selected
+}
+
+func cfgHookEnabled(cfg config.Config) map[string]bool {
+	selected := make(map[string]bool)
+	for name, hook := range cfg.Hooks {
+		selected[name] = hook.Enabled
+	}
+	return selected
+}
+
+func defaultSelections(options []setupOption, selected map[string]bool) map[string]bool {
+	normalized := make(map[string]bool)
+	for _, option := range options {
+		normalized[option.ID] = selected[option.ID]
+	}
+	return normalized
+}
+
+func anySelected(selected map[string]bool) bool {
+	for _, enabled := range selected {
+		if enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func sortedSelected(selected map[string]bool) []string {
+	names := make([]string, 0, len(selected))
+	for name := range selected {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func promptBool(reader *bufio.Reader, writer io.Writer, question string, defaultValue bool) (bool, error) {
 	suffix := " [y/N]: "
 	if defaultValue {
@@ -375,6 +482,135 @@ func promptBool(reader *bufio.Reader, writer io.Writer, question string, default
 			return defaultValue, nil
 		}
 	}
+}
+
+func promptSingleSelect(reader *bufio.Reader, writer io.Writer, question string, options []setupOption, defaultID string) (string, error) {
+	if len(options) == 0 {
+		return "", fmt.Errorf("%s has no options", question)
+	}
+	defaultIndex := optionIndex(options, defaultID)
+	if defaultIndex == -1 && len(options) > 0 {
+		defaultIndex = 0
+		defaultID = options[0].ID
+	}
+	for {
+		fmt.Fprintln(writer, question+":")
+		for i, option := range options {
+			marker := "[ ]"
+			if i == defaultIndex {
+				marker = "[x]"
+			}
+			fmt.Fprintf(writer, "  %d) %s %s\n", i+1, marker, option.Label)
+		}
+		fmt.Fprintf(writer, "Choose one [%d]: ", defaultIndex+1)
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", err
+		}
+		value := strings.TrimSpace(line)
+		if value == "" {
+			return defaultID, nil
+		}
+		index, parseErr := strconv.Atoi(value)
+		if parseErr == nil && index >= 1 && index <= len(options) {
+			return options[index-1].ID, nil
+		}
+		for _, option := range options {
+			if strings.EqualFold(value, option.ID) {
+				return option.ID, nil
+			}
+		}
+		fmt.Fprintln(writer, "Please choose one of the listed options.")
+		if errors.Is(err, io.EOF) {
+			return defaultID, nil
+		}
+	}
+}
+
+func promptMultiSelect(reader *bufio.Reader, writer io.Writer, question string, options []setupOption, defaults map[string]bool) (map[string]bool, error) {
+	if len(options) == 0 {
+		return map[string]bool{}, nil
+	}
+	defaultText := defaultSelectionText(options, defaults)
+	for {
+		fmt.Fprintln(writer, question+":")
+		for i, option := range options {
+			marker := "[ ]"
+			if defaults[option.ID] {
+				marker = "[x]"
+			}
+			fmt.Fprintf(writer, "  %d) %s %s\n", i+1, marker, option.Label)
+		}
+		fmt.Fprintf(writer, "Choose numbers, comma-separated, or all/none [%s]: ", defaultText)
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		value := strings.TrimSpace(line)
+		if value == "" {
+			return defaultSelections(options, defaults), nil
+		}
+		selected, parseErr := parseMultiSelect(value, options)
+		if parseErr == nil {
+			return selected, nil
+		}
+		fmt.Fprintf(writer, "%s\n", parseErr)
+		if errors.Is(err, io.EOF) {
+			return defaultSelections(options, defaults), nil
+		}
+	}
+}
+
+func parseMultiSelect(value string, options []setupOption) (map[string]bool, error) {
+	selected := make(map[string]bool)
+	for _, option := range options {
+		selected[option.ID] = false
+	}
+	value = strings.TrimSpace(strings.ToLower(value))
+	switch value {
+	case "all":
+		for _, option := range options {
+			selected[option.ID] = true
+		}
+		return selected, nil
+	case "none":
+		return selected, nil
+	}
+	parts := strings.Split(value, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		index, err := strconv.Atoi(part)
+		if err != nil || index < 1 || index > len(options) {
+			return nil, fmt.Errorf("invalid selection %q", part)
+		}
+		selected[options[index-1].ID] = true
+	}
+	return selected, nil
+}
+
+func defaultSelectionText(options []setupOption, defaults map[string]bool) string {
+	var indexes []string
+	for i, option := range options {
+		if defaults[option.ID] {
+			indexes = append(indexes, strconv.Itoa(i+1))
+		}
+	}
+	if len(indexes) == 0 {
+		return "none"
+	}
+	return strings.Join(indexes, ",")
+}
+
+func optionIndex(options []setupOption, id string) int {
+	for i, option := range options {
+		if option.ID == id {
+			return i
+		}
+	}
+	return -1
 }
 
 func promptString(reader *bufio.Reader, writer io.Writer, question, defaultValue string) (string, error) {

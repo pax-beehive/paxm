@@ -6,7 +6,7 @@
 
 ```text
 Human setup:
-  paxm setup
+  paxm setup  # choose providers and agent hooks interactively
 
 Agent active recall:
   paxm recall --query "what did we decide?" --json
@@ -73,7 +73,7 @@ V1 ships with a local JSONL provider so the full flow works without external API
 
 Multiple enabled providers are supported by configuration. Read-enabled providers are queried concurrently. Write-enabled providers are written concurrently. Optional provider failures are returned as provider errors; required provider failures fail the command.
 
-`paxm setup` is the interactive entry point for changing provider and hook choices. It writes the config and, when requested, installs a local hook shim under the config directory:
+`paxm setup` is the interactive entry point for changing provider and hook choices. It uses numbered selectors for memory providers and agent hooks, then writes the config and installs the selected hook shims under the config directory:
 
 ```text
 ~/.config/paxm/hooks/codex-user_prompt
