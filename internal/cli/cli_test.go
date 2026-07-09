@@ -139,6 +139,10 @@ func TestCLISetupInteractiveZepProvider(t *testing.T) {
 	if len(recallRoutes) != 1 || recallRoutes[0].Name != "zep" || recallRoutes[0].Required {
 		t.Fatalf("unexpected recall routes: %#v", recallRoutes)
 	}
+	passiveRoutes := cfg.RecallProfiles["passive"].Providers
+	if len(passiveRoutes) != 1 || passiveRoutes[0].Name != "zep" || passiveRoutes[0].Required {
+		t.Fatalf("unexpected passive recall routes: %#v", passiveRoutes)
+	}
 	writeRoutes := cfg.WriteProfiles["default"].Providers
 	if len(writeRoutes) != 1 || writeRoutes[0].Name != "zep" || writeRoutes[0].Required {
 		t.Fatalf("unexpected write routes: %#v", writeRoutes)
@@ -223,6 +227,12 @@ func TestSetupBaseConfigMergesLegacyHookWriteDefaults(t *testing.T) {
 	if !userInput.Recall.Enabled || !userInput.Write.Enabled || !userInput.Write.Buffer.Enabled {
 		t.Fatalf("legacy user prompt hook did not receive user_input write defaults: %#v", userInput)
 	}
+	if userInput.Recall.Profile != "passive" || userInput.Recall.MaxResults != 2 {
+		t.Fatalf("legacy user prompt hook did not move to passive recall: %#v", userInput.Recall)
+	}
+	if userInput.Recall.Insertion.MinScore != 0.8 || userInput.Recall.Insertion.MaxItems != 2 || !userInput.Recall.Insertion.RequireQueryTerms {
+		t.Fatalf("legacy user prompt hook did not receive passive insertion policy: %#v", userInput.Recall.Insertion)
+	}
 	if !cfg.Agents["codex"].Hooks["turn_end"].Write.Buffer.Flush {
 		t.Fatalf("turn_end flush default was not merged: %#v", cfg.Agents["codex"].Hooks["turn_end"])
 	}
@@ -277,6 +287,9 @@ func assertWriteOnlyConfig(t *testing.T, configPath string) {
 	}
 	if recallHasProvider(cfg, "local") {
 		t.Fatalf("local should not be in default recall profile: %#v", cfg.RecallProfiles["default"])
+	}
+	if recallProfileHasProvider(cfg.RecallProfiles["passive"], "local") {
+		t.Fatalf("local should not be in passive recall profile: %#v", cfg.RecallProfiles["passive"])
 	}
 	writeProfile := cfg.WriteProfiles["default"]
 	if len(writeProfile.Providers) != 1 || writeProfile.Providers[0].Name != "local" || !writeProfile.Providers[0].Required {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode"
 
 	"github.com/pax-beehive/memory-adaptor/internal/config"
 	"github.com/pax-beehive/memory-adaptor/internal/memory"
@@ -194,6 +195,7 @@ func (s *Service) RunHook(ctx context.Context, event HookEvent) (HookResult, err
 		Limit:   limit,
 		Meta:    event.Metadata,
 	})
+	recall.Hits = filterHookInsertionHits(recall.Hits, query, eventCfg.Recall.Insertion)
 	result.Query = recall.Query
 	result.Recall = &recall
 	return result, err
@@ -335,6 +337,66 @@ func copyMetadata(metadata map[string]string) map[string]string {
 		copied[key] = value
 	}
 	return copied
+}
+
+func filterHookInsertionHits(hits []memory.MemoryHit, query string, policy config.HookInsertionConfig) []memory.MemoryHit {
+	if policy == (config.HookInsertionConfig{}) {
+		return hits
+	}
+	limit := policy.MaxItems
+	if limit <= 0 || limit > len(hits) {
+		limit = len(hits)
+	}
+	filtered := make([]memory.MemoryHit, 0, limit)
+	for _, hit := range hits {
+		if policy.MinScore > 0 && hit.Score < policy.MinScore {
+			continue
+		}
+		if policy.RequireQueryTerms && !textMatchesQueryTerms(hit.Text, query) {
+			continue
+		}
+		filtered = append(filtered, hit)
+		if len(filtered) >= limit {
+			break
+		}
+	}
+	return filtered
+}
+
+func textMatchesQueryTerms(text, query string) bool {
+	text = strings.ToLower(text)
+	for _, term := range significantQueryTerms(query) {
+		if strings.Contains(text, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func significantQueryTerms(query string) []string {
+	var terms []string
+	for _, field := range strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}) {
+		field = strings.TrimSpace(field)
+		if len([]rune(field)) < 3 {
+			continue
+		}
+		if isQueryStopWord(field) {
+			continue
+		}
+		terms = append(terms, field)
+	}
+	return terms
+}
+
+func isQueryStopWord(value string) bool {
+	switch value {
+	case "about", "check", "please", "有没有", "是否", "什么", "这个", "那个":
+		return true
+	default:
+		return false
+	}
 }
 
 func firstNonEmpty(values ...string) string {

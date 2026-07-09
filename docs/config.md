@@ -36,7 +36,7 @@ recall_profiles:
   default:
     providers:
       - name: local
-        required: false
+        required: true
         weight: 1.0
     max_results: 8
     thresholds:
@@ -46,11 +46,24 @@ recall_profiles:
       type: weighted_relevance
       recency_boost: 0
 
+  passive:
+    providers:
+      - name: local
+        required: true
+        weight: 1.0
+    max_results: 2
+    thresholds:
+      min_relevance: 0.75
+      min_score: 0.75
+    ranking:
+      type: weighted_relevance
+      recency_boost: 0
+
 write_profiles:
   default:
     providers:
       - name: local
-        required: false
+        required: true
 
 agents:
   codex:
@@ -77,9 +90,14 @@ agents:
       user_input:
         recall:
           enabled: true
-          profile: default
+          profile: passive
           query_template: "{{ .prompt }}"
+          max_results: 2
           output: markdown
+          insertion:
+            min_score: 0.8
+            max_items: 2
+            require_query_terms: true
         write:
           enabled: true
           profile: default
@@ -137,6 +155,12 @@ already exist.
 
 `recall_profiles` defines read strategy.
 
+The default config separates explicit and passive recall:
+
+- `default` is used by active `paxm recall` and can be broader.
+- `passive` is used by Codex `UserPromptSubmit` and is intentionally narrower,
+  with higher thresholds and fewer results.
+
 Provider route fields:
 
 - `name`: provider instance name from `providers`.
@@ -164,6 +188,18 @@ write profile unless another profile is selected.
 
 `agents.codex.hooks.user_input.recall` controls passive recall from the Codex
 `UserPromptSubmit` hook.
+
+Hook recall fields:
+
+- `profile`: recall profile used to fetch candidates. The default hook uses
+  `passive`.
+- `query_template`: Go template rendered from hook data into the recall query.
+- `max_results`: per-hook result limit passed to recall.
+- `insertion.min_score`: second-pass score threshold before hook output is
+  returned to the agent context.
+- `insertion.max_items`: maximum number of memories inserted by the hook.
+- `insertion.require_query_terms`: when true, a hit must contain at least one
+  significant query term before it is inserted.
 
 `agents.codex.hooks.*.write` controls passive hook writes. The built-in Codex
 event names are:

@@ -283,7 +283,11 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 	}
 	for name, profile := range defaultCfg.RecallProfiles {
 		if _, ok := cfg.RecallProfiles[name]; !ok {
-			cfg.RecallProfiles[name] = profile
+			if name == "passive" {
+				cfg.RecallProfiles[name] = passiveProfileFrom(cfg.RecallProfiles["default"])
+			} else {
+				cfg.RecallProfiles[name] = profile
+			}
 		}
 	}
 	for name, profile := range defaultCfg.WriteProfiles {
@@ -314,6 +318,15 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 }
 
 func mergeHookDefaults(current, defaults config.AgentHookConfig) config.AgentHookConfig {
+	if current.Recall.Profile == "default" && defaults.Recall.Profile == "passive" && current.Recall.QueryTemplate == defaults.Recall.QueryTemplate {
+		current.Recall.Profile = defaults.Recall.Profile
+		if defaults.Recall.MaxResults != 0 {
+			current.Recall.MaxResults = defaults.Recall.MaxResults
+		}
+	}
+	if current.Recall.Insertion == (config.HookInsertionConfig{}) {
+		current.Recall.Insertion = defaults.Recall.Insertion
+	}
 	if current.Write.Profile == "" {
 		current.Write.Profile = defaults.Write.Profile
 	}
@@ -331,6 +344,21 @@ func mergeHookDefaults(current, defaults config.AgentHookConfig) config.AgentHoo
 		current.Write.Buffer = defaults.Write.Buffer
 	}
 	return current
+}
+
+func passiveProfileFrom(base config.RecallProfileConfig) config.RecallProfileConfig {
+	return config.RecallProfileConfig{
+		Providers:  append([]config.ProviderRouteConfig(nil), base.Providers...),
+		MaxResults: 2,
+		Thresholds: config.RecallThresholdConfig{
+			MinRelevance: 0.75,
+			MinScore:     0.75,
+		},
+		Ranking: config.RankingConfig{
+			Type:         "weighted_relevance",
+			RecencyBoost: base.Ranking.RecencyBoost,
+		},
+	}
 }
 
 func (r runner) runRecall(args []string) error {
@@ -970,7 +998,15 @@ func providerRequiredInWriteProfile(profile config.WriteProfileConfig, provider 
 }
 
 func upsertRecallRoute(cfg *config.Config, provider string, required bool) {
-	profile := cfg.RecallProfiles["default"]
+	upsertRecallRouteInProfile(cfg, "default", provider, required)
+	if _, ok := cfg.RecallProfiles["passive"]; !ok {
+		cfg.RecallProfiles["passive"] = passiveProfileFrom(cfg.RecallProfiles["default"])
+	}
+	upsertRecallRouteInProfile(cfg, "passive", provider, required)
+}
+
+func upsertRecallRouteInProfile(cfg *config.Config, profileName, provider string, required bool) {
+	profile := cfg.RecallProfiles[profileName]
 	for i, route := range profile.Providers {
 		if route.Name == provider {
 			route.Required = required
@@ -978,18 +1014,20 @@ func upsertRecallRoute(cfg *config.Config, provider string, required bool) {
 				route.Weight = 1
 			}
 			profile.Providers[i] = route
-			cfg.RecallProfiles["default"] = profile
+			cfg.RecallProfiles[profileName] = profile
 			return
 		}
 	}
 	profile.Providers = append(profile.Providers, config.ProviderRouteConfig{Name: provider, Required: required, Weight: 1})
-	cfg.RecallProfiles["default"] = profile
+	cfg.RecallProfiles[profileName] = profile
 }
 
 func removeRecallRoute(cfg *config.Config, provider string) {
-	profile := cfg.RecallProfiles["default"]
-	profile.Providers = filterRoutes(profile.Providers, provider)
-	cfg.RecallProfiles["default"] = profile
+	for _, profileName := range []string{"default", "passive"} {
+		profile := cfg.RecallProfiles[profileName]
+		profile.Providers = filterRoutes(profile.Providers, provider)
+		cfg.RecallProfiles[profileName] = profile
+	}
 }
 
 func upsertWriteRoute(cfg *config.Config, provider string, required bool) {

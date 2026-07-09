@@ -84,6 +84,18 @@ recall_profiles:
     ranking:
       type: weighted_relevance
 
+  passive:
+    providers:
+      - name: local
+        required: true
+        weight: 1
+    max_results: 2
+    thresholds:
+      min_relevance: 0.75
+      min_score: 0.75
+    ranking:
+      type: weighted_relevance
+
 write_profiles:
   default:
     providers:
@@ -115,10 +127,14 @@ agents:
       user_input:
         recall:
           enabled: true
-          profile: default
+          profile: passive
           query_template: "{{ .prompt }}"
-          max_results: 8
+          max_results: 2
           output: markdown
+          insertion:
+            min_score: 0.8
+            max_items: 2
+            require_query_terms: true
         write:
           enabled: true
           profile: default

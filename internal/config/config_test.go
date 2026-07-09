@@ -25,6 +25,23 @@ func TestSaveWritesYAMLByDefault(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	passive := cfg.RecallProfiles["passive"]
+	if passive.MaxResults != 2 || passive.Thresholds.MinRelevance != 0.75 || passive.Thresholds.MinScore != 0.75 {
+		t.Fatalf("unexpected passive profile: %#v", passive)
+	}
+	hook := cfg.Agents["codex"].Hooks["user_input"].Recall
+	if hook.Profile != "passive" || hook.MaxResults != 2 {
+		t.Fatalf("user_input hook should use passive profile: %#v", hook)
+	}
+	if hook.Insertion.MinScore != 0.8 || hook.Insertion.MaxItems != 2 || !hook.Insertion.RequireQueryTerms {
+		t.Fatalf("unexpected passive insertion policy: %#v", hook.Insertion)
+	}
+}
+
 func TestLoadMigratesLegacyJSON(t *testing.T) {
 	t.Parallel()
 

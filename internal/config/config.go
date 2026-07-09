@@ -86,11 +86,18 @@ type AgentHookConfig struct {
 }
 
 type HookRecallConfig struct {
-	Enabled       bool   `json:"enabled" yaml:"enabled"`
-	Profile       string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	QueryTemplate string `json:"query_template,omitempty" yaml:"query_template,omitempty"`
-	MaxResults    int    `json:"max_results,omitempty" yaml:"max_results,omitempty"`
-	Output        string `json:"output,omitempty" yaml:"output,omitempty"`
+	Enabled       bool                `json:"enabled" yaml:"enabled"`
+	Profile       string              `json:"profile,omitempty" yaml:"profile,omitempty"`
+	QueryTemplate string              `json:"query_template,omitempty" yaml:"query_template,omitempty"`
+	MaxResults    int                 `json:"max_results,omitempty" yaml:"max_results,omitempty"`
+	Output        string              `json:"output,omitempty" yaml:"output,omitempty"`
+	Insertion     HookInsertionConfig `json:"insertion,omitempty" yaml:"insertion,omitempty"`
+}
+
+type HookInsertionConfig struct {
+	MinScore          float64 `json:"min_score,omitempty" yaml:"min_score,omitempty"`
+	MaxItems          int     `json:"max_items,omitempty" yaml:"max_items,omitempty"`
+	RequireQueryTerms bool    `json:"require_query_terms,omitempty" yaml:"require_query_terms,omitempty"`
 }
 
 type HookWriteConfig struct {
@@ -179,6 +186,19 @@ func DefaultConfig(configPath string) Config {
 					Type: "weighted_relevance",
 				},
 			},
+			"passive": {
+				Providers: []ProviderRouteConfig{
+					{Name: "local", Required: true, Weight: 1},
+				},
+				MaxResults: 2,
+				Thresholds: RecallThresholdConfig{
+					MinRelevance: 0.75,
+					MinScore:     0.75,
+				},
+				Ranking: RankingConfig{
+					Type: "weighted_relevance",
+				},
+			},
 		},
 		WriteProfiles: map[string]WriteProfileConfig{
 			"default": {
@@ -211,10 +231,15 @@ func DefaultConfig(configPath string) Config {
 					"user_input": {
 						Recall: HookRecallConfig{
 							Enabled:       true,
-							Profile:       "default",
+							Profile:       "passive",
 							QueryTemplate: "{{ .prompt }}",
-							MaxResults:    8,
+							MaxResults:    2,
 							Output:        "markdown",
+							Insertion: HookInsertionConfig{
+								MinScore:          0.8,
+								MaxItems:          2,
+								RequireQueryTerms: true,
+							},
 						},
 						Write: HookWriteConfig{
 							Enabled:  true,

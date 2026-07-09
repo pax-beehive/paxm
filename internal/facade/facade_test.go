@@ -11,6 +11,7 @@ import (
 
 type captureProvider struct {
 	query string
+	hits  []memory.MemoryHit
 }
 
 func (p *captureProvider) Name() string {
@@ -19,6 +20,9 @@ func (p *captureProvider) Name() string {
 
 func (p *captureProvider) Search(_ context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
 	p.query = query.Text
+	if p.hits != nil {
+		return p.hits, nil
+	}
 	return []memory.MemoryHit{{ID: "1", Text: "hit", Score: 1}}, nil
 }
 
@@ -113,6 +117,67 @@ func TestRecallUsesAgentActiveRecallProfile(t *testing.T) {
 	}
 	if provider.query != "active query" {
 		t.Fatalf("active recall did not hit provider, got query %q", provider.query)
+	}
+}
+
+func TestRunHookAppliesInsertionPolicy(t *testing.T) {
+	t.Parallel()
+
+	provider := &captureProvider{
+		hits: []memory.MemoryHit{
+			{ID: "low-score", Text: "paxm passive recall low score", Score: 0.7, Relevance: 0.7},
+			{ID: "no-term", Text: "unrelated high score memory", Score: 0.95, Relevance: 0.95},
+			{ID: "keep", Text: "paxm passive recall should be conservative", Score: 0.9, Relevance: 0.9},
+			{ID: "over-limit", Text: "another paxm passive recall memory", Score: 0.85, Relevance: 0.85},
+		},
+	}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Read: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(config.Config{
+		Version: 1,
+		RecallProfiles: map[string]config.RecallProfileConfig{
+			"passive": {
+				Providers:  []config.ProviderRouteConfig{{Name: "capture", Required: true, Weight: 1}},
+				MaxResults: 8,
+			},
+		},
+		Agents: map[string]config.AgentConfig{
+			"codex": {
+				Enabled: true,
+				Hooks: map[string]config.AgentHookConfig{
+					"user_input": {
+						Recall: config.HookRecallConfig{
+							Enabled:       true,
+							Profile:       "passive",
+							QueryTemplate: "{{ .prompt }}",
+							MaxResults:    8,
+							Insertion: config.HookInsertionConfig{
+								MinScore:          0.8,
+								MaxItems:          1,
+								RequireQueryTerms: true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}, router)
+
+	result, err := service.RunHook(context.Background(), HookEvent{
+		Target: "codex",
+		Event:  "user_input",
+		Prompt: "paxm passive recall",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Recall == nil {
+		t.Fatal("expected recall result")
+	}
+	if len(result.Recall.Hits) != 1 || result.Recall.Hits[0].ID != "keep" {
+		t.Fatalf("unexpected inserted hits: %#v", result.Recall.Hits)
 	}
 }
 

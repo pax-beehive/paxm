@@ -15,6 +15,9 @@ func TestBuildRouterUsesProfileRequiredForHealth(t *testing.T) {
 	recall := cfg.RecallProfiles["default"]
 	recall.Providers[0].Required = false
 	cfg.RecallProfiles["default"] = recall
+	passive := cfg.RecallProfiles["passive"]
+	passive.Providers[0].Required = false
+	cfg.RecallProfiles["passive"] = passive
 	write := cfg.WriteProfiles["default"]
 	write.Providers[0].Required = false
 	cfg.WriteProfiles["default"] = write
