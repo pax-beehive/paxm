@@ -133,3 +133,29 @@ Default events avoid storing raw query or memory text. They include query length
 a query hash prefix, profile, hook event, agent target, hit/insert/write counts,
 provider recall/write counts, provider hit/ref counts, provider error counts,
 and duration.
+
+## Release Pipeline
+
+`paxm` releases are tag-driven. Pushing a `v*` tag runs
+`.github/workflows/release.yml`, which:
+
+- checks out the full git history so the tag name is available;
+- installs the Go version from `go.mod`;
+- runs `go test ./...`;
+- runs `scripts/build-release.sh`;
+- publishes the generated archives and `SHA256SUMS` to the GitHub release.
+
+`scripts/build-release.sh` is the single packaging path for both local releases
+and GitHub Actions. It cross-compiles with `CGO_ENABLED=0`, injects the tag into
+`paxm version`, and emits archives for:
+
+- `darwin/amd64`
+- `darwin/arm64`
+- `linux/amd64`
+- `linux/arm64`
+- `windows/amd64`
+- `windows/arm64`
+
+Release artifacts are intentionally just the binary plus README. Runtime config,
+API keys, hook installation, and local telemetry files remain user-owned state
+created by `paxm setup` and normal CLI usage.

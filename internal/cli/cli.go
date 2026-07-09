@@ -27,6 +27,8 @@ import (
 
 var ensureZepUser = zepadapter.EnsureUser
 
+var version = "dev"
+
 type runner struct {
 	stdin      io.Reader
 	stdout     io.Writer
@@ -63,6 +65,10 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		r.printHelp()
 		return 0
 	}
+	if args[0] == "--version" || args[0] == "-v" {
+		fmt.Fprintln(stdout, version)
+		return 0
+	}
 	if err := r.run(args); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -80,6 +86,9 @@ func (r runner) run(args []string) error {
 		return r.runRemember(args[1:])
 	case "history":
 		return r.runHistory(args[1:])
+	case "version":
+		fmt.Fprintln(r.stdout, version)
+		return nil
 	case "config":
 		return r.runConfig(args[1:])
 	case "__hook":
@@ -970,6 +979,7 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --text TEXT")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
+	fmt.Fprintln(r.stdout, "  paxm version")
 }
 
 func (r runner) recordRecallTelemetry(cfg config.Config, kind, source, target, hookEvent, profile, query string, result facade.RecallResult, skipped bool, duration time.Duration, opErr error) {

@@ -33,6 +33,18 @@ cmd/paxm
 
 ## Quick Start
 
+Install from a GitHub release:
+
+```bash
+VERSION=v0.1.0
+curl -L "https://github.com/pax-beehive/memory-adaptor/releases/download/${VERSION}/paxm_${VERSION}_darwin_arm64.tar.gz" -o /tmp/paxm.tar.gz
+tar -xzf /tmp/paxm.tar.gz -C /tmp
+install /tmp/paxm_${VERSION}_darwin_arm64/paxm ~/go/bin/paxm
+paxm version
+```
+
+Build locally:
+
 ```bash
 go build -o /tmp/paxm ./cmd/paxm
 /tmp/paxm setup
@@ -224,3 +236,18 @@ item to the in-memory hook buffer. `session_start` appends a write item.
 profile. The buffer lives in a short-lived local daemon and is intentionally not
 durable. Codex may still require you to review and trust the new non-managed
 hooks with `/hooks` before they run.
+
+## Releases
+
+Release binaries are built by GitHub Actions when a `v*` tag is pushed. The
+release workflow runs `go test ./...`, builds `paxm` for darwin, linux, and
+windows on amd64 and arm64, uploads archives, and publishes `SHA256SUMS`.
+
+To build the same assets locally:
+
+```bash
+VERSION=v0.1.0 scripts/build-release.sh
+ls dist/
+```
+
+See [docs/release.md](docs/release.md) for the release checklist.

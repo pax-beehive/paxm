@@ -489,3 +489,16 @@ func TestCLIDoesNotExposeHookOrProviderCommands(t *testing.T) {
 		t.Fatalf("hidden hook commands leaked in help: %s", stdout.String())
 	}
 }
+
+func TestCLIVersion(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Main([]string{"version"}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("version failed with code %d: %s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatalf("version output was empty")
+	}
+}
