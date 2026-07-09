@@ -68,6 +68,13 @@ session and is intentionally looser, closer to a RAG warmup for project context.
 The default `passive` profile is used for later `user_input` hooks and limits
 results to 2 with higher relevance and score thresholds.
 
+Active recall is agent-driven. A skill or agent may run multiple explicit
+`paxm recall` commands when an earlier result exposes a narrower lead, such as a
+document title, issue id, symbol, command, error text, or decision keyword. Paxm
+does not plan that query chain; it provides the recall surface and structured
+scores. The agent should keep each follow-up query focused, stop after a small
+number of hops, and verify current source when the remembered fact can drift.
+
 ## Write Profiles
 
 A write profile is the policy boundary for writes. It chooses:
@@ -128,6 +135,25 @@ does not store prompt text.
 `turn_end` appends a write item and flushes the buffer to the configured write
 profile. The buffer is owned by a short-lived local Unix-socket daemon and lives
 only in process memory. It is intentionally not durable.
+
+## Hook Write Capture
+
+Paxm does not run a shared memory-extraction or summarization step before
+writing. Hook writes render the configured `hooks.*.write.template` into a text
+payload, attach hook metadata, and route that `MemoryItem` to the configured
+write profile. The provider decides what to do with that text:
+
+- `sqlite` stores the rendered text directly.
+- `zep` writes the rendered text as a text episode and leaves graph extraction
+  to Zep.
+- `mem0` sends the rendered text as a single `role=user` message to the
+  self-hosted Mem0 `/memories` API. Mem0 extraction follows the server default
+  unless the provider `infer` config overrides it.
+- `jsonrpc` passes the `MemoryItem` to the plugin. The plugin owns any
+  extraction, summarization, filtering, or raw storage behavior.
+
+This keeps paxm's write boundary simple: templates decide what evidence is sent,
+write profiles decide which providers receive it, and providers own extraction.
 
 Pi is integrated through Pi's extension system:
 

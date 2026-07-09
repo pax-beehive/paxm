@@ -52,6 +52,34 @@ Read scores and provider metadata. Treat memory as supporting context, not sourc
 
 If recall returns nothing relevant, continue normally and do not imply memory found evidence.
 
+### Multi-Hop Recall
+
+Use multi-hop recall when the first results expose a more precise lead than the
+original query: a repo/module name, document title, issue id, symbol, command,
+error text, provider metadata, or decision keyword.
+
+Workflow:
+
+1. Run an initial focused recall with a small limit.
+2. Read the highest-scoring hits and extract one or two concrete follow-up
+   terms that were not in the original query.
+3. Run another recall for each useful follow-up term, keeping the query short
+   and specific.
+4. Merge the evidence across hops, then verify against the current repo or live
+   system when the fact can drift or direct verification is cheap.
+
+Example:
+
+```bash
+paxm recall --query "Roundtable translation language preference" --limit 3 --json
+paxm recall --query "content_translations translation_jobs DeepSeek provider" --limit 3 --json
+```
+
+Do not run open-ended recall loops. Stop after 2-3 hops, when a hop returns no
+new concrete lead, or when the next step should be repo or web verification
+instead of more memory search. Do not treat a follow-up hit as confirmed truth
+without checking current source when accuracy matters.
+
 ## Remember
 
 Store only durable, reusable facts:

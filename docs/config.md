@@ -382,6 +382,12 @@ Hook write fields:
   appending this item.
 - `buffer.flush_count`: flush after the buffer reaches this many items.
 
+Paxm writes the rendered template output as `MemoryItem.text`. It does not run a
+shared extraction step before writing. Providers own any extraction behavior:
+SQLite stores the text directly, Zep receives it as a text episode, Mem0
+receives it as a `role=user` message and may infer memories server-side, and
+JSON-RPC plugins decide their own extraction or storage behavior.
+
 The hook buffer is process memory owned by a short-lived local daemon. It is not
 durable; if the daemon exits before a flush, buffered hook write items can be
 lost.
