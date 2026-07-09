@@ -73,10 +73,18 @@ V1 ships with a local JSONL provider so the full flow works without external API
 
 Multiple enabled providers are supported by configuration. Read-enabled providers are queried concurrently. Write-enabled providers are written concurrently. Optional provider failures are returned as provider errors; required provider failures fail the command.
 
-`paxm setup` is the interactive entry point for changing provider and hook choices. It uses numbered selectors for memory providers and agent hooks, then writes the config and installs the selected hook shims under the config directory:
+`paxm setup` is the interactive entry point for changing provider and hook choices. It uses numbered selectors for memory providers and agent hooks, then writes the paxm config, installs selected hook shims, and registers Codex hooks in the user-level Codex config.
+
+For Codex, setup writes a shim under the paxm config directory:
 
 ```text
 ~/.config/paxm/hooks/codex-user_prompt
 ```
 
-The shim expects a hook event JSON object on stdin and calls `paxm recall --hook-event --json`.
+It also updates:
+
+```text
+~/.codex/config.toml
+```
+
+The shim expects a hook event JSON object on stdin and calls `paxm recall --hook-event --json`. Codex may still require you to review and trust the new non-managed hook with `/hooks` before it runs.

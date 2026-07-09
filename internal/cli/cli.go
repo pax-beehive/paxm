@@ -88,7 +88,8 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	promptReader := bufio.NewReader(r.stdin)
-	if config.Exists(path) && !*force {
+	configExists := config.Exists(path)
+	if configExists && !*force {
 		if *yes {
 			return fmt.Errorf("config already exists at %s; use --force to overwrite", path)
 		}
@@ -101,7 +102,10 @@ func (r runner) runSetup(args []string) error {
 			return nil
 		}
 	}
-	cfg := config.DefaultConfig(path)
+	cfg, err := setupBaseConfig(path, configExists)
+	if err != nil {
+		return err
+	}
 	selectedProviders := defaultSelections(providerOptions(cfg), cfgProviderEnabled(cfg))
 	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
 	if !*yes {
@@ -180,8 +184,34 @@ func (r runner) runSetup(args []string) error {
 			return err
 		}
 		fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+		if name == "codex" {
+			fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
+		}
 	}
 	return nil
+}
+
+func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
+	defaultCfg := config.DefaultConfig(path)
+	if !useExisting {
+		return defaultCfg, nil
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return config.Config{}, err
+	}
+	cfg = config.Normalize(cfg)
+	for name, provider := range defaultCfg.Providers {
+		if _, ok := cfg.Providers[name]; !ok {
+			cfg.Providers[name] = provider
+		}
+	}
+	for name, hook := range defaultCfg.Hooks {
+		if _, ok := cfg.Hooks[name]; !ok {
+			cfg.Hooks[name] = hook
+		}
+	}
+	return cfg, nil
 }
 
 func (r runner) runRecall(args []string) error {
@@ -640,7 +670,112 @@ func installHookShim(configPath, target, event string) (string, error) {
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		return "", err
 	}
+	if target == "codex" {
+		if err := installCodexGlobalHook(codexConfigPath(), scriptPath); err != nil {
+			return "", err
+		}
+	}
 	return scriptPath, nil
+}
+
+func codexConfigPath() string {
+	if path := os.Getenv("PAXM_CODEX_CONFIG"); path != "" {
+		return config.ExpandPath(path)
+	}
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return filepath.Join(".codex", "config.toml")
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	return filepath.Join(config.ExpandPath(codexHome), "config.toml")
+}
+
+func installCodexGlobalHook(path, scriptPath string) error {
+	path = config.ExpandPath(path)
+	command := shellQuote(scriptPath)
+	entry := `{ hooks = [{ type = "command", command = "` + escapeTomlString(command) + `", async = false, statusMessage = "Recalling paxm memory" }] }`
+
+	contentBytes, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	content := string(contentBytes)
+	if strings.Contains(content, scriptPath) || strings.Contains(content, command) {
+		return nil
+	}
+
+	updated := upsertCodexUserPromptHook(content, entry)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if len(contentBytes) > 0 {
+		backupPath := path + ".paxm.bak"
+		if _, err := os.Stat(backupPath); errors.Is(err, os.ErrNotExist) {
+			if err := os.WriteFile(backupPath, contentBytes, 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	return os.WriteFile(path, []byte(updated), 0o600)
+}
+
+func upsertCodexUserPromptHook(content, entry string) string {
+	if content == "" {
+		return "[hooks]\nUserPromptSubmit = [" + entry + "]\n"
+	}
+	lines := strings.SplitAfter(content, "\n")
+	hooksStart := -1
+	hooksEnd := len(lines)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "[hooks]" {
+			hooksStart = i
+			continue
+		}
+		if hooksStart != -1 && i > hooksStart && strings.HasPrefix(trimmed, "[") {
+			hooksEnd = i
+			break
+		}
+	}
+	if hooksStart == -1 {
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		return content + "\n[hooks]\nUserPromptSubmit = [" + entry + "]\n"
+	}
+	for i := hooksStart + 1; i < hooksEnd; i++ {
+		line := lines[i]
+		if strings.HasPrefix(strings.TrimSpace(line), "UserPromptSubmit = ") {
+			lines[i] = appendInlineTomlArray(line, entry)
+			return strings.Join(lines, "")
+		}
+	}
+	newLine := "UserPromptSubmit = [" + entry + "]\n"
+	updated := append([]string{}, lines[:hooksStart+1]...)
+	updated = append(updated, newLine)
+	updated = append(updated, lines[hooksStart+1:]...)
+	return strings.Join(updated, "")
+}
+
+func appendInlineTomlArray(line, entry string) string {
+	newline := ""
+	if strings.HasSuffix(line, "\n") {
+		newline = "\n"
+		line = strings.TrimSuffix(line, "\n")
+	}
+	index := strings.LastIndex(line, "]")
+	if index == -1 {
+		return line + newline
+	}
+	prefix := strings.TrimRight(line[:index], " ")
+	suffix := line[index:]
+	if strings.HasSuffix(prefix, "[") {
+		return prefix + entry + suffix + newline
+	}
+	return prefix + ", " + entry + suffix + newline
 }
 
 func shellQuote(value string) string {
@@ -648,6 +783,11 @@ func shellQuote(value string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func escapeTomlString(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return replacer.Replace(value)
 }
 
 func extractConfigFlag(args []string) ([]string, string, error) {
