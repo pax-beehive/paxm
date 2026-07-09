@@ -126,6 +126,17 @@ agents:
             enabled: true
             flush: true
             flush_count: 10
+
+telemetry:
+  enabled: true
+  dir: ~/.local/state/paxm
+  events_file: events.jsonl
+  metrics_file: metrics.json
+  max_event_file_bytes: 1048576
+  max_event_files: 3
+  retention_days: 30
+  capture_query_preview: false
+  query_preview_chars: 80
 ```
 
 ## Providers
@@ -226,3 +237,30 @@ Hook write fields:
 The hook buffer is process memory owned by a short-lived local daemon. It is not
 durable; if the daemon exits before a flush, buffered hook write items can be
 lost.
+
+## Telemetry
+
+`telemetry` controls local debug logs and metrics used by `paxm history`.
+
+Files:
+
+- `events_file`: rolling JSONL event log. It records operation metadata such as
+  command, hook event, profile, hit count, provider names, duration, and errors.
+- `metrics_file`: compact aggregate JSON. It is overwritten on each telemetry
+  update and is the source for `paxm history`.
+
+Bounds:
+
+- `max_event_file_bytes`: rotate `events_file` when the next event would exceed
+  this size.
+- `max_event_files`: total event log files to keep, including the active file.
+  With the default `3`, paxm keeps `events.jsonl`, `events.jsonl.1`, and
+  `events.jsonl.2`.
+- `retention_days`: number of daily metric buckets to keep in `metrics_file`.
+
+Privacy:
+
+- Query text is not stored by default. Telemetry stores query length and a
+  SHA-256 hash prefix for correlation.
+- Set `capture_query_preview: true` only if local debugging needs a short query
+  preview. The preview is capped by `query_preview_chars`.

@@ -88,6 +88,28 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"recall"`) || !strings.Contains(stdout.String(), "provider fan-out") {
 		t.Fatalf("unexpected hook output: %s", stdout.String())
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"--config", configPath, "history", "--days", "7"}, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("history failed with code %d: %s", code, stderr.String())
+	}
+	history := stdout.String()
+	for _, expected := range []string{
+		"paxm history (last 7 days)",
+		"recalls: 2",
+		"writes: 1",
+		"by profile:",
+		"default",
+		"passive",
+		"by provider:",
+		"local",
+	} {
+		if !strings.Contains(history, expected) {
+			t.Fatalf("history missing %q: %s", expected, history)
+		}
+	}
 }
 
 func TestCLISetupInteractiveProviderChoices(t *testing.T) {

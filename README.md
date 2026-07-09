@@ -13,6 +13,9 @@ Agent active recall:
 
 Hook passive recall:
   installed hook shim -> paxm __hook -> in-memory buffer daemon
+
+Local history:
+  paxm history --days 7
 ```
 
 The CLI command layer does not talk to concrete memory providers directly. Commands call the facade, the facade calls the memory router, and the router fans out to enabled providers.
@@ -25,6 +28,7 @@ cmd/paxm
   internal/adapters      provider registry
   internal/adapters/local
   internal/config
+  internal/telemetry   bounded event logs and metrics
 ```
 
 ## Quick Start
@@ -34,6 +38,7 @@ go build -o /tmp/paxm ./cmd/paxm
 /tmp/paxm setup
 /tmp/paxm remember --text "paxm supports hook passive recall"
 /tmp/paxm recall --query "passive recall"
+/tmp/paxm history --days 7
 ```
 
 For a project-local config during development:
@@ -163,6 +168,17 @@ agents:
             enabled: true
             flush: true
             flush_count: 10
+
+telemetry:
+  enabled: true
+  dir: ~/.local/state/paxm
+  events_file: events.jsonl
+  metrics_file: metrics.json
+  max_event_file_bytes: 1048576
+  max_event_files: 3
+  retention_days: 30
+  capture_query_preview: false
+  query_preview_chars: 80
 ```
 
 Multiple enabled providers are supported by configuration. Recall profiles decide
@@ -177,6 +193,11 @@ exactly one of `user_id` or `graph_id`. When setup is configured for a Zep
 user graph, it ensures the configured `user_id` exists before saving the config.
 
 `paxm setup` is the interactive entry point for changing provider and hook choices. It uses numbered selectors for memory providers and agent hooks, then writes the paxm config, installs selected hook shims, and registers Codex hooks in the user-level Codex config.
+
+`paxm history` reads local telemetry metrics and summarizes recall frequency,
+hits, hook insertions, writes, provider errors, and storage usage. Telemetry
+uses a bounded rolling JSONL event log plus a compact metrics JSON file. By
+default it records query length and a query hash, not raw query text.
 
 For Codex, setup writes a shim under the paxm config directory:
 

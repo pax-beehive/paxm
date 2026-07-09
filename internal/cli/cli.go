@@ -21,6 +21,8 @@ import (
 	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
 	"github.com/pax-beehive/memory-adaptor/internal/config"
 	"github.com/pax-beehive/memory-adaptor/internal/facade"
+	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
 )
 
 var ensureZepUser = zepadapter.EnsureUser
@@ -76,6 +78,8 @@ func (r runner) run(args []string) error {
 		return r.runRecall(args[1:])
 	case "remember":
 		return r.runRemember(args[1:])
+	case "history":
+		return r.runHistory(args[1:])
 	case "config":
 		return r.runConfig(args[1:])
 	case "__hook":
@@ -295,6 +299,7 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 			cfg.WriteProfiles[name] = profile
 		}
 	}
+	cfg.Telemetry = mergeTelemetryDefaults(cfg.Telemetry, defaultCfg.Telemetry)
 	for name, agent := range defaultCfg.Agents {
 		existing, ok := cfg.Agents[name]
 		if !ok {
@@ -315,6 +320,34 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		cfg.Agents[name] = existing
 	}
 	return cfg, nil
+}
+
+func mergeTelemetryDefaults(current, defaults config.TelemetryConfig) config.TelemetryConfig {
+	if current.Enabled == nil {
+		current.Enabled = defaults.Enabled
+	}
+	if current.Dir == "" {
+		current.Dir = defaults.Dir
+	}
+	if current.EventsFile == "" {
+		current.EventsFile = defaults.EventsFile
+	}
+	if current.MetricsFile == "" {
+		current.MetricsFile = defaults.MetricsFile
+	}
+	if current.MaxEventFileBytes == 0 {
+		current.MaxEventFileBytes = defaults.MaxEventFileBytes
+	}
+	if current.MaxEventFiles == 0 {
+		current.MaxEventFiles = defaults.MaxEventFiles
+	}
+	if current.RetentionDays == 0 {
+		current.RetentionDays = defaults.RetentionDays
+	}
+	if current.QueryPreviewChars == 0 {
+		current.QueryPreviewChars = defaults.QueryPreviewChars
+	}
+	return current
 }
 
 func mergeHookDefaults(current, defaults config.AgentHookConfig) config.AgentHookConfig {
@@ -394,15 +427,17 @@ func (r runner) runRecall(args []string) error {
 		q = string(bytes)
 	}
 
-	service, err := r.loadService()
+	cfg, service, err := r.loadRuntime()
 	if err != nil {
 		return err
 	}
+	started := time.Now()
 	result, err := service.Recall(context.Background(), facade.RecallInput{
 		Query:   q,
 		Profile: *profile,
 		Limit:   *limit,
 	})
+	r.recordRecallTelemetry(cfg, "recall", "cli", "", "", effectiveRecallProfile(cfg, *profile), firstNonEmpty(result.Query, q), result, false, time.Since(started), err)
 	if err != nil {
 		return err
 	}
@@ -433,15 +468,17 @@ func (r runner) runRemember(args []string) error {
 		value = string(bytes)
 	}
 
-	service, err := r.loadService()
+	cfg, service, err := r.loadRuntime()
 	if err != nil {
 		return err
 	}
+	started := time.Now()
 	result, err := service.Ingest(context.Background(), facade.IngestInput{
 		Text:    value,
 		Profile: *profile,
 		Source:  *source,
 	})
+	r.recordRememberTelemetry(cfg, "remember", "cli", effectiveWriteProfile(*profile), 1, result, time.Since(started), err)
 	if err != nil {
 		return err
 	}
@@ -455,11 +492,21 @@ func (r runner) runRemember(args []string) error {
 }
 
 func (r runner) executeHook(event facade.HookEvent, jsonOut bool) error {
-	service, err := r.loadService()
+	cfg, service, err := r.loadRuntime()
 	if err != nil {
 		return err
 	}
+	started := time.Now()
 	result, err := service.RunHook(context.Background(), event)
+	query := event.Query
+	if result.Recall != nil {
+		query = result.Recall.Query
+	}
+	var recall facade.RecallResult
+	if result.Recall != nil {
+		recall = *result.Recall
+	}
+	r.recordRecallTelemetry(cfg, "hook_recall", "hook", result.Target, result.Event, hookRecallProfile(cfg, event), query, recall, result.Skipped, time.Since(started), err)
 	if err != nil {
 		return err
 	}
@@ -480,9 +527,10 @@ type hookBufferRequest struct {
 }
 
 type hookBufferResponse struct {
-	OK      bool   `json:"ok"`
-	Flushed int    `json:"flushed,omitempty"`
-	Error   string `json:"error,omitempty"`
+	OK       bool   `json:"ok"`
+	Buffered bool   `json:"buffered,omitempty"`
+	Flushed  int    `json:"flushed,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 func (r runner) runInternalHook(args []string) error {
@@ -502,7 +550,12 @@ func (r runner) runInternalHook(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := r.sendHookToBuffer(event); err != nil {
+	bufferStarted := time.Now()
+	response, err := r.sendHookToBuffer(event)
+	if cfg, cfgErr := config.Load(r.configFile()); cfgErr == nil {
+		r.recordHookWriteTelemetry(cfg, event, response, time.Since(bufferStarted), err)
+	}
+	if err != nil {
 		fmt.Fprintf(r.stderr, "paxm hook buffer skipped: %s\n", err)
 	}
 	if event.Event == "user_input" {
@@ -519,7 +572,7 @@ func (r runner) runHookDaemon(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	service, err := r.loadService()
+	_, service, err := r.loadRuntime()
 	if err != nil {
 		return err
 	}
@@ -603,13 +656,13 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 			_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
 			return 0, err
 		}
-		_ = writeJSON(conn, hookBufferResponse{OK: true, Flushed: 1})
+		_ = writeJSON(conn, hookBufferResponse{OK: true, Buffered: true, Flushed: 1})
 		return 1, nil
 	}
 	*buffer = append(*buffer, item)
 	shouldFlush := bufferCfg.Flush || (bufferCfg.FlushCount > 0 && len(*buffer) >= bufferCfg.FlushCount)
 	if !shouldFlush {
-		_ = writeJSON(conn, hookBufferResponse{OK: true})
+		_ = writeJSON(conn, hookBufferResponse{OK: true, Buffered: true})
 		return 0, nil
 	}
 	flushed := len(*buffer)
@@ -619,16 +672,16 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 		return 0, err
 	}
 	*buffer = nil
-	_ = writeJSON(conn, hookBufferResponse{OK: true, Flushed: flushed})
+	_ = writeJSON(conn, hookBufferResponse{OK: true, Buffered: true, Flushed: flushed})
 	return flushed, nil
 }
 
-func (r runner) sendHookToBuffer(event facade.HookEvent) error {
+func (r runner) sendHookToBuffer(event facade.HookEvent) (hookBufferResponse, error) {
 	socket := hookSocketPath(r.configFile())
 	response, err := sendHookBufferRequest(socket, event)
 	if err != nil {
 		if startErr := r.startHookDaemon(socket); startErr != nil {
-			return startErr
+			return hookBufferResponse{}, startErr
 		}
 		for i := 0; i < 20; i++ {
 			time.Sleep(50 * time.Millisecond)
@@ -639,12 +692,12 @@ func (r runner) sendHookToBuffer(event facade.HookEvent) error {
 		}
 	}
 	if err != nil {
-		return err
+		return hookBufferResponse{}, err
 	}
 	if !response.OK && response.Error != "" {
-		return errors.New(response.Error)
+		return response, errors.New(response.Error)
 	}
-	return nil
+	return response, nil
 }
 
 func (r runner) startHookDaemon(socket string) error {
@@ -815,19 +868,48 @@ func (r runner) runConfigDoctor(args []string) error {
 	return err
 }
 
-func (r runner) loadService() (*facade.Service, error) {
+func (r runner) runHistory(args []string) error {
+	fs := flag.NewFlagSet("history", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	days := fs.Int("days", 7, "number of days to summarize")
+	jsonOut := fs.Bool("json", false, "write JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(r.configFile())
+	if err != nil {
+		return err
+	}
+	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
+	summary, err := recorder.History(*days)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writeJSON(r.stdout, summary)
+	}
+	writeHistorySummary(r.stdout, summary)
+	return nil
+}
+
+func (r runner) loadRuntime() (config.Config, *facade.Service, error) {
 	cfg, err := config.Load(r.configFile())
 	if err != nil {
 		if errors.Is(err, config.ErrConfigMissing) {
-			return nil, fmt.Errorf("%w; run `paxm --config %s setup`", err, r.configFile())
+			return config.Config{}, nil, fmt.Errorf("%w; run `paxm --config %s setup`", err, r.configFile())
 		}
-		return nil, err
+		return config.Config{}, nil, err
 	}
 	router, err := adapters.DefaultRegistry().BuildRouter(cfg)
 	if err != nil {
-		return nil, err
+		return config.Config{}, nil, err
 	}
-	return facade.New(cfg, router), nil
+	return cfg, facade.New(cfg, router), nil
+}
+
+func (r runner) loadService() (*facade.Service, error) {
+	_, service, err := r.loadRuntime()
+	return service, err
 }
 
 func (r runner) configFile() string {
@@ -844,7 +926,151 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --text TEXT")
+	fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
+}
+
+func (r runner) recordRecallTelemetry(cfg config.Config, kind, source, target, hookEvent, profile, query string, result facade.RecallResult, skipped bool, duration time.Duration, opErr error) {
+	event := telemetry.Event{
+		Time:                 time.Now().UTC(),
+		Kind:                 kind,
+		Source:               source,
+		Command:              sourceCommand(source, kind),
+		Target:               target,
+		HookEvent:            hookEvent,
+		Profile:              profile,
+		Success:              opErr == nil,
+		Skipped:              skipped,
+		DurationMS:           duration.Milliseconds(),
+		HitCount:             len(result.Hits),
+		InsertedCount:        insertedCount(kind, result.Hits),
+		ProviderHits:         telemetry.ProviderHits(result.Hits),
+		ProviderErrorDetails: telemetry.ProviderErrors(result.ProviderErrors),
+		Error:                telemetryError(opErr),
+	}
+	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
+	recorder.PrepareQueryEvent(&event, query)
+	r.recordTelemetry(cfg, event)
+}
+
+func (r runner) recordRememberTelemetry(cfg config.Config, kind, source, profile string, itemCount int, result facade.IngestResult, duration time.Duration, opErr error) {
+	event := telemetry.Event{
+		Time:                 time.Now().UTC(),
+		Kind:                 kind,
+		Source:               source,
+		Command:              sourceCommand(source, kind),
+		Profile:              profile,
+		Success:              opErr == nil,
+		DurationMS:           duration.Milliseconds(),
+		ItemCount:            itemCount,
+		RefCount:             len(result.Refs),
+		ProviderRefs:         telemetry.ProviderRefs(result.Refs),
+		ProviderErrorDetails: telemetry.ProviderErrors(result.ProviderErrors),
+		Error:                telemetryError(opErr),
+	}
+	r.recordTelemetry(cfg, event)
+}
+
+func (r runner) recordHookWriteTelemetry(cfg config.Config, event facade.HookEvent, response hookBufferResponse, duration time.Duration, opErr error) {
+	telemetryEvent := telemetry.Event{
+		Time:       time.Now().UTC(),
+		Kind:       "hook_write",
+		Source:     "hook",
+		Command:    "hook",
+		Target:     event.Target,
+		HookEvent:  event.Event,
+		Profile:    hookWriteProfile(cfg, event),
+		Success:    opErr == nil,
+		Skipped:    opErr != nil || !response.Buffered,
+		DurationMS: duration.Milliseconds(),
+		ItemCount:  boolInt(response.Buffered),
+		Flushed:    response.Flushed,
+		Error:      telemetryError(opErr),
+	}
+	r.recordTelemetry(cfg, telemetryEvent)
+}
+
+func (r runner) recordTelemetry(cfg config.Config, event telemetry.Event) {
+	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
+	if err := recorder.Record(event); err != nil {
+		fmt.Fprintf(r.stderr, "paxm telemetry skipped: %s\n", err)
+	}
+}
+
+func sourceCommand(source, kind string) string {
+	if source == "hook" {
+		return "hook"
+	}
+	return kind
+}
+
+func insertedCount(kind string, hits []memory.MemoryHit) int {
+	if kind != "hook_recall" {
+		return 0
+	}
+	return len(hits)
+}
+
+func effectiveRecallProfile(cfg config.Config, profile string) string {
+	if strings.TrimSpace(profile) != "" {
+		return profile
+	}
+	if agent, ok := cfg.Agents["codex"]; ok && agent.ActiveRecall.Enabled && strings.TrimSpace(agent.ActiveRecall.Profile) != "" {
+		return agent.ActiveRecall.Profile
+	}
+	return "default"
+}
+
+func effectiveWriteProfile(profile string) string {
+	if strings.TrimSpace(profile) == "" {
+		return "default"
+	}
+	return profile
+}
+
+func hookRecallProfile(cfg config.Config, event facade.HookEvent) string {
+	if event.Target == "" {
+		event.Target = "codex"
+	}
+	if event.Event == "" {
+		event.Event = "user_input"
+	}
+	if agent, ok := cfg.Agents[event.Target]; ok {
+		if hook, ok := agent.Hooks[event.Event]; ok {
+			return effectiveRecallProfile(cfg, hook.Recall.Profile)
+		}
+	}
+	return "default"
+}
+
+func hookWriteProfile(cfg config.Config, event facade.HookEvent) string {
+	if event.Target == "" {
+		event.Target = "codex"
+	}
+	if agent, ok := cfg.Agents[event.Target]; ok {
+		if hook, ok := agent.Hooks[event.Event]; ok {
+			return effectiveWriteProfile(hook.Write.Profile)
+		}
+	}
+	return "default"
+}
+
+func telemetryError(err error) string {
+	if err == nil {
+		return ""
+	}
+	value := err.Error()
+	if len(value) <= 240 {
+		return value
+	}
+	return value[:240]
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 type setupOption struct {
@@ -1594,6 +1820,47 @@ func writeRecallMarkdown(w io.Writer, result facade.RecallResult) {
 		}
 		fmt.Fprintln(w, strings.TrimSpace(hit.Text))
 		fmt.Fprintln(w)
+	}
+}
+
+func writeHistorySummary(w io.Writer, summary telemetry.HistorySummary) {
+	fmt.Fprintf(w, "paxm history (last %d days)\n", summary.Days)
+	if summary.Totals.Events == 0 {
+		fmt.Fprintln(w, "no telemetry events recorded yet")
+		fmt.Fprintf(w, "logs: %s\n", summary.Storage.EventsFile)
+		fmt.Fprintf(w, "metrics: %s\n", summary.Storage.MetricsFile)
+		return
+	}
+	fmt.Fprintf(w, "recalls: %d, hits: %d, inserted: %d\n", summary.Totals.Recalls, summary.Totals.Hits, summary.Totals.Inserted)
+	fmt.Fprintf(w, "writes: %d, refs: %d, flushes: %d\n", summary.Totals.Writes, summary.Totals.Refs, summary.Totals.Flushes)
+	fmt.Fprintf(w, "events: %d, successes: %d, errors: %d, provider_errors: %d\n", summary.Totals.Events, summary.Totals.Successes, summary.Totals.Errors, summary.Totals.ProviderErrors)
+	fmt.Fprintf(w, "storage: events=%dB total=%dB max=%dB files=%d\n", summary.Storage.EventBytes, summary.Storage.TotalBytes, summary.Storage.MaxBytes, summary.Storage.MaxFiles)
+	if len(summary.Daily) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "by day:")
+		for _, day := range summary.Daily {
+			fmt.Fprintf(w, "  %s recalls=%d hits=%d inserted=%d writes=%d errors=%d\n", day.Date, day.Counter.Recalls, day.Counter.Hits, day.Counter.Inserted, day.Counter.Writes, day.Counter.Errors)
+		}
+	}
+	writeNamedCounters(w, "by profile:", summary.Profiles, func(counter telemetry.Counter) string {
+		return fmt.Sprintf("recalls=%d hits=%d inserted=%d writes=%d errors=%d", counter.Recalls, counter.Hits, counter.Inserted, counter.Writes, counter.Errors)
+	})
+	writeNamedCounters(w, "by hook:", summary.HookEvents, func(counter telemetry.Counter) string {
+		return fmt.Sprintf("recalls=%d inserted=%d writes=%d flushes=%d errors=%d", counter.Recalls, counter.Inserted, counter.Writes, counter.Flushes, counter.Errors)
+	})
+	writeNamedCounters(w, "by provider:", summary.Providers, func(counter telemetry.Counter) string {
+		return fmt.Sprintf("hits=%d refs=%d provider_errors=%d", counter.Hits, counter.Refs, counter.ProviderErrors)
+	})
+}
+
+func writeNamedCounters(w io.Writer, title string, counters []telemetry.NamedCounter, format func(telemetry.Counter) string) {
+	if len(counters) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, title)
+	for _, counter := range counters {
+		fmt.Fprintf(w, "  %s %s\n", counter.Name, format(counter.Counter))
 	}
 }
 

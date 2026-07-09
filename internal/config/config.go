@@ -19,6 +19,7 @@ type Config struct {
 	RecallProfiles map[string]RecallProfileConfig `json:"recall_profiles,omitempty" yaml:"recall_profiles,omitempty"`
 	WriteProfiles  map[string]WriteProfileConfig  `json:"write_profiles,omitempty" yaml:"write_profiles,omitempty"`
 	Agents         map[string]AgentConfig         `json:"agents,omitempty" yaml:"agents,omitempty"`
+	Telemetry      TelemetryConfig                `json:"telemetry,omitempty" yaml:"telemetry,omitempty"`
 
 	Hooks map[string]LegacyHookConfig `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 }
@@ -123,6 +124,18 @@ type LegacyHookEventConfig struct {
 	Recall HookRecallConfig `json:"recall" yaml:"recall"`
 }
 
+type TelemetryConfig struct {
+	Enabled             *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Dir                 string `json:"dir,omitempty" yaml:"dir,omitempty"`
+	EventsFile          string `json:"events_file,omitempty" yaml:"events_file,omitempty"`
+	MetricsFile         string `json:"metrics_file,omitempty" yaml:"metrics_file,omitempty"`
+	MaxEventFileBytes   int64  `json:"max_event_file_bytes,omitempty" yaml:"max_event_file_bytes,omitempty"`
+	MaxEventFiles       int    `json:"max_event_files,omitempty" yaml:"max_event_files,omitempty"`
+	RetentionDays       int    `json:"retention_days,omitempty" yaml:"retention_days,omitempty"`
+	CaptureQueryPreview bool   `json:"capture_query_preview,omitempty" yaml:"capture_query_preview,omitempty"`
+	QueryPreviewChars   int    `json:"query_preview_chars,omitempty" yaml:"query_preview_chars,omitempty"`
+}
+
 func DefaultConfigPath() string {
 	if path := os.Getenv("PAXM_CONFIG"); path != "" {
 		return ExpandPath(path)
@@ -150,6 +163,17 @@ func DefaultDataPath() string {
 		return filepath.Join(".paxm", "memory.jsonl")
 	}
 	return filepath.Join(home, ".local", "share", "paxm", "memory.jsonl")
+}
+
+func DefaultStateDir() string {
+	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
+		return filepath.Join(ExpandPath(dir), "paxm")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(".paxm", "state")
+	}
+	return filepath.Join(home, ".local", "state", "paxm")
 }
 
 func DefaultConfig(configPath string) Config {
@@ -268,6 +292,7 @@ func DefaultConfig(configPath string) Config {
 				},
 			},
 		},
+		Telemetry: defaultTelemetryConfig(configPath),
 	}
 }
 
@@ -377,6 +402,7 @@ func Normalize(cfg Config) Config {
 	for name, agent := range cfg.Agents {
 		cfg.Agents[name] = normalizeAgent(agent)
 	}
+	cfg.Telemetry = normalizeTelemetry(cfg.Telemetry)
 	for name, provider := range cfg.Providers {
 		provider.Read = nil
 		provider.Write = nil
@@ -490,6 +516,56 @@ func normalizeAgent(agent AgentConfig) AgentConfig {
 		agent.Hooks[name] = hook
 	}
 	return agent
+}
+
+func defaultTelemetryConfig(configPath string) TelemetryConfig {
+	enabled := true
+	return TelemetryConfig{
+		Enabled:           &enabled,
+		Dir:               defaultTelemetryDir(configPath),
+		EventsFile:        "events.jsonl",
+		MetricsFile:       "metrics.json",
+		MaxEventFileBytes: 1 << 20,
+		MaxEventFiles:     3,
+		RetentionDays:     30,
+		QueryPreviewChars: 80,
+	}
+}
+
+func defaultTelemetryDir(configPath string) string {
+	if configPath != "" && configPath != DefaultConfigPath() {
+		return filepath.Join(filepath.Dir(configPath), "state")
+	}
+	return DefaultStateDir()
+}
+
+func normalizeTelemetry(telemetry TelemetryConfig) TelemetryConfig {
+	if telemetry.Enabled == nil {
+		enabled := true
+		telemetry.Enabled = &enabled
+	}
+	if telemetry.EventsFile == "" {
+		telemetry.EventsFile = "events.jsonl"
+	}
+	if telemetry.MetricsFile == "" {
+		telemetry.MetricsFile = "metrics.json"
+	}
+	if telemetry.MaxEventFileBytes == 0 {
+		telemetry.MaxEventFileBytes = 1 << 20
+	}
+	if telemetry.MaxEventFiles == 0 {
+		telemetry.MaxEventFiles = 3
+	}
+	if telemetry.RetentionDays == 0 {
+		telemetry.RetentionDays = 30
+	}
+	if telemetry.QueryPreviewChars == 0 {
+		telemetry.QueryPreviewChars = 80
+	}
+	if telemetry.Dir != "" {
+		telemetry.Dir = ExpandPath(telemetry.Dir)
+	}
+	return telemetry
 }
 
 func legacyRecallProfile(providers map[string]ProviderConfig) RecallProfileConfig {

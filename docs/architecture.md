@@ -12,6 +12,7 @@ cmd/paxm
   internal/memory       provider interface, routing, ranking, thresholds
   internal/adapters     provider registry
   internal/config       YAML config model and compatibility loading
+  internal/telemetry    bounded local logs, metrics, and history summaries
 ```
 
 The CLI never talks to concrete providers directly. It loads config, builds the
@@ -95,6 +96,7 @@ Each shim calls a hidden internal hook entrypoint. The public CLI surface stays:
 paxm [--config PATH] setup
 paxm [--config PATH] recall --query TEXT [--json]
 paxm [--config PATH] remember --text TEXT
+paxm [--config PATH] history [--days N] [--json]
 paxm [--config PATH] config doctor
 ```
 
@@ -109,3 +111,24 @@ maximum inserted items, and optional query-term overlap.
 `turn_end` appends a write item and flushes the buffer to the configured write
 profile. The buffer is owned by a short-lived local Unix-socket daemon and lives
 only in process memory. It is intentionally not durable.
+
+## Local Telemetry
+
+The CLI records local telemetry after recall, remember, hook recall, and hook
+write-buffer operations. Telemetry is best effort: write failures are reported to
+stderr but do not fail the memory operation.
+
+Telemetry has two storage paths:
+
+- a rolling JSONL event log for debugging recent behavior;
+- a compact metrics JSON file for `paxm history`.
+
+The event log is bounded by `max_event_file_bytes` and `max_event_files`.
+Rotation renames the active file to `.1`, shifts older backups, and deletes the
+oldest backup beyond the configured limit. Metrics are overwritten on update and
+prune daily buckets according to `retention_days`, so aggregate history does not
+grow without bound.
+
+Default events avoid storing raw query or memory text. They include query length,
+a query hash prefix, profile, hook event, hit/insert/write counts, provider
+names, provider error counts, and duration.

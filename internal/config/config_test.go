@@ -42,6 +42,28 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigEnablesBoundedTelemetry(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := DefaultConfig(configPath)
+	if cfg.Telemetry.Enabled == nil || !*cfg.Telemetry.Enabled {
+		t.Fatalf("telemetry should be enabled by default: %#v", cfg.Telemetry)
+	}
+	if cfg.Telemetry.Dir != filepath.Join(filepath.Dir(configPath), "state") {
+		t.Fatalf("unexpected telemetry dir: %q", cfg.Telemetry.Dir)
+	}
+	if cfg.Telemetry.EventsFile != "events.jsonl" || cfg.Telemetry.MetricsFile != "metrics.json" {
+		t.Fatalf("unexpected telemetry files: %#v", cfg.Telemetry)
+	}
+	if cfg.Telemetry.MaxEventFileBytes <= 0 || cfg.Telemetry.MaxEventFiles != 3 || cfg.Telemetry.RetentionDays != 30 {
+		t.Fatalf("unexpected telemetry bounds: %#v", cfg.Telemetry)
+	}
+	if cfg.Telemetry.CaptureQueryPreview {
+		t.Fatalf("query preview should be off by default")
+	}
+}
+
 func TestLoadMigratesLegacyJSON(t *testing.T) {
 	t.Parallel()
 
