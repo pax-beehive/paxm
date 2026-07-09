@@ -43,6 +43,13 @@ install /tmp/paxm_${VERSION}_darwin_arm64/paxm ~/go/bin/paxm
 paxm version
 ```
 
+Future upgrades can be installed in place:
+
+```bash
+paxm update --check
+paxm update
+```
+
 Build locally:
 
 ```bash
@@ -242,6 +249,10 @@ hooks with `/hooks` before they run.
 Release binaries are built by GitHub Actions when a `v*` tag is pushed. The
 release workflow runs `go test ./...`, builds `paxm` for darwin, linux, and
 windows on amd64 and arm64, uploads archives, and publishes `SHA256SUMS`.
+Released binaries support `paxm update`, which downloads the current platform's
+archive from GitHub releases, verifies it against `SHA256SUMS`, and replaces the
+current executable. Use `paxm update --version vX.Y.Z` to pin a specific release
+or `paxm update --install-path PATH` to install somewhere else.
 
 To build the same assets locally:
 

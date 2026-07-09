@@ -86,6 +86,8 @@ func (r runner) run(args []string) error {
 		return r.runRemember(args[1:])
 	case "history":
 		return r.runHistory(args[1:])
+	case "update":
+		return r.runUpdate(args[1:])
 	case "version":
 		fmt.Fprintln(r.stdout, version)
 		return nil
@@ -978,6 +980,7 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--limit N] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --text TEXT")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
+	fmt.Fprintln(r.stdout, "  paxm update [--check] [--version VERSION]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
 	fmt.Fprintln(r.stdout, "  paxm version")
 }

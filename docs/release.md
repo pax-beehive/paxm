@@ -59,3 +59,23 @@ tar -xzf paxm_v0.1.0_darwin_arm64.tar.gz
 ```
 
 For Windows assets, use `unzip` instead of `tar`.
+
+## Self Update
+
+Released binaries can install future releases:
+
+```bash
+paxm update --check
+paxm update
+```
+
+Useful flags:
+
+- `--version v0.1.1`: install a specific release instead of the latest release.
+- `--install-path PATH`: install the downloaded binary somewhere other than the
+  currently running executable.
+- `--force`: reinstall even when the current `paxm version` matches the target
+  tag.
+
+`paxm update` verifies the downloaded archive against the release `SHA256SUMS`
+before replacing the binary.

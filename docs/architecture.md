@@ -159,3 +159,23 @@ and GitHub Actions. It cross-compiles with `CGO_ENABLED=0`, injects the tag into
 Release artifacts are intentionally just the binary plus README. Runtime config,
 API keys, hook installation, and local telemetry files remain user-owned state
 created by `paxm setup` and normal CLI usage.
+
+## Self Update
+
+`paxm update` is a release-client path layered on top of GitHub releases. It is
+not part of provider routing or memory behavior.
+
+The updater:
+
+- resolves the target release, either from `--version` or GitHub's latest
+  release API;
+- selects the asset matching the current `GOOS/GOARCH`;
+- downloads the archive and `SHA256SUMS`;
+- verifies the archive checksum before extraction;
+- extracts the `paxm` binary and replaces the current executable, or
+  `--install-path` when provided.
+
+The updater intentionally does not modify paxm config, Codex hooks, local memory
+files, or telemetry files. It only replaces the binary. On Windows, replacing a
+running executable is not supported; users should pass `--install-path` and move
+the binary after the process exits.
