@@ -34,10 +34,10 @@ func TestRecorderRotatesEventLogsAndKeepsMetrics(t *testing.T) {
 			Success:  true,
 			HitCount: 2,
 			ProviderRecalls: map[string]int{
-				"local": 1,
+				"sqlite": 1,
 			},
 			ProviderHits: map[string]int{
-				"local": 2,
+				"sqlite": 2,
 			},
 		}); err != nil {
 			t.Fatal(err)
@@ -64,7 +64,7 @@ func TestRecorderRotatesEventLogsAndKeepsMetrics(t *testing.T) {
 	if summary.Totals.Recalls != 8 || summary.Totals.Hits != 16 {
 		t.Fatalf("unexpected summary totals: %#v", summary.Totals)
 	}
-	if len(summary.Providers) != 1 || summary.Providers[0].Name != "local" || summary.Providers[0].Counter.Hits != 16 {
+	if len(summary.Providers) != 1 || summary.Providers[0].Name != "sqlite" || summary.Providers[0].Counter.Hits != 16 {
 		t.Fatalf("unexpected provider summary: %#v", summary.Providers)
 	}
 	if summary.Providers[0].Counter.Recalls != 8 {

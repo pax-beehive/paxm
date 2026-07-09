@@ -108,7 +108,7 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 		"by agent:",
 		"codex passive_recalls=1 passive_writes=0",
 		"by provider:",
-		"local recalls=2",
+		"sqlite recalls=2",
 		"writes=1",
 	} {
 		if !strings.Contains(history, expected) {
@@ -123,7 +123,7 @@ func TestCLISetupInteractiveProviderChoices(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("1\n/custom/memory.jsonl\n3\n1\nnone\n")
+	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n3\n1\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -148,7 +148,7 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("1\n/custom/memory.jsonl\n1\n1\n2\n")
+	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n2\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -208,10 +208,10 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 func TestInternalHookDoesNotBufferWhenHookWriteDisabled(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.DefaultConfig(configPath)
-	cfg.Providers["local"] = config.ProviderConfig{
-		Type:    "local",
+	cfg.Providers["sqlite"] = config.ProviderConfig{
+		Type:    "sqlite",
 		Enabled: true,
-		Path:    filepath.Join(t.TempDir(), "memory.jsonl"),
+		Path:    filepath.Join(t.TempDir(), "memory.sqlite"),
 	}
 	pi := cfg.Agents["pi"]
 	pi.Enabled = true
@@ -293,8 +293,8 @@ func TestCLISetupInteractiveZepProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Providers["local"].Enabled {
-		t.Fatalf("local should be disabled when only zep was selected: %#v", cfg.Providers)
+	if cfg.Providers["sqlite"].Enabled {
+		t.Fatalf("sqlite should be disabled when only zep was selected: %#v", cfg.Providers)
 	}
 	zep := cfg.Providers["zep"]
 	if !zep.Enabled || zep.APIKey != "zep-key" || zep.GraphID != "graph-1" || zep.UserID != "" || zep.SearchScope != "edges" {
@@ -453,7 +453,7 @@ func TestWriteRecallMarkdownShowsScores(t *testing.T) {
 	writeRecallMarkdown(&stdout, facade.RecallResult{
 		Hits: []memory.MemoryHit{
 			{
-				Provider:     "local",
+				Provider:     "sqlite",
 				Text:         "Todd memory",
 				Score:        0.87654,
 				Relevance:    0.76543,
@@ -498,18 +498,21 @@ func assertWriteOnlyConfig(t *testing.T, configPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	local := cfg.Providers["local"]
-	if local.Path != "/custom/memory.jsonl" {
-		t.Fatalf("unexpected local path: %q", local.Path)
+	sqlite := cfg.Providers["sqlite"]
+	if sqlite.Type != "sqlite" {
+		t.Fatalf("unexpected sqlite type: %q", sqlite.Type)
 	}
-	if recallHasProvider(cfg, "local") {
-		t.Fatalf("local should not be in default recall profile: %#v", cfg.RecallProfiles["default"])
+	if sqlite.Path != "/custom/memory.sqlite" {
+		t.Fatalf("unexpected sqlite path: %q", sqlite.Path)
 	}
-	if recallProfileHasProvider(cfg.RecallProfiles["passive"], "local") {
-		t.Fatalf("local should not be in passive recall profile: %#v", cfg.RecallProfiles["passive"])
+	if recallHasProvider(cfg, "sqlite") {
+		t.Fatalf("sqlite should not be in default recall profile: %#v", cfg.RecallProfiles["default"])
+	}
+	if recallProfileHasProvider(cfg.RecallProfiles["passive"], "sqlite") {
+		t.Fatalf("sqlite should not be in passive recall profile: %#v", cfg.RecallProfiles["passive"])
 	}
 	writeProfile := cfg.WriteProfiles["default"]
-	if len(writeProfile.Providers) != 1 || writeProfile.Providers[0].Name != "local" || !writeProfile.Providers[0].Required {
+	if len(writeProfile.Providers) != 1 || writeProfile.Providers[0].Name != "sqlite" || !writeProfile.Providers[0].Required {
 		t.Fatalf("unexpected default write profile: %#v", writeProfile)
 	}
 	if cfg.Agents["codex"].Enabled || cfg.Agents["pi"].Enabled {

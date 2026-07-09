@@ -165,13 +165,13 @@ func defaultConfigDir() string {
 
 func DefaultDataPath() string {
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
-		return filepath.Join(ExpandPath(dir), "paxm", "memory.jsonl")
+		return filepath.Join(ExpandPath(dir), "paxm", "memory.sqlite")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".paxm", "memory.jsonl")
+		return filepath.Join(".paxm", "memory.sqlite")
 	}
-	return filepath.Join(home, ".local", "share", "paxm", "memory.jsonl")
+	return filepath.Join(home, ".local", "share", "paxm", "memory.sqlite")
 }
 
 func DefaultStateDir() string {
@@ -189,13 +189,13 @@ func DefaultConfig(configPath string) Config {
 	configPath = ExpandPath(configPath)
 	dataPath := DefaultDataPath()
 	if configPath != "" && configPath != DefaultConfigPath() {
-		dataPath = filepath.Join(filepath.Dir(configPath), "memory.jsonl")
+		dataPath = filepath.Join(filepath.Dir(configPath), "memory.sqlite")
 	}
 	return Config{
 		Version: 1,
 		Providers: map[string]ProviderConfig{
-			"local": {
-				Type:    "local",
+			"sqlite": {
+				Type:    "sqlite",
 				Enabled: true,
 				Path:    dataPath,
 			},
@@ -208,7 +208,7 @@ func DefaultConfig(configPath string) Config {
 		RecallProfiles: map[string]RecallProfileConfig{
 			"default": {
 				Providers: []ProviderRouteConfig{
-					{Name: "local", Required: true, Weight: 1},
+					{Name: "sqlite", Required: true, Weight: 1},
 				},
 				MaxResults: 3,
 				Thresholds: RecallThresholdConfig{
@@ -221,7 +221,7 @@ func DefaultConfig(configPath string) Config {
 			},
 			"passive": {
 				Providers: []ProviderRouteConfig{
-					{Name: "local", Required: true, Weight: 1},
+					{Name: "sqlite", Required: true, Weight: 1},
 				},
 				MaxResults: 2,
 				Thresholds: RecallThresholdConfig{
@@ -234,7 +234,7 @@ func DefaultConfig(configPath string) Config {
 			},
 			"passive_initial": {
 				Providers: []ProviderRouteConfig{
-					{Name: "local", Required: true, Weight: 1},
+					{Name: "sqlite", Required: true, Weight: 1},
 				},
 				MaxResults: 5,
 				Thresholds: RecallThresholdConfig{
@@ -249,7 +249,7 @@ func DefaultConfig(configPath string) Config {
 		WriteProfiles: map[string]WriteProfileConfig{
 			"default": {
 				Providers: []ProviderRouteConfig{
-					{Name: "local", Required: true},
+					{Name: "sqlite", Required: true},
 				},
 			},
 		},
@@ -416,18 +416,7 @@ func Normalize(cfg Config) Config {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]ProviderConfig)
 	}
-	for name, provider := range cfg.Providers {
-		if provider.Type == "" {
-			provider.Type = name
-		}
-		if provider.Path != "" {
-			provider.Path = ExpandPath(provider.Path)
-		}
-		if provider.SearchScope == "" && provider.Type == "zep" {
-			provider.SearchScope = "episodes"
-		}
-		cfg.Providers[name] = provider
-	}
+	renamedLegacyLocal := normalizeProviders(&cfg)
 	if len(cfg.RecallProfiles) == 0 {
 		cfg.RecallProfiles = map[string]RecallProfileConfig{
 			"default": legacyRecallProfile(cfg.Providers),
@@ -448,6 +437,9 @@ func Normalize(cfg Config) Config {
 			"default": legacyWriteProfile(cfg.Providers),
 		}
 	}
+	if renamedLegacyLocal {
+		renameProviderRoutes(&cfg, "local", "sqlite")
+	}
 	for name, profile := range cfg.WriteProfiles {
 		cfg.WriteProfiles[name] = normalizeWriteProfile(profile)
 	}
@@ -467,6 +459,78 @@ func Normalize(cfg Config) Config {
 	}
 	cfg.Hooks = nil
 	return cfg
+}
+
+func normalizeProviders(cfg *Config) bool {
+	normalized := make(map[string]ProviderConfig, len(cfg.Providers))
+	var legacyLocal *ProviderConfig
+	for name, provider := range cfg.Providers {
+		if provider.Type == "" {
+			provider.Type = name
+		}
+		if provider.Type == "local" {
+			provider.Type = "sqlite"
+			provider.Path = sqlitePathFromLegacyLocalPath(provider.Path)
+		}
+		if name == "local" && provider.Type == "sqlite" {
+			provider = normalizeProviderConfig(provider)
+			legacyLocal = &provider
+			continue
+		}
+		normalized[name] = normalizeProviderConfig(provider)
+	}
+	if legacyLocal != nil {
+		if _, exists := normalized["sqlite"]; !exists {
+			normalized["sqlite"] = *legacyLocal
+		}
+		cfg.Providers = normalized
+		return true
+	}
+	cfg.Providers = normalized
+	return false
+}
+
+func normalizeProviderConfig(provider ProviderConfig) ProviderConfig {
+	if provider.Path != "" {
+		provider.Path = ExpandPath(provider.Path)
+	}
+	if provider.SearchScope == "" && provider.Type == "zep" {
+		provider.SearchScope = "episodes"
+	}
+	return provider
+}
+
+func renameProviderRoutes(cfg *Config, from, to string) {
+	for name, profile := range cfg.RecallProfiles {
+		profile.Providers = renameProviderRouteList(profile.Providers, from, to)
+		cfg.RecallProfiles[name] = profile
+	}
+	for name, profile := range cfg.WriteProfiles {
+		profile.Providers = renameProviderRouteList(profile.Providers, from, to)
+		cfg.WriteProfiles[name] = profile
+	}
+}
+
+func renameProviderRouteList(routes []ProviderRouteConfig, from, to string) []ProviderRouteConfig {
+	renamed := routes[:0]
+	indexByName := make(map[string]int, len(routes))
+	for _, route := range routes {
+		if route.Name == from {
+			route.Name = to
+		}
+		if existingIndex, ok := indexByName[route.Name]; ok {
+			existing := renamed[existingIndex]
+			existing.Required = existing.Required || route.Required
+			if route.Weight > existing.Weight {
+				existing.Weight = route.Weight
+			}
+			renamed[existingIndex] = existing
+			continue
+		}
+		indexByName[route.Name] = len(renamed)
+		renamed = append(renamed, route)
+	}
+	return renamed
 }
 
 func decodeConfig(file *os.File, path string, cfg *Config) error {
@@ -495,6 +559,16 @@ func legacyJSONPath(path string) string {
 		return path
 	}
 	return filepath.Join(filepath.Dir(path), "config.json")
+}
+
+func sqlitePathFromLegacyLocalPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return path
+	}
+	if strings.EqualFold(filepath.Ext(path), ".jsonl") {
+		return strings.TrimSuffix(path, filepath.Ext(path)) + ".sqlite"
+	}
+	return path
 }
 
 func normalizeRecallProfile(profile RecallProfileConfig) RecallProfileConfig {

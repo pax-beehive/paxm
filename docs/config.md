@@ -15,15 +15,10 @@ YAML unless an explicit `.json` path is provided.
 version: 1
 
 providers:
-  local:
-    type: local
+  sqlite:
+    type: sqlite
     enabled: true
-    path: ~/.local/share/paxm/memory.jsonl
-
-  mem0:
-    type: mem0
-    enabled: false
-    api_key: "plain-text-api-key"
+    path: ~/.local/share/paxm/memory.sqlite
 
   zep:
     type: zep
@@ -35,7 +30,7 @@ providers:
 recall_profiles:
   default:
     providers:
-      - name: local
+      - name: sqlite
         required: true
         weight: 1.0
     max_results: 3
@@ -48,7 +43,7 @@ recall_profiles:
 
   passive:
     providers:
-      - name: local
+      - name: sqlite
         required: true
         weight: 1.0
     max_results: 2
@@ -61,7 +56,7 @@ recall_profiles:
 
   passive_initial:
     providers:
-      - name: local
+      - name: sqlite
         required: true
         weight: 1.0
     max_results: 5
@@ -75,7 +70,7 @@ recall_profiles:
 write_profiles:
   default:
     providers:
-      - name: local
+      - name: sqlite
         required: true
 
 agents:
@@ -191,9 +186,9 @@ telemetry:
 
 Fields:
 
-- `type`: adapter type, such as `local`.
+- `type`: adapter type, such as `sqlite` or `zep`.
 - `enabled`: whether this provider can be used by profiles.
-- `path`: local provider JSONL path.
+- `path`: local SQLite provider database path.
 - `api_key`: optional plain-text API key for remote providers.
 - `base_url`: optional remote provider API base URL override.
 - `user_id`: Zep user graph target.
@@ -203,10 +198,14 @@ Fields:
 - `max_characters`: optional Zep auto-scope context character limit.
 - `source_description`: optional Zep source description for writes.
 
-V1 ships with `local` and `zep` provider adapters. Zep requires `api_key` and
+V1 ships with `sqlite` and `zep` provider adapters. Zep requires `api_key` and
 exactly one of `user_id` or `graph_id`. If setup is configured for a Zep user
 graph, it idempotently creates the configured `user_id` when the user does not
 already exist.
+
+Legacy configs with a default `local` provider are loaded as a `sqlite`
+provider; a legacy `*.jsonl` path is mapped to the same basename with a
+`*.sqlite` extension. JSONL memory contents are not migrated.
 
 ## Recall Profiles
 

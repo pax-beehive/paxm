@@ -29,6 +29,9 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	if provider := cfg.Providers["sqlite"]; provider.Type != "sqlite" || !strings.HasSuffix(provider.Path, "memory.sqlite") {
+		t.Fatalf("default sqlite provider is invalid: %#v", provider)
+	}
 	active := cfg.RecallProfiles["default"]
 	if active.MaxResults != 3 {
 		t.Fatalf("default active recall should return 3 results: %#v", active)
@@ -84,7 +87,7 @@ func TestNormalizeBackfillsInitialPassiveRecall(t *testing.T) {
 	cfg := Normalize(Config{
 		Version: 1,
 		Providers: map[string]ProviderConfig{
-			"local": {Type: "local", Enabled: true},
+			"local": {Type: "local", Enabled: true, Path: "/tmp/memory.jsonl"},
 		},
 		RecallProfiles: map[string]RecallProfileConfig{
 			"default": {
@@ -116,7 +119,7 @@ func TestNormalizeBackfillsInitialPassiveRecall(t *testing.T) {
 	})
 
 	initialProfile := cfg.RecallProfiles["passive_initial"]
-	if len(initialProfile.Providers) != 1 || initialProfile.Providers[0].Name != "local" || initialProfile.Providers[0].Required {
+	if len(initialProfile.Providers) != 1 || initialProfile.Providers[0].Name != "sqlite" || initialProfile.Providers[0].Required {
 		t.Fatalf("initial profile should inherit passive routes: %#v", initialProfile)
 	}
 	initial := cfg.Agents["codex"].Hooks["user_input"].Recall.Initial
@@ -170,7 +173,7 @@ func TestLoadMigratesLegacyJSON(t *testing.T) {
 		t.Fatalf("legacy read=false should remove provider from recall profile: %#v", cfg.RecallProfiles["default"])
 	}
 	writeRoutes := cfg.WriteProfiles["default"].Providers
-	if len(writeRoutes) != 1 || writeRoutes[0].Name != "local" || writeRoutes[0].Required || writeRoutes[0].Weight != 2 {
+	if len(writeRoutes) != 1 || writeRoutes[0].Name != "sqlite" || writeRoutes[0].Required || writeRoutes[0].Weight != 2 {
 		t.Fatalf("legacy write route was not migrated: %#v", writeRoutes)
 	}
 	hook := cfg.Agents["codex"].Hooks["user_input"].Recall
@@ -180,8 +183,14 @@ func TestLoadMigratesLegacyJSON(t *testing.T) {
 	if _, ok := cfg.Agents["codex"].Hooks["user_prompt"]; ok {
 		t.Fatalf("legacy user_prompt hook should be normalized to user_input: %#v", cfg.Agents["codex"].Hooks)
 	}
-	if cfg.Providers["local"].Read != nil || cfg.Hooks != nil {
+	if cfg.Providers["sqlite"].Read != nil || cfg.Hooks != nil {
 		t.Fatalf("legacy fields should not survive normalization: %#v", cfg)
+	}
+	if _, ok := cfg.Providers["local"]; ok {
+		t.Fatalf("legacy local provider should be renamed: %#v", cfg.Providers)
+	}
+	if cfg.Providers["sqlite"].Type != "sqlite" || cfg.Providers["sqlite"].Path != "/tmp/paxm-memory.sqlite" {
+		t.Fatalf("legacy local provider should normalize to sqlite: %#v", cfg.Providers["sqlite"])
 	}
 }
 
@@ -200,10 +209,53 @@ func TestLoadFallsBackFromDefaultYAMLToLegacyJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Providers["local"].Enabled {
+	if !cfg.Providers["sqlite"].Enabled {
 		t.Fatalf("legacy provider was not loaded: %#v", cfg.Providers)
+	}
+	if _, ok := cfg.Providers["local"]; ok {
+		t.Fatalf("legacy local provider should be renamed: %#v", cfg.Providers)
+	}
+	if cfg.Providers["sqlite"].Type != "sqlite" || cfg.Providers["sqlite"].Path != "/tmp/memory.sqlite" {
+		t.Fatalf("legacy local provider should normalize to sqlite: %#v", cfg.Providers["sqlite"])
 	}
 	if !Exists(yamlPath) {
 		t.Fatalf("expected Exists to include legacy json fallback")
+	}
+}
+
+func TestNormalizeMergesLegacyLocalRoutesIntoSQLite(t *testing.T) {
+	t.Parallel()
+
+	cfg := Normalize(Config{
+		Version: 1,
+		Providers: map[string]ProviderConfig{
+			"local":  {Type: "local", Enabled: true, Path: "/tmp/memory.jsonl"},
+			"sqlite": {Type: "sqlite", Enabled: true, Path: "/tmp/memory.sqlite"},
+		},
+		RecallProfiles: map[string]RecallProfileConfig{
+			"default": {
+				Providers: []ProviderRouteConfig{
+					{Name: "local", Required: false, Weight: 1},
+					{Name: "sqlite", Required: true, Weight: 2},
+				},
+			},
+		},
+		WriteProfiles: map[string]WriteProfileConfig{
+			"default": {
+				Providers: []ProviderRouteConfig{
+					{Name: "local", Required: true, Weight: 1},
+					{Name: "sqlite", Required: false, Weight: 3},
+				},
+			},
+		},
+	})
+
+	recallRoutes := cfg.RecallProfiles["default"].Providers
+	if len(recallRoutes) != 1 || recallRoutes[0].Name != "sqlite" || !recallRoutes[0].Required || recallRoutes[0].Weight != 2 {
+		t.Fatalf("legacy recall routes should merge into sqlite: %#v", recallRoutes)
+	}
+	writeRoutes := cfg.WriteProfiles["default"].Providers
+	if len(writeRoutes) != 1 || writeRoutes[0].Name != "sqlite" || !writeRoutes[0].Required || writeRoutes[0].Weight != 3 {
+		t.Fatalf("legacy write routes should merge into sqlite: %#v", writeRoutes)
 	}
 }

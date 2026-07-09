@@ -139,14 +139,14 @@ func (r runner) runSetup(args []string) error {
 		if err != nil {
 			return err
 		}
-		if selectedProviders["local"] {
-			local := cfg.Providers["local"]
-			local.Path, err = promptString(promptReader, r.stdout, "Local memory path", local.Path)
+		if selectedProviders["sqlite"] {
+			sqlite := cfg.Providers["sqlite"]
+			sqlite.Path, err = promptString(promptReader, r.stdout, "SQLite memory path", sqlite.Path)
 			if err != nil {
 				return err
 			}
-			cfg.Providers["local"] = local
-			if err := promptProviderRouting(promptReader, r.stdout, &cfg, "local", "Local"); err != nil {
+			cfg.Providers["sqlite"] = sqlite
+			if err := promptProviderRouting(promptReader, r.stdout, &cfg, "sqlite", "SQLite"); err != nil {
 				return err
 			}
 		}

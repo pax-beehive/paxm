@@ -38,7 +38,7 @@ paxm config doctor
 ```
 
 `paxm setup` is where the user chooses memory providers and agent hooks. Active
-recall requires at least one enabled readable provider. The local provider works
+recall requires at least one enabled readable provider. The SQLite provider works
 without an API key; remote providers such as Zep require the user to provide
 their API key during setup.
 
@@ -75,7 +75,7 @@ cmd/paxm
   internal/facade
   internal/memory        provider interface and multi-provider router
   internal/adapters      provider registry
-  internal/adapters/local
+  internal/adapters/sqlite
   internal/config
   internal/telemetry   bounded event logs and metrics
 ```
@@ -125,17 +125,17 @@ Default config path:
 ~/.config/paxm/config.yaml
 ```
 
-V1 ships with a local JSONL provider so the full flow works without external API keys.
+V1 ships with a SQLite provider so the full flow works without external API keys.
 The CLI can load legacy JSON configs, but new setup writes YAML by default.
 
 ```yaml
 version: 1
 
 providers:
-  local:
-    type: local
+  sqlite:
+    type: sqlite
     enabled: true
-    path: ~/.local/share/paxm/memory.jsonl
+    path: ~/.local/share/paxm/memory.sqlite
 
   zep:
     type: zep
@@ -147,7 +147,7 @@ providers:
 recall_profiles:
   default:
     providers:
-      - name: local
+      - name: sqlite
         required: true
         weight: 1
     max_results: 3
@@ -159,7 +159,7 @@ recall_profiles:
 
   passive:
     providers:
-      - name: local
+      - name: sqlite
         required: true
         weight: 1
     max_results: 2
@@ -171,7 +171,7 @@ recall_profiles:
 
   passive_initial:
     providers:
-      - name: local
+      - name: sqlite
         required: true
         weight: 1
     max_results: 5
@@ -184,7 +184,7 @@ recall_profiles:
 write_profiles:
   default:
     providers:
-      - name: local
+      - name: sqlite
         required: true
 
 agents:

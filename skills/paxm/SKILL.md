@@ -30,7 +30,7 @@ If `paxm config doctor` says config is missing or invalid, the user needs one in
 paxm setup
 ```
 
-`paxm setup` lets the user choose memory providers and agent hooks. Active recall needs at least one enabled readable provider. `local` works without an API key; remote providers such as Zep require the user to provide their own API key during setup. Passive hook recall only works after hooks are installed by setup, but active commands still work independently.
+`paxm setup` lets the user choose memory providers and agent hooks. Active recall needs at least one enabled readable provider. `sqlite` works without an API key; remote providers such as Zep require the user to provide their own API key during setup. Passive hook recall only works after hooks are installed by setup, but active commands still work independently.
 
 If the user gives a config path, pass it through every command:
 
