@@ -8,11 +8,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pax-beehive/memory-adaptor/internal/adapters"
 	"github.com/pax-beehive/memory-adaptor/internal/config"
@@ -72,6 +75,10 @@ func (r runner) run(args []string) error {
 		return r.runRemember(args[1:])
 	case "config":
 		return r.runConfig(args[1:])
+	case "__hook":
+		return r.runInternalHook(args[1:])
+	case "__hook-daemon":
+		return r.runHookDaemon(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -200,9 +207,10 @@ func (r runner) runSetup(args []string) error {
 		enabled := selectedHooks[name]
 		agent.Enabled = true
 		for eventName, eventCfg := range agent.Hooks {
-			if eventName == "user_prompt" {
+			if eventName == "user_input" {
 				eventCfg.Recall.Enabled = enabled
 			}
+			eventCfg.Write.Enabled = enabled && eventCfg.Write.Enabled
 			agent.Hooks[eventName] = eventCfg
 		}
 		cfg.Agents[name] = agent
@@ -215,11 +223,16 @@ func (r runner) runSetup(args []string) error {
 		if !selectedHooks[name] {
 			continue
 		}
-		scriptPath, err := installHookShim(path, name, "user_prompt")
-		if err != nil {
+		if err := removeLegacyHookShim(path, name); err != nil {
 			return err
 		}
-		fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+		for _, event := range installedHookEvents() {
+			scriptPath, err := installHookShim(path, name, event.ConfigEvent)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+		}
 		if name == "codex" {
 			fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
 		}
@@ -253,11 +266,45 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		}
 	}
 	for name, agent := range defaultCfg.Agents {
-		if _, ok := cfg.Agents[name]; !ok {
+		existing, ok := cfg.Agents[name]
+		if !ok {
 			cfg.Agents[name] = agent
+			continue
 		}
+		if existing.Hooks == nil {
+			existing.Hooks = make(map[string]config.AgentHookConfig)
+		}
+		for eventName, eventCfg := range agent.Hooks {
+			existingHook, ok := existing.Hooks[eventName]
+			if !ok {
+				existing.Hooks[eventName] = eventCfg
+				continue
+			}
+			existing.Hooks[eventName] = mergeHookDefaults(existingHook, eventCfg)
+		}
+		cfg.Agents[name] = existing
 	}
 	return cfg, nil
+}
+
+func mergeHookDefaults(current, defaults config.AgentHookConfig) config.AgentHookConfig {
+	if current.Write.Profile == "" {
+		current.Write.Profile = defaults.Write.Profile
+	}
+	if current.Write.Template == "" {
+		current.Write.Template = defaults.Write.Template
+	}
+	if current.Write.Mode == "" {
+		current.Write.Mode = defaults.Write.Mode
+	}
+	if !current.Write.Enabled && current.Write.Template == "{{ .prompt }}" && current.Write.Mode == "prompt" && defaults.Write.Enabled {
+		current.Write = defaults.Write
+		return current
+	}
+	if current.Write.Buffer == (config.HookBufferConfig{}) {
+		current.Write.Buffer = defaults.Write.Buffer
+	}
+	return current
 }
 
 func (r runner) runRecall(args []string) error {
@@ -274,13 +321,13 @@ func (r runner) runRecall(args []string) error {
 		return err
 	}
 	if *hookEvent {
-		var event facade.HookEvent
 		bytes, err := io.ReadAll(r.stdin)
 		if err != nil {
 			return err
 		}
-		if err := json.Unmarshal(bytes, &event); err != nil {
-			return fmt.Errorf("decode hook event JSON: %w", err)
+		event, err := decodeHookEvent(bytes, "codex", "user_input")
+		if err != nil {
+			return err
 		}
 		return r.executeHook(event, *jsonOut)
 	}
@@ -370,6 +417,295 @@ func (r runner) executeHook(event facade.HookEvent, jsonOut bool) error {
 	}
 	writeRecallMarkdown(r.stdout, *result.Recall)
 	return nil
+}
+
+type hookBufferRequest struct {
+	Target string          `json:"target"`
+	Event  string          `json:"event"`
+	Raw    json.RawMessage `json:"raw"`
+}
+
+type hookBufferResponse struct {
+	OK      bool   `json:"ok"`
+	Flushed int    `json:"flushed,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (r runner) runInternalHook(args []string) error {
+	fs := flag.NewFlagSet("__hook", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	target := fs.String("target", "codex", "hook target")
+	eventName := fs.String("event", "", "hook event")
+	jsonOut := fs.Bool("json", false, "write JSON recall output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(r.stdin)
+	if err != nil {
+		return err
+	}
+	event, err := decodeHookEvent(raw, *target, *eventName)
+	if err != nil {
+		return err
+	}
+	if err := r.sendHookToBuffer(event); err != nil {
+		fmt.Fprintf(r.stderr, "paxm hook buffer skipped: %s\n", err)
+	}
+	if event.Event == "user_input" {
+		return r.executeHook(event, *jsonOut)
+	}
+	return nil
+}
+
+func (r runner) runHookDaemon(args []string) error {
+	fs := flag.NewFlagSet("__hook-daemon", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	socket := fs.String("socket", hookSocketPath(r.configFile()), "daemon socket")
+	idleTimeout := fs.Duration("idle-timeout", 30*time.Minute, "daemon idle timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	service, err := r.loadService()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
+		return err
+	}
+	_ = os.Remove(*socket)
+	listener, err := net.Listen("unix", *socket)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = listener.Close()
+		_ = os.Remove(*socket)
+	}()
+
+	var buffer []facade.IngestInput
+	deadline := time.NewTimer(*idleTimeout)
+	defer deadline.Stop()
+	for {
+		type acceptResult struct {
+			conn net.Conn
+			err  error
+		}
+		accepted := make(chan acceptResult, 1)
+		go func() {
+			conn, err := listener.Accept()
+			accepted <- acceptResult{conn: conn, err: err}
+		}()
+		select {
+		case <-deadline.C:
+			if len(buffer) > 0 {
+				_, _ = service.IngestBatch(context.Background(), facade.IngestBatchInput{Items: buffer})
+			}
+			return nil
+		case result := <-accepted:
+			if result.err != nil {
+				return result.err
+			}
+			flushed, err := handleHookBufferConn(context.Background(), service, result.conn, &buffer)
+			if err != nil {
+				fmt.Fprintf(r.stderr, "paxm hook buffer error: %s\n", err)
+			}
+			if !deadline.Stop() {
+				select {
+				case <-deadline.C:
+				default:
+				}
+			}
+			deadline.Reset(*idleTimeout)
+			_ = flushed
+		}
+	}
+}
+
+func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net.Conn, buffer *[]facade.IngestInput) (int, error) {
+	defer conn.Close()
+	var request hookBufferRequest
+	if err := json.NewDecoder(conn).Decode(&request); err != nil {
+		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
+		return 0, err
+	}
+	event, err := decodeHookEvent(request.Raw, request.Target, request.Event)
+	if err != nil {
+		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
+		return 0, err
+	}
+	item, ok, err := service.HookWriteItem(event)
+	if err != nil {
+		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
+		return 0, err
+	}
+	if !ok {
+		_ = writeJSON(conn, hookBufferResponse{OK: true})
+		return 0, nil
+	}
+	bufferCfg := service.HookBufferConfig(event)
+	if !bufferCfg.Enabled {
+		_, err := service.IngestBatch(ctx, facade.IngestBatchInput{Items: []facade.IngestInput{item}})
+		if err != nil {
+			_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
+			return 0, err
+		}
+		_ = writeJSON(conn, hookBufferResponse{OK: true, Flushed: 1})
+		return 1, nil
+	}
+	*buffer = append(*buffer, item)
+	shouldFlush := bufferCfg.Flush || (bufferCfg.FlushCount > 0 && len(*buffer) >= bufferCfg.FlushCount)
+	if !shouldFlush {
+		_ = writeJSON(conn, hookBufferResponse{OK: true})
+		return 0, nil
+	}
+	flushed := len(*buffer)
+	_, err = service.IngestBatch(ctx, facade.IngestBatchInput{Items: *buffer})
+	if err != nil {
+		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
+		return 0, err
+	}
+	*buffer = nil
+	_ = writeJSON(conn, hookBufferResponse{OK: true, Flushed: flushed})
+	return flushed, nil
+}
+
+func (r runner) sendHookToBuffer(event facade.HookEvent) error {
+	socket := hookSocketPath(r.configFile())
+	response, err := sendHookBufferRequest(socket, event)
+	if err != nil {
+		if startErr := r.startHookDaemon(socket); startErr != nil {
+			return startErr
+		}
+		for i := 0; i < 20; i++ {
+			time.Sleep(50 * time.Millisecond)
+			response, err = sendHookBufferRequest(socket, event)
+			if err == nil {
+				break
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if !response.OK && response.Error != "" {
+		return errors.New(response.Error)
+	}
+	return nil
+}
+
+func (r runner) startHookDaemon(socket string) error {
+	binaryPath, err := os.Executable()
+	if err != nil || binaryPath == "" {
+		binaryPath = "paxm"
+	}
+	cmd := exec.Command(binaryPath, "--config", r.configFile(), "__hook-daemon", "--socket", socket)
+	if devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
+		defer devNull.Close()
+		cmd.Stdin = devNull
+		cmd.Stdout = devNull
+		cmd.Stderr = devNull
+	}
+	detachCommand(cmd)
+	return cmd.Start()
+}
+
+func sendHookBufferRequest(socket string, event facade.HookEvent) (hookBufferResponse, error) {
+	conn, err := net.DialTimeout("unix", socket, time.Second)
+	if err != nil {
+		return hookBufferResponse{}, err
+	}
+	defer conn.Close()
+	raw := event.Raw
+	if len(raw) == 0 {
+		raw = json.RawMessage(`{}`)
+	}
+	request := hookBufferRequest{
+		Target: event.Target,
+		Event:  event.Event,
+		Raw:    raw,
+	}
+	if err := json.NewEncoder(conn).Encode(request); err != nil {
+		return hookBufferResponse{}, err
+	}
+	var response hookBufferResponse
+	if err := json.NewDecoder(conn).Decode(&response); err != nil {
+		return hookBufferResponse{}, err
+	}
+	return response, nil
+}
+
+func decodeHookEvent(raw []byte, target, eventName string) (facade.HookEvent, error) {
+	raw = bytesTrimSpace(raw)
+	if len(raw) == 0 {
+		raw = []byte(`{}`)
+	}
+	var event facade.HookEvent
+	if err := json.Unmarshal(raw, &event); err != nil {
+		return facade.HookEvent{}, fmt.Errorf("decode hook event JSON: %w", err)
+	}
+	if event.Target == "" {
+		event.Target = target
+	}
+	if event.Target == "" {
+		event.Target = "codex"
+	}
+	if event.Event == "" {
+		event.Event = eventName
+	}
+	if event.Event == "" {
+		event.Event = "user_input"
+	}
+	if event.Prompt == "" {
+		event.Prompt = promptFromRawHook(raw)
+	}
+	enrichHookEventFromRaw(&event, raw)
+	event.Raw = append(json.RawMessage(nil), raw...)
+	return event, nil
+}
+
+func promptFromRawHook(raw []byte) string {
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return ""
+	}
+	for _, key := range []string{"prompt", "user_prompt", "input", "message"} {
+		value, ok := object[key].(string)
+		if ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func enrichHookEventFromRaw(event *facade.HookEvent, raw []byte) {
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return
+	}
+	if event.Workspace == "" {
+		for _, key := range []string{"workspace", "cwd", "current_dir"} {
+			if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
+				event.Workspace = value
+				break
+			}
+		}
+	}
+	if event.Metadata == nil {
+		event.Metadata = make(map[string]string)
+	}
+	for _, key := range []string{"session_id", "transcript_path", "cwd", "current_dir", "model", "source"} {
+		if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
+			event.Metadata[key] = value
+		}
+	}
+}
+
+func bytesTrimSpace(bytes []byte) []byte {
+	return []byte(strings.TrimSpace(string(bytes)))
+}
+
+func hookSocketPath(configPath string) string {
+	return filepath.Join(filepath.Dir(config.ExpandPath(configPath)), "hooks", "paxm-hook.sock")
 }
 
 func (r runner) runConfig(args []string) error {
@@ -504,8 +840,12 @@ func cfgProviderEnabled(cfg config.Config) map[string]bool {
 func cfgHookEnabled(cfg config.Config) map[string]bool {
 	selected := make(map[string]bool)
 	for name, agent := range cfg.Agents {
-		hook, ok := agent.Hooks["user_prompt"]
-		selected[name] = ok && hook.Recall.Enabled
+		for _, hook := range agent.Hooks {
+			if hook.Recall.Enabled || hook.Write.Enabled {
+				selected[name] = true
+				break
+			}
+		}
 	}
 	return selected
 }
@@ -856,22 +1196,71 @@ func promptString(reader *bufio.Reader, writer io.Writer, question, defaultValue
 	return value, nil
 }
 
+func removeLegacyHookShim(configPath, target string) error {
+	legacyPath := filepath.Join(filepath.Dir(config.ExpandPath(configPath)), "hooks", target+"-user_prompt")
+	if err := os.Remove(legacyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+type hookInstallEvent struct {
+	ConfigEvent string
+	CodexEvent  string
+	Matcher     string
+	Status      string
+}
+
+func installedHookEvents() []hookInstallEvent {
+	return []hookInstallEvent{
+		{
+			ConfigEvent: "session_start",
+			CodexEvent:  "SessionStart",
+			Matcher:     "startup|resume|clear|compact",
+			Status:      "Buffering paxm session memory",
+		},
+		{
+			ConfigEvent: "user_input",
+			CodexEvent:  "UserPromptSubmit",
+			Status:      "Recalling paxm memory",
+		},
+		{
+			ConfigEvent: "turn_end",
+			CodexEvent:  "Stop",
+			Status:      "Buffering paxm turn memory",
+		},
+	}
+}
+
+func hookInstallEventByConfig(configEvent string) (hookInstallEvent, bool) {
+	for _, event := range installedHookEvents() {
+		if event.ConfigEvent == configEvent {
+			return event, true
+		}
+	}
+	return hookInstallEvent{}, false
+}
+
 func installHookShim(configPath, target, event string) (string, error) {
 	hooksDir := filepath.Join(filepath.Dir(config.ExpandPath(configPath)), "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		return "", err
+	}
+	installEvent, ok := hookInstallEventByConfig(event)
+	if !ok {
+		return "", fmt.Errorf("unsupported hook event %q", event)
 	}
 	binaryPath, err := os.Executable()
 	if err != nil || binaryPath == "" {
 		binaryPath = "paxm"
 	}
 	scriptPath := filepath.Join(hooksDir, target+"-"+event)
-	script := "#!/bin/sh\nexec " + shellQuote(binaryPath) + " --config " + shellQuote(config.ExpandPath(configPath)) + " recall --hook-event --json\n"
+	script := "#!/bin/sh\nexec " + shellQuote(binaryPath) + " --config " + shellQuote(config.ExpandPath(configPath)) + " __hook --target " + shellQuote(target) + " --event " + shellQuote(event) + " --json\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		return "", err
 	}
 	if target == "codex" {
-		if err := installCodexGlobalHook(codexConfigPath(), scriptPath); err != nil {
+		if err := installCodexGlobalHook(codexConfigPath(), scriptPath, installEvent.ConfigEvent); err != nil {
 			return "", err
 		}
 	}
@@ -893,28 +1282,43 @@ func codexConfigPath() string {
 	return filepath.Join(config.ExpandPath(codexHome), "config.toml")
 }
 
-func installCodexGlobalHook(path, scriptPath string) error {
+func installCodexGlobalHook(path, scriptPath, configEvent string) error {
 	path = config.ExpandPath(path)
+	installEvent, ok := hookInstallEventByConfig(configEvent)
+	if !ok {
+		return fmt.Errorf("unsupported Codex hook event %q", configEvent)
+	}
 	command := shellQuote(scriptPath)
-	entry := `{ hooks = [{ type = "command", command = "` + escapeTomlString(command) + `", async = false, statusMessage = "Recalling paxm memory" }] }`
+	commandHook := `{ type = "command", command = "` + escapeTomlString(command) + `", async = false, statusMessage = "` + escapeTomlString(installEvent.Status) + `" }`
+	entry := `{ hooks = [` + commandHook + `] }`
+	if installEvent.Matcher != "" {
+		entry = `{ matcher = "` + escapeTomlString(installEvent.Matcher) + `", hooks = [` + commandHook + `] }`
+	}
 
 	contentBytes, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	content := string(contentBytes)
+	content, prunedLegacy := pruneLegacyCodexUserPromptHook(string(contentBytes))
 	if strings.Contains(content, scriptPath) || strings.Contains(content, command) {
+		if prunedLegacy {
+			return writeCodexConfig(path, contentBytes, content)
+		}
 		return nil
 	}
 
-	updated := upsertCodexUserPromptHook(content, entry)
+	updated := upsertCodexHook(content, installEvent.CodexEvent, entry)
+	return writeCodexConfig(path, contentBytes, updated)
+}
+
+func writeCodexConfig(path string, original []byte, updated string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if len(contentBytes) > 0 {
+	if len(original) > 0 {
 		backupPath := path + ".paxm.bak"
 		if _, err := os.Stat(backupPath); errors.Is(err, os.ErrNotExist) {
-			if err := os.WriteFile(backupPath, contentBytes, 0o600); err != nil {
+			if err := os.WriteFile(backupPath, original, 0o600); err != nil {
 				return err
 			}
 		}
@@ -922,9 +1326,31 @@ func installCodexGlobalHook(path, scriptPath string) error {
 	return os.WriteFile(path, []byte(updated), 0o600)
 }
 
-func upsertCodexUserPromptHook(content, entry string) string {
+func pruneLegacyCodexUserPromptHook(content string) (string, bool) {
+	if !strings.Contains(content, "codex-user_prompt") {
+		return content, false
+	}
+	lines := strings.SplitAfter(content, "\n")
+	changed := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "UserPromptSubmit = ") {
+			next := removeInlineTomlArrayEntries(line, "codex-user_prompt")
+			if next != line {
+				lines[i] = next
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return content, false
+	}
+	return strings.Join(lines, ""), true
+}
+
+func upsertCodexHook(content, eventName, entry string) string {
 	if content == "" {
-		return "[hooks]\nUserPromptSubmit = [" + entry + "]\n"
+		return "[hooks]\n" + eventName + " = [" + entry + "]\n"
 	}
 	lines := strings.SplitAfter(content, "\n")
 	hooksStart := -1
@@ -944,20 +1370,93 @@ func upsertCodexUserPromptHook(content, entry string) string {
 		if !strings.HasSuffix(content, "\n") {
 			content += "\n"
 		}
-		return content + "\n[hooks]\nUserPromptSubmit = [" + entry + "]\n"
+		return content + "\n[hooks]\n" + eventName + " = [" + entry + "]\n"
 	}
 	for i := hooksStart + 1; i < hooksEnd; i++ {
 		line := lines[i]
-		if strings.HasPrefix(strings.TrimSpace(line), "UserPromptSubmit = ") {
+		if strings.HasPrefix(strings.TrimSpace(line), eventName+" = ") {
 			lines[i] = appendInlineTomlArray(line, entry)
 			return strings.Join(lines, "")
 		}
 	}
-	newLine := "UserPromptSubmit = [" + entry + "]\n"
+	newLine := eventName + " = [" + entry + "]\n"
 	updated := append([]string{}, lines[:hooksStart+1]...)
 	updated = append(updated, newLine)
 	updated = append(updated, lines[hooksStart+1:]...)
 	return strings.Join(updated, "")
+}
+
+func removeInlineTomlArrayEntries(line, marker string) string {
+	newline := ""
+	if strings.HasSuffix(line, "\n") {
+		newline = "\n"
+		line = strings.TrimSuffix(line, "\n")
+	}
+	start := strings.Index(line, "[")
+	end := strings.LastIndex(line, "]")
+	if start == -1 || end <= start {
+		return line + newline
+	}
+	prefix := line[:start+1]
+	body := line[start+1 : end]
+	suffix := line[end:]
+	entries := splitTopLevelInlineEntries(body)
+	filtered := entries[:0]
+	changed := false
+	for _, entry := range entries {
+		if strings.Contains(entry, marker) {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	if !changed {
+		return line + newline
+	}
+	return prefix + strings.Join(filtered, ", ") + suffix + newline
+}
+
+func splitTopLevelInlineEntries(body string) []string {
+	var entries []string
+	start := 0
+	depth := 0
+	inString := false
+	escaped := false
+	for i, char := range body {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch char {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				entries = append(entries, strings.TrimSpace(body[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	if strings.TrimSpace(body[start:]) != "" {
+		entries = append(entries, strings.TrimSpace(body[start:]))
+	}
+	return entries
 }
 
 func appendInlineTomlArray(line, entry string) string {

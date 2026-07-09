@@ -73,9 +73,12 @@ func TestLoadMigratesLegacyJSON(t *testing.T) {
 	if len(writeRoutes) != 1 || writeRoutes[0].Name != "local" || writeRoutes[0].Required || writeRoutes[0].Weight != 2 {
 		t.Fatalf("legacy write route was not migrated: %#v", writeRoutes)
 	}
-	hook := cfg.Agents["codex"].Hooks["user_prompt"].Recall
+	hook := cfg.Agents["codex"].Hooks["user_input"].Recall
 	if !hook.Enabled || hook.Profile != "default" || hook.MaxResults != 4 {
 		t.Fatalf("legacy hook was not migrated: %#v", hook)
+	}
+	if _, ok := cfg.Agents["codex"].Hooks["user_prompt"]; ok {
+		t.Fatalf("legacy user_prompt hook should be normalized to user_input: %#v", cfg.Agents["codex"].Hooks)
 	}
 	if cfg.Providers["local"].Read != nil || cfg.Hooks != nil {
 		t.Fatalf("legacy fields should not survive normalization: %#v", cfg)

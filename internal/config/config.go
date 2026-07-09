@@ -94,10 +94,17 @@ type HookRecallConfig struct {
 }
 
 type HookWriteConfig struct {
-	Enabled  bool   `json:"enabled" yaml:"enabled"`
-	Profile  string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Template string `json:"template,omitempty" yaml:"template,omitempty"`
-	Mode     string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Enabled  bool             `json:"enabled" yaml:"enabled"`
+	Profile  string           `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Template string           `json:"template,omitempty" yaml:"template,omitempty"`
+	Mode     string           `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Buffer   HookBufferConfig `json:"buffer,omitempty" yaml:"buffer,omitempty"`
+}
+
+type HookBufferConfig struct {
+	Enabled    bool `json:"enabled" yaml:"enabled"`
+	Flush      bool `json:"flush,omitempty" yaml:"flush,omitempty"`
+	FlushCount int  `json:"flush_count,omitempty" yaml:"flush_count,omitempty"`
 }
 
 type LegacyHookConfig struct {
@@ -189,7 +196,19 @@ func DefaultConfig(configPath string) Config {
 					Output:  "markdown",
 				},
 				Hooks: map[string]AgentHookConfig{
-					"user_prompt": {
+					"session_start": {
+						Write: HookWriteConfig{
+							Enabled:  true,
+							Profile:  "default",
+							Template: "Session started.\n\nEvent:\n{{ .raw_json }}",
+							Mode:     "session_start",
+							Buffer: HookBufferConfig{
+								Enabled:    true,
+								FlushCount: 10,
+							},
+						},
+					},
+					"user_input": {
 						Recall: HookRecallConfig{
 							Enabled:       true,
 							Profile:       "default",
@@ -198,10 +217,27 @@ func DefaultConfig(configPath string) Config {
 							Output:        "markdown",
 						},
 						Write: HookWriteConfig{
-							Enabled:  false,
+							Enabled:  true,
 							Profile:  "default",
-							Template: "{{ .prompt }}",
-							Mode:     "prompt",
+							Template: "User input:\n{{ .prompt }}\n\nEvent:\n{{ .raw_json }}",
+							Mode:     "user_input",
+							Buffer: HookBufferConfig{
+								Enabled:    true,
+								FlushCount: 10,
+							},
+						},
+					},
+					"turn_end": {
+						Write: HookWriteConfig{
+							Enabled:  true,
+							Profile:  "default",
+							Template: "Turn ended.\n\nEvent:\n{{ .raw_json }}",
+							Mode:     "turn_end",
+							Buffer: HookBufferConfig{
+								Enabled:    true,
+								Flush:      true,
+								FlushCount: 10,
+							},
 						},
 					},
 				},
@@ -398,6 +434,12 @@ func normalizeAgent(agent AgentConfig) AgentConfig {
 	if agent.Hooks == nil {
 		agent.Hooks = make(map[string]AgentHookConfig)
 	}
+	if legacyHook, ok := agent.Hooks["user_prompt"]; ok {
+		if _, exists := agent.Hooks["user_input"]; !exists {
+			agent.Hooks["user_input"] = legacyHook
+		}
+		delete(agent.Hooks, "user_prompt")
+	}
 	for name, hook := range agent.Hooks {
 		if hook.Recall.Profile == "" {
 			hook.Recall.Profile = "default"
@@ -413,6 +455,12 @@ func normalizeAgent(agent AgentConfig) AgentConfig {
 		}
 		if hook.Write.Mode == "" {
 			hook.Write.Mode = "prompt"
+		}
+		if hook.Write.Enabled && !hook.Write.Buffer.Enabled {
+			hook.Write.Buffer.Enabled = true
+		}
+		if hook.Write.Buffer.Enabled && hook.Write.Buffer.FlushCount == 0 {
+			hook.Write.Buffer.FlushCount = 10
 		}
 		agent.Hooks[name] = hook
 	}

@@ -14,10 +14,13 @@ import (
 
 type fakeGraphClient struct {
 	addRequest    *zepgo.AddDataRequest
+	batchRequest  *zepgo.AddDataBatchRequest
 	searchRequest *zepgo.GraphSearchQuery
 	addResult     *zepgo.Episode
+	batchResult   []*zepgo.Episode
 	searchResult  *zepgo.GraphSearchResults
 	addErr        error
+	batchErr      error
 	searchErr     error
 }
 
@@ -27,6 +30,14 @@ func (c *fakeGraphClient) Add(_ context.Context, request *zepgo.AddDataRequest, 
 		return nil, c.addErr
 	}
 	return c.addResult, nil
+}
+
+func (c *fakeGraphClient) AddBatch(_ context.Context, request *zepgo.AddDataBatchRequest, _ ...option.RequestOption) ([]*zepgo.Episode, error) {
+	c.batchRequest = request
+	if c.batchErr != nil {
+		return nil, c.batchErr
+	}
+	return c.batchResult, nil
 }
 
 func (c *fakeGraphClient) Search(_ context.Context, request *zepgo.GraphSearchQuery, _ ...option.RequestOption) (*zepgo.GraphSearchResults, error) {
@@ -59,7 +70,7 @@ func TestNewValidatesZepConfig(t *testing.T) {
 func TestPutAddsTextEpisode(t *testing.T) {
 	t.Parallel()
 
-	client := &fakeGraphClient{addResult: &zepgo.Episode{UUID: "episode-1"}}
+	client := &fakeGraphClient{batchResult: []*zepgo.Episode{{UUID: "episode-1"}}}
 	provider, err := newWithClient("zep", config.ProviderConfig{
 		APIKey:            "key",
 		UserID:            "user-1",
@@ -83,24 +94,28 @@ func TestPutAddsTextEpisode(t *testing.T) {
 	if ref.ID != "episode-1" || ref.Provider != "zep" {
 		t.Fatalf("unexpected ref: %#v", ref)
 	}
-	request := client.addRequest
+	request := client.batchRequest
 	if request == nil {
-		t.Fatal("add request was not captured")
+		t.Fatal("batch request was not captured")
 	}
-	if request.Data != "Todd prefers YAML config" || request.Type != zepgo.GraphDataTypeText {
-		t.Fatalf("unexpected add payload: %#v", request)
+	if len(request.Episodes) != 1 {
+		t.Fatalf("unexpected batch request: %#v", request)
+	}
+	episode := request.Episodes[0]
+	if episode.Data != "Todd prefers YAML config" || episode.Type != zepgo.GraphDataTypeText {
+		t.Fatalf("unexpected episode payload: %#v", episode)
 	}
 	if request.UserID == nil || *request.UserID != "user-1" || request.GraphID != nil {
 		t.Fatalf("unexpected target: %#v", request)
 	}
-	if request.CreatedAt == nil || *request.CreatedAt != createdAt.Format(time.RFC3339Nano) {
-		t.Fatalf("unexpected created_at: %#v", request.CreatedAt)
+	if episode.CreatedAt == nil || *episode.CreatedAt != createdAt.Format(time.RFC3339Nano) {
+		t.Fatalf("unexpected created_at: %#v", episode.CreatedAt)
 	}
-	if request.SourceDescription == nil || *request.SourceDescription != "paxm memory" {
-		t.Fatalf("unexpected source description: %#v", request.SourceDescription)
+	if episode.SourceDescription == nil || *episode.SourceDescription != "paxm memory" {
+		t.Fatalf("unexpected source description: %#v", episode.SourceDescription)
 	}
-	if request.Metadata["paxm_id"] != "memory-1" || request.Metadata["project"] != "paxm" {
-		t.Fatalf("metadata was not mapped: %#v", request.Metadata)
+	if episode.Metadata["paxm_id"] != "memory-1" || episode.Metadata["project"] != "paxm" {
+		t.Fatalf("metadata was not mapped: %#v", episode.Metadata)
 	}
 }
 
@@ -184,7 +199,7 @@ func TestProviderReturnsClientErrors(t *testing.T) {
 	t.Parallel()
 
 	client := &fakeGraphClient{
-		addErr:    errors.New("add failed"),
+		batchErr:  errors.New("add failed"),
 		searchErr: errors.New("search failed"),
 	}
 	provider, err := newWithClient("zep", config.ProviderConfig{APIKey: "key", UserID: "user"}, client)

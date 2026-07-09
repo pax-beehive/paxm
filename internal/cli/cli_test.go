@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,8 +39,21 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(codexConfig), "UserPromptSubmit") || !strings.Contains(string(codexConfig), "codex-user_prompt") {
-		t.Fatalf("codex config missing hook registration: %s", string(codexConfig))
+	codexConfigText := string(codexConfig)
+	for _, expected := range []string{
+		"SessionStart",
+		"UserPromptSubmit",
+		"Stop",
+		"codex-session_start",
+		"codex-user_input",
+		"codex-turn_end",
+	} {
+		if !strings.Contains(codexConfigText, expected) {
+			t.Fatalf("codex config missing %q registration: %s", expected, codexConfigText)
+		}
+	}
+	if strings.Count(stdout.String(), "installed hook shim") != 3 {
+		t.Fatalf("setup should install three hook shims: %s", stdout.String())
 	}
 
 	stdout.Reset()
@@ -132,6 +146,79 @@ func TestCLISetupInteractiveZepProvider(t *testing.T) {
 	}
 }
 
+func TestSetupBaseConfigMergesLegacyHookWriteDefaults(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	legacyPath := filepath.Join(dir, "config.json")
+	legacy := `{
+  "version": 1,
+  "providers": {
+    "local": {
+      "type": "local",
+      "enabled": true,
+      "read": true,
+      "write": true,
+      "required": false,
+      "path": "/tmp/paxm-memory.jsonl",
+      "weight": 1
+    }
+  },
+  "hooks": {
+    "codex": {
+      "enabled": true,
+      "events": {
+        "user_prompt": {
+          "recall": {
+            "enabled": true,
+            "query_template": "{{ .prompt }}",
+            "max_results": 8,
+            "output": "markdown"
+          }
+        }
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := setupBaseConfig(configPath, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userInput := cfg.Agents["codex"].Hooks["user_input"]
+	if !userInput.Recall.Enabled || !userInput.Write.Enabled || !userInput.Write.Buffer.Enabled {
+		t.Fatalf("legacy user prompt hook did not receive user_input write defaults: %#v", userInput)
+	}
+	if !cfg.Agents["codex"].Hooks["turn_end"].Write.Buffer.Flush {
+		t.Fatalf("turn_end flush default was not merged: %#v", cfg.Agents["codex"].Hooks["turn_end"])
+	}
+}
+
+func TestSetupRemovesLegacyHookShim(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+	legacyShim := filepath.Join(filepath.Dir(configPath), "hooks", "codex-user_prompt")
+	if err := os.MkdirAll(filepath.Dir(legacyShim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyShim, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Main([]string{"--config", configPath, "setup", "--yes"}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(legacyShim); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy shim should be removed, stat err: %v", err)
+	}
+}
+
 func TestCLISetupRequiresAProvider(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
@@ -165,8 +252,10 @@ func assertWriteOnlyConfig(t *testing.T, configPath string) {
 	if len(writeProfile.Providers) != 1 || writeProfile.Providers[0].Name != "local" || !writeProfile.Providers[0].Required {
 		t.Fatalf("unexpected default write profile: %#v", writeProfile)
 	}
-	if cfg.Agents["codex"].Hooks["user_prompt"].Recall.Enabled {
-		t.Fatalf("codex user prompt recall should be disabled: %#v", cfg.Agents["codex"])
+	for eventName, hook := range cfg.Agents["codex"].Hooks {
+		if hook.Recall.Enabled || hook.Write.Enabled {
+			t.Fatalf("codex hook %s should be disabled: %#v", eventName, cfg.Agents["codex"])
+		}
 	}
 }
 
@@ -184,7 +273,7 @@ func TestInstallCodexGlobalHookPreservesExistingHooks(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "config.toml")
 	original := `[hooks]
-UserPromptSubmit = [{ hooks = [{ type = "command", command = "paxl __agent-hook", async = false }] }]
+UserPromptSubmit = [{ hooks = [{ type = "command", command = "paxl __agent-hook", async = false }] }, { hooks = [{ type = "command", command = "'/Users/toddzheng/.config/paxm/hooks/codex-user_prompt'", async = false, statusMessage = "Recalling paxm memory" }] }]
 
 [hooks.state]
 `
@@ -192,11 +281,11 @@ UserPromptSubmit = [{ hooks = [{ type = "command", command = "paxl __agent-hook"
 		t.Fatal(err)
 	}
 
-	scriptPath := filepath.Join(t.TempDir(), "codex-user_prompt")
-	if err := installCodexGlobalHook(path, scriptPath); err != nil {
+	scriptPath := filepath.Join(t.TempDir(), "codex-user_input")
+	if err := installCodexGlobalHook(path, scriptPath, "user_input"); err != nil {
 		t.Fatal(err)
 	}
-	if err := installCodexGlobalHook(path, scriptPath); err != nil {
+	if err := installCodexGlobalHook(path, scriptPath, "user_input"); err != nil {
 		t.Fatal(err)
 	}
 	updatedBytes, err := os.ReadFile(path)
@@ -207,11 +296,44 @@ UserPromptSubmit = [{ hooks = [{ type = "command", command = "paxl __agent-hook"
 	if !strings.Contains(updated, "paxl __agent-hook") {
 		t.Fatalf("existing hook was not preserved: %s", updated)
 	}
-	if strings.Count(updated, "codex-user_prompt") != 1 {
+	if strings.Count(updated, "codex-user_input") != 1 {
 		t.Fatalf("paxm hook was not installed exactly once: %s", updated)
 	}
-	if strings.Index(updated, "[hooks.state]") < strings.Index(updated, "codex-user_prompt") {
+	if strings.Contains(updated, "codex-user_prompt") {
+		t.Fatalf("legacy paxm hook was not pruned: %s", updated)
+	}
+	if strings.Index(updated, "[hooks.state]") < strings.Index(updated, "codex-user_input") {
 		t.Fatalf("paxm hook was inserted outside [hooks]: %s", updated)
+	}
+}
+
+func TestInstallCodexGlobalHookRegistersAllEvents(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	for _, event := range installedHookEvents() {
+		scriptPath := filepath.Join(t.TempDir(), "codex-"+event.ConfigEvent)
+		if err := installCodexGlobalHook(path, scriptPath, event.ConfigEvent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	contentBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+	for _, expected := range []string{
+		"SessionStart",
+		"startup|resume|clear|compact",
+		"UserPromptSubmit",
+		"Stop",
+		"codex-session_start",
+		"codex-user_input",
+		"codex-turn_end",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("codex config missing %q: %s", expected, content)
+		}
 	}
 }
 
@@ -234,5 +356,14 @@ func TestCLIDoesNotExposeHookOrProviderCommands(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unknown command "provider"`) {
 		t.Fatalf("unexpected provider error: %s", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Main([]string{"--help"}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("help failed with code %d: %s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "__hook") || strings.Contains(stdout.String(), "hook run") {
+		t.Fatalf("hidden hook commands leaked in help: %s", stdout.String())
 	}
 }

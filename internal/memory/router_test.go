@@ -39,6 +39,19 @@ func (p fakeProvider) Health(context.Context) error {
 	return nil
 }
 
+type captureBatchProvider struct {
+	fakeProvider
+	items []MemoryItem
+}
+
+func (p *captureBatchProvider) PutBatch(_ context.Context, items []MemoryItem) ([]MemoryRef, error) {
+	p.items = append([]MemoryItem(nil), items...)
+	return []MemoryRef{
+		{Provider: p.name, ID: "batch-1"},
+		{Provider: p.name, ID: "batch-2"},
+	}, nil
+}
+
 func TestRouterSearchFansOutAndDedupes(t *testing.T) {
 	t.Parallel()
 
@@ -153,5 +166,31 @@ func TestRouterPutWritesToAllWritableProviders(t *testing.T) {
 	}
 	if len(result.Refs) != 2 {
 		t.Fatalf("expected two refs, got %d", len(result.Refs))
+	}
+}
+
+func TestRouterPutBatchUsesProviderBatchAPI(t *testing.T) {
+	t.Parallel()
+
+	provider := &captureBatchProvider{fakeProvider: fakeProvider{name: "writer"}}
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: provider, Write: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.PutBatchWithPolicy(context.Background(), []MemoryItem{
+		{Text: "one"},
+		{Text: "two"},
+	}, PutPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.items) != 2 {
+		t.Fatalf("batch provider did not receive all items: %#v", provider.items)
+	}
+	if len(result.Refs) != 2 || result.Refs[0].Provider != "writer" || result.Refs[1].Provider != "writer" {
+		t.Fatalf("unexpected batch refs: %#v", result.Refs)
 	}
 }

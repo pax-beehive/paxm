@@ -3,6 +3,7 @@ package facade
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"text/template"
@@ -42,6 +43,10 @@ type IngestResult struct {
 	ProviderErrors []memory.ProviderError `json:"provider_errors,omitempty"`
 }
 
+type IngestBatchInput struct {
+	Items []IngestInput `json:"items"`
+}
+
 type HookEvent struct {
 	Target    string            `json:"target,omitempty"`
 	Event     string            `json:"event,omitempty"`
@@ -50,6 +55,7 @@ type HookEvent struct {
 	Workspace string            `json:"workspace,omitempty"`
 	Limit     int               `json:"limit,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	Raw       json.RawMessage   `json:"-"`
 }
 
 type HookResult struct {
@@ -107,12 +113,52 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (IngestResult, 
 	return result, err
 }
 
+func (s *Service) IngestBatch(ctx context.Context, input IngestBatchInput) (IngestResult, error) {
+	grouped := make(map[string][]memory.MemoryItem)
+	for _, item := range input.Items {
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		profile := item.Profile
+		if strings.TrimSpace(profile) == "" {
+			profile = "default"
+		}
+		grouped[profile] = append(grouped[profile], memory.MemoryItem{
+			Text:      text,
+			Source:    item.Source,
+			Metadata:  item.Metadata,
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+	if len(grouped) == 0 {
+		return IngestResult{}, nil
+	}
+
+	var result IngestResult
+	var errs []error
+	for profile, items := range grouped {
+		policy, err := s.putPolicy(profile)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		putResult, err := s.router.PutBatchWithPolicy(ctx, items, policy)
+		result.Refs = append(result.Refs, putResult.Refs...)
+		result.ProviderErrors = append(result.ProviderErrors, putResult.ProviderErrors...)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return result, errors.Join(errs...)
+}
+
 func (s *Service) RunHook(ctx context.Context, event HookEvent) (HookResult, error) {
 	if event.Target == "" {
 		event.Target = "codex"
 	}
 	if event.Event == "" {
-		event.Event = "user_prompt"
+		event.Event = "user_input"
 	}
 	result := HookResult{Target: event.Target, Event: event.Event}
 
@@ -151,6 +197,51 @@ func (s *Service) RunHook(ctx context.Context, event HookEvent) (HookResult, err
 	result.Query = recall.Query
 	result.Recall = &recall
 	return result, err
+}
+
+func (s *Service) HookWriteItem(event HookEvent) (IngestInput, bool, error) {
+	if event.Target == "" {
+		event.Target = "codex"
+	}
+	agentCfg, ok := s.cfg.Agents[event.Target]
+	if !ok || !agentCfg.Enabled {
+		return IngestInput{}, false, nil
+	}
+	eventCfg, ok := agentCfg.Hooks[event.Event]
+	if !ok || !eventCfg.Write.Enabled {
+		return IngestInput{}, false, nil
+	}
+	text, err := renderHookTemplate(eventCfg.Write.Template, event)
+	if err != nil {
+		return IngestInput{}, false, err
+	}
+	if strings.TrimSpace(text) == "" {
+		return IngestInput{}, false, nil
+	}
+	metadata := copyMetadata(event.Metadata)
+	metadata["hook_target"] = event.Target
+	metadata["hook_event"] = event.Event
+	if event.Workspace != "" {
+		metadata["workspace"] = event.Workspace
+	}
+	return IngestInput{
+		Text:     text,
+		Profile:  eventCfg.Write.Profile,
+		Source:   "hook:" + event.Target + ":" + event.Event,
+		Metadata: metadata,
+	}, true, nil
+}
+
+func (s *Service) HookBufferConfig(event HookEvent) config.HookBufferConfig {
+	if event.Target == "" {
+		event.Target = "codex"
+	}
+	if agentCfg, ok := s.cfg.Agents[event.Target]; ok && agentCfg.Enabled {
+		if eventCfg, ok := agentCfg.Hooks[event.Event]; ok {
+			return eventCfg.Write.Buffer
+		}
+	}
+	return config.HookBufferConfig{}
 }
 
 func (s *Service) searchPolicy(profileName string, limitOverride int) (memory.SearchPolicy, error) {
@@ -211,10 +302,14 @@ func fmtMissingProfile(kind, name string) error {
 }
 
 func renderHookQuery(queryTemplate string, event HookEvent) (string, error) {
+	return renderHookTemplate(queryTemplate, event)
+}
+
+func renderHookTemplate(queryTemplate string, event HookEvent) (string, error) {
 	if strings.TrimSpace(queryTemplate) == "" {
 		return "", nil
 	}
-	tmpl, err := template.New("hook_query").Option("missingkey=zero").Parse(queryTemplate)
+	tmpl, err := template.New("hook_template").Option("missingkey=zero").Parse(queryTemplate)
 	if err != nil {
 		return "", err
 	}
@@ -225,12 +320,21 @@ func renderHookQuery(queryTemplate string, event HookEvent) (string, error) {
 		"prompt":    event.Prompt,
 		"workspace": event.Workspace,
 		"metadata":  event.Metadata,
+		"raw_json":  strings.TrimSpace(string(event.Raw)),
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(buf.String()), nil
+}
+
+func copyMetadata(metadata map[string]string) map[string]string {
+	copied := make(map[string]string, len(metadata)+3)
+	for key, value := range metadata {
+		copied[key] = value
+	}
+	return copied
 }
 
 func firstNonEmpty(values ...string) string {

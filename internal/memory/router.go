@@ -158,6 +158,10 @@ func (r *Router) Put(ctx context.Context, item MemoryItem) (PutResult, error) {
 }
 
 func (r *Router) PutWithPolicy(ctx context.Context, item MemoryItem, policy PutPolicy) (PutResult, error) {
+	return r.PutBatchWithPolicy(ctx, []MemoryItem{item}, policy)
+}
+
+func (r *Router) PutBatchWithPolicy(ctx context.Context, items []MemoryItem, policy PutPolicy) (PutResult, error) {
 	var writable []ProviderBinding
 	var err error
 	if len(policy.Providers) > 0 {
@@ -175,10 +179,13 @@ func (r *Router) PutWithPolicy(ctx context.Context, item MemoryItem, policy PutP
 	if len(writable) == 0 {
 		return PutResult{}, errors.New("no writable memory providers are enabled")
 	}
+	if len(items) == 0 {
+		return PutResult{}, nil
+	}
 
 	type response struct {
 		binding ProviderBinding
-		ref     MemoryRef
+		refs    []MemoryRef
 		err     error
 	}
 
@@ -188,8 +195,8 @@ func (r *Router) PutWithPolicy(ctx context.Context, item MemoryItem, policy PutP
 		wg.Add(1)
 		go func(binding ProviderBinding) {
 			defer wg.Done()
-			ref, err := binding.Provider.Put(ctx, item)
-			responses <- response{binding: binding, ref: ref, err: err}
+			refs, err := putBatch(ctx, binding.Provider, items)
+			responses <- response{binding: binding, refs: refs, err: err}
 		}(binding)
 	}
 	wg.Wait()
@@ -212,8 +219,10 @@ func (r *Router) PutWithPolicy(ctx context.Context, item MemoryItem, policy PutP
 			}
 			continue
 		}
-		res.ref.Provider = name
-		result.Refs = append(result.Refs, res.ref)
+		for _, ref := range res.refs {
+			ref.Provider = name
+			result.Refs = append(result.Refs, ref)
+		}
 	}
 	if len(requiredErrs) > 0 {
 		return result, errors.Join(requiredErrs...)
@@ -222,6 +231,21 @@ func (r *Router) PutWithPolicy(ctx context.Context, item MemoryItem, policy PutP
 		return result.Refs[i].Provider < result.Refs[j].Provider
 	})
 	return result, nil
+}
+
+func putBatch(ctx context.Context, provider Provider, items []MemoryItem) ([]MemoryRef, error) {
+	if batchProvider, ok := provider.(BatchProvider); ok {
+		return batchProvider.PutBatch(ctx, items)
+	}
+	refs := make([]MemoryRef, 0, len(items))
+	for _, item := range items {
+		ref, err := provider.Put(ctx, item)
+		if err != nil {
+			return refs, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
 }
 
 func (r *Router) bindingsForRoutes(routes []ProviderRoute, op string) ([]ProviderBinding, error) {

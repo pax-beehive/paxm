@@ -60,17 +60,54 @@ agents:
       profile: default
       output: markdown
     hooks:
-      user_prompt:
+      session_start:
+        write:
+          enabled: true
+          profile: default
+          template: |
+            Session started.
+
+            Event:
+            {{ .raw_json }}
+          mode: session_start
+          buffer:
+            enabled: true
+            flush_count: 10
+
+      user_input:
         recall:
           enabled: true
           profile: default
           query_template: "{{ .prompt }}"
           output: markdown
         write:
-          enabled: false
+          enabled: true
           profile: default
-          template: "{{ .prompt }}"
-          mode: prompt
+          template: |
+            User input:
+            {{ .prompt }}
+
+            Event:
+            {{ .raw_json }}
+          mode: user_input
+          buffer:
+            enabled: true
+            flush_count: 10
+
+      turn_end:
+        write:
+          enabled: true
+          profile: default
+          template: |
+            Turn ended.
+
+            Event:
+            {{ .raw_json }}
+          mode: turn_end
+          buffer:
+            enabled: true
+            flush: true
+            flush_count: 10
 ```
 
 ## Providers
@@ -123,8 +160,31 @@ write profile unless another profile is selected.
 
 `agents.codex.active_recall` controls explicit recall calls.
 
-`agents.codex.hooks.user_prompt.recall` controls passive recall from the Codex
-user prompt hook.
+`agents.codex.hooks.user_input.recall` controls passive recall from the Codex
+`UserPromptSubmit` hook.
 
-`agents.codex.hooks.user_prompt.write` is present in the config model for future
-passive write behavior, but V1 does not install or run write hooks.
+`agents.codex.hooks.*.write` controls passive hook writes. The built-in Codex
+event names are:
+
+- `session_start`: Codex `SessionStart`; writes a session-start event into the
+  buffer.
+- `user_input`: Codex `UserPromptSubmit`; returns recall output and writes the
+  user input event into the buffer.
+- `turn_end`: Codex `Stop`; writes a turn-end event and flushes the buffer.
+
+Hook write fields:
+
+- `enabled`: whether this hook produces a memory write item.
+- `profile`: write profile used when the item is flushed.
+- `template`: Go template rendered from hook data. Available keys include
+  `.target`, `.event`, `.prompt`, `.query`, `.workspace`, `.metadata`, and
+  `.raw_json`.
+- `mode`: descriptive write mode for config readability.
+- `buffer.enabled`: when true, queue this hook item in the in-memory daemon.
+- `buffer.flush`: when true, flush the current in-memory daemon buffer after
+  appending this item.
+- `buffer.flush_count`: flush after the buffer reaches this many items.
+
+The hook buffer is process memory owned by a short-lived local daemon. It is not
+durable; if the daemon exits before a flush, buffered hook write items can be
+lost.

@@ -70,18 +70,36 @@ configuration.
 
 - `active_recall` is used by explicit `paxm recall --query ...` calls.
 - `hooks.*.recall` is passive recall triggered by agent hooks.
-- `hooks.*.write` is reserved for passive writes from future hook events.
+- `hooks.*.write` is passive memory capture triggered by agent hooks.
 
-Both active recall and hook recall point at recall profiles.
+Active recall and hook recall point at recall profiles. Hook writes point at
+write profiles.
 
 ## Hook Behavior
 
-V1 hook behavior is passive recall only. The Codex user prompt hook calls:
+V1 installs three Codex hooks through `paxm setup`:
 
 ```text
-paxm --config PATH recall --hook-event --json
+SessionStart      -> session_start
+UserPromptSubmit  -> user_input
+Stop              -> turn_end
 ```
 
-The hook event is converted into a recall query using the hook recall template.
-The hook does not write memory in V1 unless a future write hook is explicitly
-enabled and implemented.
+Each shim calls a hidden internal hook entrypoint. The public CLI surface stays:
+
+```text
+paxm [--config PATH] setup
+paxm [--config PATH] recall --query TEXT [--json]
+paxm [--config PATH] remember --text TEXT
+paxm [--config PATH] config doctor
+```
+
+`user_input` runs passive recall by rendering the configured hook recall
+template into a query. It also renders the configured write template and appends
+the result to the hook buffer.
+
+`session_start` only appends a write item to the hook buffer.
+
+`turn_end` appends a write item and flushes the buffer to the configured write
+profile. The buffer is owned by a short-lived local Unix-socket daemon and lives
+only in process memory. It is intentionally not durable.

@@ -62,6 +62,10 @@ type Provider interface {
 	Health(ctx context.Context) error
 }
 
+type BatchProvider interface {
+	PutBatch(ctx context.Context, items []MemoryItem) ([]MemoryRef, error)
+}
+
 type ProviderError struct {
 	Provider string `json:"provider"`
 	Required bool   `json:"required"`

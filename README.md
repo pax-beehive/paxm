@@ -12,7 +12,7 @@ Agent active recall:
   paxm recall --query "what did we decide?" --json
 
 Hook passive recall:
-  installed hook shim -> paxm recall --hook-event --json
+  installed hook shim -> paxm __hook -> in-memory buffer daemon
 ```
 
 The CLI command layer does not talk to concrete memory providers directly. Commands call the facade, the facade calls the memory router, and the router fans out to enabled providers.
@@ -98,7 +98,21 @@ agents:
       profile: default
       output: markdown
     hooks:
-      user_prompt:
+      session_start:
+        write:
+          enabled: true
+          profile: default
+          template: |
+            Session started.
+
+            Event:
+            {{ .raw_json }}
+          mode: session_start
+          buffer:
+            enabled: true
+            flush_count: 10
+
+      user_input:
         recall:
           enabled: true
           profile: default
@@ -106,10 +120,33 @@ agents:
           max_results: 8
           output: markdown
         write:
-          enabled: false
+          enabled: true
           profile: default
-          template: "{{ .prompt }}"
-          mode: prompt
+          template: |
+            User input:
+            {{ .prompt }}
+
+            Event:
+            {{ .raw_json }}
+          mode: user_input
+          buffer:
+            enabled: true
+            flush_count: 10
+
+      turn_end:
+        write:
+          enabled: true
+          profile: default
+          template: |
+            Turn ended.
+
+            Event:
+            {{ .raw_json }}
+          mode: turn_end
+          buffer:
+            enabled: true
+            flush: true
+            flush_count: 10
 ```
 
 Multiple enabled providers are supported by configuration. Recall profiles decide
@@ -127,7 +164,9 @@ exactly one of `user_id` or `graph_id`.
 For Codex, setup writes a shim under the paxm config directory:
 
 ```text
-~/.config/paxm/hooks/codex-user_prompt
+~/.config/paxm/hooks/codex-session_start
+~/.config/paxm/hooks/codex-user_input
+~/.config/paxm/hooks/codex-turn_end
 ```
 
 It also updates:
@@ -136,4 +175,10 @@ It also updates:
 ~/.codex/config.toml
 ```
 
-The shim expects a hook event JSON object on stdin and calls `paxm recall --hook-event --json`. Codex may still require you to review and trust the new non-managed hook with `/hooks` before it runs.
+The shims expect hook event JSON on stdin and call a hidden `paxm __hook`
+entrypoint. `user_input` returns recall JSON to Codex and also appends a write
+item to the in-memory hook buffer. `session_start` appends a write item.
+`turn_end` appends a write item and flushes the buffer to the configured write
+profile. The buffer lives in a short-lived local daemon and is intentionally not
+durable. Codex may still require you to review and trust the new non-managed
+hooks with `/hooks` before they run.

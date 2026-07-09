@@ -24,6 +24,7 @@ const (
 
 type graphClient interface {
 	Add(context.Context, *zepgo.AddDataRequest, ...option.RequestOption) (*zepgo.Episode, error)
+	AddBatch(context.Context, *zepgo.AddDataBatchRequest, ...option.RequestOption) ([]*zepgo.Episode, error)
 	Search(context.Context, *zepgo.GraphSearchQuery, ...option.RequestOption) (*zepgo.GraphSearchResults, error)
 }
 
@@ -122,32 +123,60 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 }
 
 func (p *Provider) Put(ctx context.Context, item memory.MemoryItem) (memory.MemoryRef, error) {
-	if err := ctx.Err(); err != nil {
-		return memory.MemoryRef{}, err
-	}
-	text := strings.TrimSpace(item.Text)
-	if text == "" {
-		return memory.MemoryRef{}, errors.New("memory text is required")
-	}
-	request := &zepgo.AddDataRequest{
-		Data:              text,
-		Type:              zepgo.GraphDataTypeText,
-		Metadata:          toZepMetadata(item),
-		SourceDescription: stringPtr(firstNonEmpty(p.sourceDescription, item.Source, "paxm")),
-	}
-	if !item.CreatedAt.IsZero() {
-		request.CreatedAt = stringPtr(item.CreatedAt.UTC().Format(time.RFC3339Nano))
-	}
-	p.applyAddTarget(request)
-
-	episode, err := p.client.Add(ctx, request)
+	refs, err := p.PutBatch(ctx, []memory.MemoryItem{item})
 	if err != nil {
 		return memory.MemoryRef{}, err
 	}
-	if episode == nil || strings.TrimSpace(episode.UUID) == "" {
+	if len(refs) == 0 {
 		return memory.MemoryRef{}, errors.New("zep add did not return an episode uuid")
 	}
-	return memory.MemoryRef{Provider: p.name, ID: episode.UUID}, nil
+	return refs[0], nil
+}
+
+func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]memory.MemoryRef, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	episodes := make([]*zepgo.EpisodeData, 0, len(items))
+	for _, item := range items {
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			return nil, errors.New("memory text is required")
+		}
+		episode := &zepgo.EpisodeData{
+			Data:              text,
+			Type:              zepgo.GraphDataTypeText,
+			Metadata:          toZepMetadata(item),
+			SourceDescription: stringPtr(firstNonEmpty(p.sourceDescription, item.Source, "paxm")),
+		}
+		if !item.CreatedAt.IsZero() {
+			episode.CreatedAt = stringPtr(item.CreatedAt.UTC().Format(time.RFC3339Nano))
+		}
+		episodes = append(episodes, episode)
+	}
+	request := &zepgo.AddDataBatchRequest{
+		Episodes: episodes,
+	}
+	p.applyBatchTarget(request)
+
+	result, err := p.client.AddBatch(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]memory.MemoryRef, 0, len(result))
+	for _, episode := range result {
+		if episode == nil || strings.TrimSpace(episode.UUID) == "" {
+			continue
+		}
+		refs = append(refs, memory.MemoryRef{Provider: p.name, ID: episode.UUID})
+	}
+	if len(refs) == 0 {
+		return nil, errors.New("zep add batch did not return episode uuids")
+	}
+	return refs, nil
 }
 
 func (p *Provider) Health(ctx context.Context) error {
@@ -163,6 +192,14 @@ func (p *Provider) applyTarget(request *zepgo.GraphSearchQuery) {
 }
 
 func (p *Provider) applyAddTarget(request *zepgo.AddDataRequest) {
+	if p.userID != "" {
+		request.UserID = stringPtr(p.userID)
+		return
+	}
+	request.GraphID = stringPtr(p.graphID)
+}
+
+func (p *Provider) applyBatchTarget(request *zepgo.AddDataBatchRequest) {
 	if p.userID != "" {
 		request.UserID = stringPtr(p.userID)
 		return
