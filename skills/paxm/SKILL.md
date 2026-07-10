@@ -38,6 +38,31 @@ If the user gives a config path, pass it through every command:
 paxm --config /path/to/config.yaml recall --query "..." --json
 ```
 
+## MCP Mode
+
+When the host has paxm configured as an MCP server, prefer the structured MCP
+tools over shelling out:
+
+- `paxm_recall` instead of `paxm recall --json`
+- `paxm_remember` instead of `paxm remember`
+- `paxm_history` instead of `paxm history --json`
+- `paxm_config_doctor` instead of `paxm config doctor --json`
+
+The server command is:
+
+```bash
+paxm mcp serve
+```
+
+For a custom config:
+
+```bash
+paxm --config /path/to/config.yaml mcp serve
+```
+
+MCP mode follows the same operating rules as CLI mode. Do not use it to run
+setup, install hooks, uninstall integrations, or backfill old sessions.
+
 ## Active Recall
 
 Before answering a question that depends on prior project decisions, user preferences, repo history, or old debugging context, run a targeted recall:

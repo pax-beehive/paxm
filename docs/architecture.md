@@ -8,6 +8,8 @@ hook installation, and recall policy in user-owned configuration.
 ```text
 cmd/paxm
   internal/cli          command parsing and interactive setup
+  internal/mcp          stdio MCP server and memory tools
+  internal/runtime      shared config, router, and facade loading
   internal/facade       active recall, hook recall, and writes
   internal/memory       provider interface, routing, ranking, thresholds
   internal/adapters     provider registry
@@ -15,8 +17,9 @@ cmd/paxm
   internal/telemetry    bounded local logs, metrics, and history summaries
 ```
 
-The CLI never talks to concrete providers directly. It loads config, builds the
-provider registry/router, and calls the facade.
+The CLI and MCP server never talk to concrete providers directly. They load
+config, build the provider registry/router, and call the facade through the
+shared runtime seam.
 
 ## Provider Boundary
 
@@ -75,6 +78,13 @@ does not plan that query chain; it provides the recall surface and structured
 scores. The agent should keep each follow-up query focused, stop after a small
 number of hops, and verify current source when the remembered fact can drift.
 
+Agents that support MCP can use `paxm mcp serve` instead of shelling out to the
+CLI. The MCP server exposes `paxm_recall`, `paxm_remember`, `paxm_history`, and
+`paxm_config_doctor` over stdio. It reuses the same facade and telemetry paths
+as the CLI, so recall/write policy remains entirely in user-owned paxm config.
+It intentionally does not expose setup, uninstall, hook installation, or
+backfill execution as MCP tools.
+
 ## Write Profiles
 
 A write profile is the policy boundary for writes. It chooses:
@@ -117,6 +127,7 @@ paxm [--config PATH] history [--days N] [--json]
 paxm [--config PATH] backfill scan --agent AGENT [--before TIME]
 paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]
 paxm [--config PATH] backfill status --agent AGENT --provider NAME
+paxm [--config PATH] mcp serve
 paxm [--config PATH] config doctor
 ```
 

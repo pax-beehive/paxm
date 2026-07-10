@@ -29,6 +29,9 @@ curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/downloa
 This repo includes a bundled agent skill at [skills/paxm/SKILL.md](skills/paxm/SKILL.md).
 The skill teaches an agent to actively call `paxm recall`, `paxm remember`, and
 `paxm history` while respecting user-owned setup and provider configuration.
+Agents that support MCP can instead connect to `paxm mcp serve` for the same
+recall, remember, history, and config doctor operations through structured tool
+calls.
 
 Install the CLI first, then run one interactive setup pass:
 
@@ -65,6 +68,9 @@ Human setup:
 Agent active recall:
   paxm recall --query "what did we decide?" --limit 10 --json
 
+MCP active recall:
+  paxm mcp serve  # stdio MCP server for structured agent tool calls
+
 Hook passive recall:
   installed hook shim -> paxm __hook -> in-memory buffer daemon
 
@@ -81,6 +87,8 @@ The CLI command layer does not talk to concrete memory providers directly. Comma
 ```text
 cmd/paxm
   internal/cli
+  internal/mcp           stdio MCP server and memory tools
+  internal/runtime       shared config, router, and facade loading
   internal/facade
   internal/memory        provider interface and multi-provider router
   internal/adapters      provider registry
@@ -128,6 +136,36 @@ For a project-local config during development:
 /tmp/paxm --config /tmp/paxm-dev/config.yaml remember --text "enabled providers can read and write"
 printf '{"prompt":"enabled providers"}' | /tmp/paxm --config /tmp/paxm-dev/config.yaml recall --hook-event --json
 ```
+
+## MCP Server
+
+`paxm` can run as a local stdio MCP server:
+
+```bash
+paxm mcp serve
+```
+
+MCP hosts should configure the command as `paxm` with args
+`["mcp", "serve"]`. If you use a non-default config path, pass it before the
+subcommand:
+
+```json
+{
+  "command": "paxm",
+  "args": ["--config", "/path/to/config.yaml", "mcp", "serve"]
+}
+```
+
+The MCP server exposes a narrow tool surface:
+
+- `paxm_recall`: active recall through configured recall profiles.
+- `paxm_remember`: durable writes through configured write profiles.
+- `paxm_history`: recent local telemetry summary.
+- `paxm_config_doctor`: provider health checks without returning config secrets.
+
+`paxm mcp serve` does not run setup, install hooks, uninstall integrations, or
+run historical backfills. Users still own provider credentials, setup, and
+passive hook installation through `paxm setup`.
 
 ## Config
 

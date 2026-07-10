@@ -17,11 +17,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/adapters"
 	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
 	"github.com/pax-beehive/memory-adaptor/internal/config"
 	"github.com/pax-beehive/memory-adaptor/internal/facade"
+	"github.com/pax-beehive/memory-adaptor/internal/mcp"
 	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	paxruntime "github.com/pax-beehive/memory-adaptor/internal/runtime"
 	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
 )
 
@@ -90,6 +91,8 @@ func (r runner) run(args []string) error {
 		return r.runHistory(args[1:])
 	case "backfill":
 		return r.runBackfill(args[1:])
+	case "mcp":
+		return r.runMCP(args[1:])
 	case "update":
 		return r.runUpdate(args[1:])
 	case "version":
@@ -470,7 +473,7 @@ func (r runner) runRecall(args []string) error {
 		Profile: *profile,
 		Limit:   *limit,
 	})
-	r.recordRecallTelemetry(cfg, "recall", "cli", "", "", effectiveRecallProfile(cfg, *profile), firstNonEmpty(result.Query, q), result, false, time.Since(started), err)
+	r.recordRecallTelemetry(cfg, "recall", "cli", "", "", paxruntime.EffectiveRecallProfile(cfg, *profile), firstNonEmpty(result.Query, q), result, false, time.Since(started), err)
 	if err != nil {
 		return err
 	}
@@ -511,7 +514,7 @@ func (r runner) runRemember(args []string) error {
 		Profile: *profile,
 		Source:  *source,
 	})
-	r.recordRememberTelemetry(cfg, "remember", "cli", effectiveWriteProfile(*profile), 1, result, time.Since(started), err)
+	r.recordRememberTelemetry(cfg, "remember", "cli", paxruntime.EffectiveWriteProfile(*profile), 1, result, time.Since(started), err)
 	if err != nil {
 		return err
 	}
@@ -733,7 +736,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 			OK:             true,
 			Buffered:       true,
 			Flushed:        1,
-			ProviderWrites: writeProviderRoutes(service.Config(), item.Profile),
+			ProviderWrites: paxruntime.WriteProviderRoutes(service.Config(), item.Profile),
 			ProviderRefs:   telemetry.ProviderRefs(result.Refs),
 			ProviderErrors: result.ProviderErrors,
 		})
@@ -746,7 +749,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 		return 0, false, nil
 	}
 	flushed := len(*buffer)
-	providerWrites := writeProviderRoutesForItems(service.Config(), *buffer)
+	providerWrites := paxruntime.WriteProviderRoutesForItems(service.Config(), *buffer)
 	result, err := service.IngestBatch(ctx, facade.IngestBatchInput{Items: *buffer})
 	if err != nil {
 		_ = writeJSON(conn, hookBufferResponse{
@@ -960,15 +963,11 @@ func (r runner) runConfigDoctor(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := config.Load(r.configFile())
+	rt, err := paxruntime.Load(r.configFile())
 	if err != nil {
 		return err
 	}
-	router, err := adapters.DefaultRegistry().BuildRouter(cfg)
-	if err != nil {
-		return err
-	}
-	statuses, err := router.Health(context.Background())
+	statuses, err := rt.Health(context.Background())
 	if *jsonOut {
 		if writeErr := writeJSON(r.stdout, statuses); writeErr != nil {
 			return writeErr
@@ -983,6 +982,29 @@ func (r runner) runConfigDoctor(args []string) error {
 		fmt.Fprintf(r.stdout, "error: %s: %s\n", status.Provider, status.Error)
 	}
 	return err
+}
+
+func (r runner) runMCP(args []string) error {
+	if len(args) == 0 {
+		return errors.New("mcp command requires a subcommand: serve")
+	}
+	switch args[0] {
+	case "serve":
+		fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
+		fs.SetOutput(r.stderr)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return mcp.Serve(mcp.Options{
+			ConfigPath: r.configFile(),
+			Version:    version,
+			Stdin:      r.stdin,
+			Stdout:     r.stdout,
+			Stderr:     r.stderr,
+		})
+	default:
+		return fmt.Errorf("unknown mcp subcommand %q", args[0])
+	}
 }
 
 func (r runner) runHistory(args []string) error {
@@ -1010,18 +1032,11 @@ func (r runner) runHistory(args []string) error {
 }
 
 func (r runner) loadRuntime() (config.Config, *facade.Service, error) {
-	cfg, err := config.Load(r.configFile())
-	if err != nil {
-		if errors.Is(err, config.ErrConfigMissing) {
-			return config.Config{}, nil, fmt.Errorf("%w; run `paxm --config %s setup`", err, r.configFile())
-		}
-		return config.Config{}, nil, err
-	}
-	router, err := adapters.DefaultRegistry().BuildRouter(cfg)
+	rt, err := paxruntime.Load(r.configFile())
 	if err != nil {
 		return config.Config{}, nil, err
 	}
-	return cfg, facade.New(cfg, router), nil
+	return rt.Config, rt.Service, nil
 }
 
 func (r runner) loadService() (*facade.Service, error) {
@@ -1030,10 +1045,7 @@ func (r runner) loadService() (*facade.Service, error) {
 }
 
 func (r runner) configFile() string {
-	if r.configPath != "" {
-		return config.ExpandPath(r.configPath)
-	}
-	return config.DefaultConfigPath()
+	return paxruntime.ConfigFile(r.configPath)
 }
 
 func (r runner) printHelp() {
@@ -1048,51 +1060,39 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill scan --agent AGENT [--before TIME]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill status --agent AGENT --provider NAME")
+	fmt.Fprintln(r.stdout, "  paxm [--config PATH] mcp serve")
 	fmt.Fprintln(r.stdout, "  paxm update [--check] [--version VERSION]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
 	fmt.Fprintln(r.stdout, "  paxm version")
 }
 
 func (r runner) recordRecallTelemetry(cfg config.Config, kind, source, target, hookEvent, profile, query string, result facade.RecallResult, skipped bool, duration time.Duration, opErr error) {
-	event := telemetry.Event{
-		Time:                 time.Now().UTC(),
-		Kind:                 kind,
-		Source:               source,
-		Command:              sourceCommand(source, kind),
-		Target:               target,
-		HookEvent:            hookEvent,
-		Profile:              profile,
-		Success:              opErr == nil,
-		Skipped:              skipped,
-		DurationMS:           duration.Milliseconds(),
-		HitCount:             len(result.Hits),
-		InsertedCount:        insertedCount(kind, result.Hits),
-		ProviderRecalls:      recallProviderRoutes(cfg, profile, skipped),
-		ProviderHits:         telemetry.ProviderHits(result.Hits),
-		ProviderErrorDetails: telemetry.ProviderErrors(result.ProviderErrors),
-		Error:                telemetryError(opErr),
-	}
+	event := paxruntime.RecallTelemetryEvent(cfg, paxruntime.RecallTelemetryInput{
+		Kind:      kind,
+		Source:    source,
+		Target:    target,
+		HookEvent: hookEvent,
+		Profile:   profile,
+		Result:    result,
+		Skipped:   skipped,
+		Duration:  duration,
+		Err:       opErr,
+	})
 	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
 	recorder.PrepareQueryEvent(&event, query)
 	r.recordTelemetry(cfg, event)
 }
 
 func (r runner) recordRememberTelemetry(cfg config.Config, kind, source, profile string, itemCount int, result facade.IngestResult, duration time.Duration, opErr error) {
-	event := telemetry.Event{
-		Time:                 time.Now().UTC(),
-		Kind:                 kind,
-		Source:               source,
-		Command:              sourceCommand(source, kind),
-		Profile:              profile,
-		Success:              opErr == nil,
-		DurationMS:           duration.Milliseconds(),
-		ItemCount:            itemCount,
-		RefCount:             len(result.Refs),
-		ProviderWrites:       writeProviderRoutes(cfg, profile),
-		ProviderRefs:         telemetry.ProviderRefs(result.Refs),
-		ProviderErrorDetails: telemetry.ProviderErrors(result.ProviderErrors),
-		Error:                telemetryError(opErr),
-	}
+	event := paxruntime.RememberTelemetryEvent(cfg, paxruntime.RememberTelemetryInput{
+		Kind:      kind,
+		Source:    source,
+		Profile:   profile,
+		ItemCount: itemCount,
+		Result:    result,
+		Duration:  duration,
+		Err:       opErr,
+	})
 	r.recordTelemetry(cfg, event)
 }
 
@@ -1113,7 +1113,7 @@ func (r runner) recordHookWriteTelemetry(cfg config.Config, event facade.HookEve
 		ProviderWrites:       response.ProviderWrites,
 		ProviderRefs:         response.ProviderRefs,
 		ProviderErrorDetails: telemetry.ProviderErrors(response.ProviderErrors),
-		Error:                telemetryError(opErr),
+		Error:                paxruntime.TelemetryError(opErr),
 	}
 	r.recordTelemetry(cfg, telemetryEvent)
 }
@@ -1123,85 +1123,6 @@ func (r runner) recordTelemetry(cfg config.Config, event telemetry.Event) {
 	if err := recorder.Record(event); err != nil {
 		fmt.Fprintf(r.stderr, "paxm telemetry skipped: %s\n", err)
 	}
-}
-
-func sourceCommand(source, kind string) string {
-	if source == "hook" {
-		return "hook"
-	}
-	return kind
-}
-
-func insertedCount(kind string, hits []memory.MemoryHit) int {
-	if kind != "hook_recall" {
-		return 0
-	}
-	return len(hits)
-}
-
-func effectiveRecallProfile(cfg config.Config, profile string) string {
-	if strings.TrimSpace(profile) != "" {
-		return profile
-	}
-	if agent, ok := cfg.Agents["codex"]; ok && agent.ActiveRecall.Enabled && strings.TrimSpace(agent.ActiveRecall.Profile) != "" {
-		return agent.ActiveRecall.Profile
-	}
-	return "default"
-}
-
-func effectiveWriteProfile(profile string) string {
-	if strings.TrimSpace(profile) == "" {
-		return "default"
-	}
-	return profile
-}
-
-func recallProviderRoutes(cfg config.Config, profile string, skipped bool) map[string]int {
-	if skipped {
-		return nil
-	}
-	profile = effectiveRecallProfile(cfg, profile)
-	recallProfile, ok := cfg.RecallProfiles[profile]
-	if !ok {
-		return nil
-	}
-	return providerRouteCounts(recallProfile.Providers)
-}
-
-func writeProviderRoutes(cfg config.Config, profile string) map[string]int {
-	profile = effectiveWriteProfile(profile)
-	writeProfile, ok := cfg.WriteProfiles[profile]
-	if !ok {
-		return nil
-	}
-	return providerRouteCounts(writeProfile.Providers)
-}
-
-func writeProviderRoutesForItems(cfg config.Config, items []facade.IngestInput) map[string]int {
-	counts := make(map[string]int)
-	for _, item := range items {
-		for provider, count := range writeProviderRoutes(cfg, item.Profile) {
-			counts[provider] += count
-		}
-	}
-	if len(counts) == 0 {
-		return nil
-	}
-	return counts
-}
-
-func providerRouteCounts(routes []config.ProviderRouteConfig) map[string]int {
-	counts := make(map[string]int)
-	for _, route := range routes {
-		if strings.TrimSpace(route.Name) == "" {
-			continue
-		}
-		counts[route.Name]++
-	}
-	if len(counts) == 0 {
-		return nil
-	}
-	return counts
 }
 
 func hookRecallProfile(cfg config.Config, event facade.HookEvent) string {
@@ -1214,9 +1135,9 @@ func hookRecallProfile(cfg config.Config, event facade.HookEvent) string {
 	if agent, ok := cfg.Agents[event.Target]; ok {
 		if hook, ok := agent.Hooks[event.Event]; ok {
 			if event.Metadata != nil && event.Metadata[facade.HookRecallPhaseMetadataKey] == facade.HookRecallPhaseInitial && hook.Recall.Initial != nil && hook.Recall.Initial.Enabled {
-				return effectiveRecallProfile(cfg, hook.Recall.Initial.Profile)
+				return paxruntime.EffectiveRecallProfile(cfg, hook.Recall.Initial.Profile)
 			}
-			return effectiveRecallProfile(cfg, hook.Recall.Profile)
+			return paxruntime.EffectiveRecallProfile(cfg, hook.Recall.Profile)
 		}
 	}
 	return "default"
@@ -1228,7 +1149,7 @@ func hookWriteProfile(cfg config.Config, event facade.HookEvent) string {
 	}
 	if agent, ok := cfg.Agents[event.Target]; ok {
 		if hook, ok := agent.Hooks[event.Event]; ok {
-			return effectiveWriteProfile(hook.Write.Profile)
+			return paxruntime.EffectiveWriteProfile(hook.Write.Profile)
 		}
 	}
 	return "default"
@@ -1401,17 +1322,6 @@ func pruneHookSessionState(state *hookSessionState, now time.Time) {
 		delete(state.Seen, entries[0].Key)
 		entries = entries[1:]
 	}
-}
-
-func telemetryError(err error) string {
-	if err == nil {
-		return ""
-	}
-	value := err.Error()
-	if len(value) <= 240 {
-		return value
-	}
-	return value[:240]
 }
 
 func boolInt(value bool) int {

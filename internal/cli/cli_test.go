@@ -125,6 +125,28 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 	}
 }
 
+func TestCLIMCPServeInitialize(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n")
+	code := Main([]string{"--config", configPath, "mcp", "serve"}, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp serve failed with code %d: %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"serverInfo"`) || !strings.Contains(stdout.String(), `"tools"`) {
+		t.Fatalf("unexpected mcp initialize response: %s", stdout.String())
+	}
+}
+
 func TestCLISetupInteractiveProviderChoices(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))

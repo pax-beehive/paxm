@@ -44,5 +44,5 @@ Open design questions:
   or personal/global first (`~/.agents/plugins/marketplace.json`).
 - Whether `paxm` should support an explicit plugin data install location such as
   `${PLUGIN_DATA}/bin/paxm` in addition to normal `PATH` lookup.
-- Whether a future MCP server should be added for richer tool calls, or whether
-  the CLI plus skill remains the right surface for V1.
+- Whether the plugin should register the existing `paxm mcp serve` command for
+  users automatically after MCP trust review.
