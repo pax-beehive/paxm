@@ -80,6 +80,8 @@ func (r runner) run(args []string) error {
 	switch args[0] {
 	case "setup":
 		return r.runSetup(args[1:])
+	case "uninstall":
+		return r.runUninstall(args[1:])
 	case "recall":
 		return r.runRecall(args[1:])
 	case "remember":
@@ -112,15 +114,15 @@ func (r runner) runSetup(args []string) error {
 	}
 
 	path := r.configFile()
-	promptReader := bufio.NewReader(r.stdin)
+	prompter := newSetupPrompter(r.stdin, r.stdout)
 	configExists := config.Exists(path)
 	if configExists && !*force {
 		if *yes {
 			return fmt.Errorf("config already exists at %s; use --force to overwrite", path)
 		}
-		overwrite, err := promptBool(promptReader, r.stdout, fmt.Sprintf("Config already exists at %s. Overwrite?", path), false)
+		overwrite, err := prompter.confirm(fmt.Sprintf("Update existing config at %s?", path), false)
 		if err != nil {
-			return err
+			return r.finishSetupPrompt(err)
 		}
 		if !overwrite {
 			fmt.Fprintln(r.stdout, "setup cancelled")
@@ -135,21 +137,24 @@ func (r runner) runSetup(args []string) error {
 	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
 	if !*yes {
 		var err error
-		selectedProviders, err = promptMultiSelect(promptReader, r.stdout, "Select memory providers to enable", providerOptions(cfg), selectedProviders)
+		selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(cfg), selectedProviders)
 		if err != nil {
-			return err
+			return r.finishSetupPrompt(err)
 		}
 		for _, providerName := range providerOptionIDs(cfg) {
 			if !selectedProviders[providerName] {
 				continue
 			}
-			if err := promptProviderInstance(promptReader, r.stdout, &cfg, providerName); err != nil {
-				return err
+			if err := promptProviderInstance(prompter.reader, prompter.output, &cfg, providerName); err != nil {
+				return r.finishSetupPrompt(err)
 			}
 		}
-		selectedHooks, err = promptMultiSelect(promptReader, r.stdout, "Select agent hooks to install", hookOptions(cfg), selectedHooks)
+		selectedHooks, err = prompter.multiSelect("Select agents for passive memory", hookOptions(cfg), selectedHooks)
 		if err != nil {
-			return err
+			return r.finishSetupPrompt(err)
+		}
+		if err := configureSelectedAgents(prompter, &cfg, selectedHooks); err != nil {
+			return r.finishSetupPrompt(err)
 		}
 	}
 	if !anySelected(selectedProviders) {
@@ -163,17 +168,21 @@ func (r runner) runSetup(args []string) error {
 			removeProviderFromDefaultProfiles(&cfg, name)
 		}
 	}
-	for name, agent := range cfg.Agents {
-		enabled := selectedHooks[name]
-		agent.Enabled = enabled
-		for eventName, eventCfg := range agent.Hooks {
-			if eventName == "user_input" {
-				eventCfg.Recall.Enabled = enabled
-			}
-			eventCfg.Write.Enabled = enabled && eventCfg.Write.Enabled
-			agent.Hooks[eventName] = eventCfg
+	if *yes {
+		for name, agent := range cfg.Agents {
+			agent.Enabled = selectedHooks[name]
+			cfg.Agents[name] = agent
 		}
-		cfg.Agents[name] = agent
+	} else {
+		writeSetupSummary(r.stdout, cfg, selectedProviders, selectedHooks)
+		apply, err := prompter.confirm("Apply this setup?", true)
+		if err != nil {
+			return r.finishSetupPrompt(err)
+		}
+		if !apply {
+			fmt.Fprintln(r.stdout, "setup cancelled")
+			return nil
+		}
 	}
 	zepUserResult, err := maybeEnsureZepUser(context.Background(), cfg)
 	if err != nil {
@@ -182,7 +191,7 @@ func (r runner) runSetup(args []string) error {
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(r.stdout, "created config: %s\n", path)
+	fmt.Fprintf(r.stdout, "saved config: %s\n", path)
 	if zepUserResult != nil {
 		status := "exists"
 		if zepUserResult.Created {
@@ -197,8 +206,11 @@ func (r runner) runSetup(args []string) error {
 		if err := removeLegacyHookShim(path, name); err != nil {
 			return err
 		}
+		if err := uninstallAgentIntegration(path, name); err != nil {
+			return fmt.Errorf("reset %s integration: %w", name, err)
+		}
 		installedScripts := make(map[string]string)
-		for _, event := range hookInstallEventsForTarget(name) {
+		for _, event := range hookInstallEventsForAgent(cfg.Agents[name]) {
 			scriptPath, err := installHookShim(path, name, event.ConfigEvent)
 			if err != nil {
 				return err
@@ -209,6 +221,12 @@ func (r runner) runSetup(args []string) error {
 		if name == "codex" {
 			fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
 		}
+		if name == "claude" {
+			if err := installClaudeGlobalHooks(claudeSettingsPath(), installedScripts); err != nil {
+				return err
+			}
+			fmt.Fprintf(r.stdout, "registered Claude Code global hook: %s\n", claudeSettingsPath())
+		}
 		if name == "pi" {
 			if err := installPiGlobalHook(piExtensionPath(), installedScripts); err != nil {
 				return err
@@ -217,6 +235,14 @@ func (r runner) runSetup(args []string) error {
 		}
 	}
 	return nil
+}
+
+func (r runner) finishSetupPrompt(err error) error {
+	if errors.Is(err, errPromptCancelled) {
+		fmt.Fprintln(r.stdout, "setup cancelled")
+		return nil
+	}
+	return err
 }
 
 func maybeEnsureZepUser(ctx context.Context, cfg config.Config) (*zepadapter.EnsureUserResult, error) {
@@ -516,6 +542,7 @@ func (r runner) executeHook(event facade.HookEvent, jsonOut bool) error {
 }
 
 type hookBufferRequest struct {
+	Action string          `json:"action,omitempty"`
 	Target string          `json:"target"`
 	Event  string          `json:"event"`
 	Raw    json.RawMessage `json:"raw"`
@@ -613,9 +640,12 @@ func (r runner) runHookDaemon(args []string) error {
 			if result.err != nil {
 				return result.err
 			}
-			flushed, err := handleHookBufferConn(context.Background(), service, result.conn, &buffer)
+			flushed, shutdown, err := handleHookBufferConn(context.Background(), service, result.conn, &buffer)
 			if err != nil {
 				fmt.Fprintf(r.stderr, "paxm hook buffer error: %s\n", err)
+			}
+			if shutdown {
+				return nil
 			}
 			if !deadline.Stop() {
 				select {
@@ -629,26 +659,51 @@ func (r runner) runHookDaemon(args []string) error {
 	}
 }
 
-func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net.Conn, buffer *[]facade.IngestInput) (int, error) {
+func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net.Conn, buffer *[]facade.IngestInput) (int, bool, error) {
 	defer conn.Close()
 	var request hookBufferRequest
 	if err := json.NewDecoder(conn).Decode(&request); err != nil {
 		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
-		return 0, err
+		return 0, false, err
+	}
+	if request.Action == "flush" || request.Action == "shutdown" {
+		flushed := len(*buffer)
+		if flushed > 0 {
+			result, err := service.IngestBatch(ctx, facade.IngestBatchInput{Items: *buffer})
+			if err != nil {
+				_ = writeJSON(conn, hookBufferResponse{
+					OK:             false,
+					Error:          err.Error(),
+					ProviderRefs:   telemetry.ProviderRefs(result.Refs),
+					ProviderErrors: result.ProviderErrors,
+				})
+				return 0, false, err
+			}
+			*buffer = nil
+			_ = writeJSON(conn, hookBufferResponse{
+				OK:             true,
+				Flushed:        flushed,
+				ProviderRefs:   telemetry.ProviderRefs(result.Refs),
+				ProviderErrors: result.ProviderErrors,
+			})
+		} else {
+			_ = writeJSON(conn, hookBufferResponse{OK: true})
+		}
+		return flushed, request.Action == "shutdown", nil
 	}
 	event, err := decodeHookEvent(request.Raw, request.Target, request.Event)
 	if err != nil {
 		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
-		return 0, err
+		return 0, false, err
 	}
 	item, ok, err := service.HookWriteItem(event)
 	if err != nil {
 		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
-		return 0, err
+		return 0, false, err
 	}
 	if !ok {
 		_ = writeJSON(conn, hookBufferResponse{OK: true})
-		return 0, nil
+		return 0, false, nil
 	}
 	bufferCfg := service.HookBufferConfig(event)
 	if !bufferCfg.Enabled {
@@ -660,7 +715,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 				ProviderRefs:   telemetry.ProviderRefs(result.Refs),
 				ProviderErrors: result.ProviderErrors,
 			})
-			return 0, err
+			return 0, false, err
 		}
 		_ = writeJSON(conn, hookBufferResponse{
 			OK:             true,
@@ -670,13 +725,13 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 			ProviderRefs:   telemetry.ProviderRefs(result.Refs),
 			ProviderErrors: result.ProviderErrors,
 		})
-		return 1, nil
+		return 1, false, nil
 	}
 	*buffer = append(*buffer, item)
 	shouldFlush := bufferCfg.Flush || (bufferCfg.FlushCount > 0 && len(*buffer) >= bufferCfg.FlushCount)
 	if !shouldFlush {
 		_ = writeJSON(conn, hookBufferResponse{OK: true, Buffered: true})
-		return 0, nil
+		return 0, false, nil
 	}
 	flushed := len(*buffer)
 	providerWrites := writeProviderRoutesForItems(service.Config(), *buffer)
@@ -689,7 +744,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 			ProviderRefs:   telemetry.ProviderRefs(result.Refs),
 			ProviderErrors: result.ProviderErrors,
 		})
-		return 0, err
+		return 0, false, err
 	}
 	*buffer = nil
 	_ = writeJSON(conn, hookBufferResponse{
@@ -700,7 +755,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 		ProviderRefs:   telemetry.ProviderRefs(result.Refs),
 		ProviderErrors: result.ProviderErrors,
 	})
-	return flushed, nil
+	return flushed, false, nil
 }
 
 func (r runner) sendHookToBuffer(event facade.HookEvent) (hookBufferResponse, error) {
@@ -766,6 +821,29 @@ func sendHookBufferRequest(socket string, event facade.HookEvent) (hookBufferRes
 		return hookBufferResponse{}, err
 	}
 	return response, nil
+}
+
+func flushExistingHookBuffer(configPath string, shutdown bool) error {
+	conn, err := net.DialTimeout("unix", hookSocketPath(configPath), 250*time.Millisecond)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	action := "flush"
+	if shutdown {
+		action = "shutdown"
+	}
+	if err := json.NewEncoder(conn).Encode(hookBufferRequest{Action: action}); err != nil {
+		return err
+	}
+	var response hookBufferResponse
+	if err := json.NewDecoder(conn).Decode(&response); err != nil {
+		return err
+	}
+	if !response.OK {
+		return errors.New(firstNonEmpty(response.Error, "hook buffer flush failed"))
+	}
+	return nil
 }
 
 func decodeHookEvent(raw []byte, target, eventName string) (facade.HookEvent, error) {
@@ -951,6 +1029,7 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout)
 	fmt.Fprintln(r.stdout, "Usage:")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup")
+	fmt.Fprintln(r.stdout, "  paxm [--config PATH] uninstall [--agent AGENT] [--yes]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--limit N] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --text TEXT")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
@@ -1598,12 +1677,45 @@ func hookOptions(cfg config.Config) []setupOption {
 	for name := range cfg.Agents {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool {
+		leftPriority := agentOptionPriority(names[i])
+		rightPriority := agentOptionPriority(names[j])
+		if leftPriority == rightPriority {
+			return names[i] < names[j]
+		}
+		return leftPriority < rightPriority
+	})
 	options := make([]setupOption, 0, len(names))
 	for _, name := range names {
-		options = append(options, setupOption{ID: name, Label: name})
+		options = append(options, setupOption{ID: name, Label: agentDisplayName(name)})
 	}
 	return options
+}
+
+func agentOptionPriority(name string) int {
+	switch name {
+	case "codex":
+		return 0
+	case "claude":
+		return 1
+	case "pi":
+		return 2
+	default:
+		return 100
+	}
+}
+
+func agentDisplayName(name string) string {
+	switch name {
+	case "codex":
+		return "Codex"
+	case "claude":
+		return "Claude Code"
+	case "pi":
+		return "Pi"
+	default:
+		return name
+	}
 }
 
 func cfgProviderEnabled(cfg config.Config) map[string]bool {
@@ -2001,7 +2113,7 @@ func removeLegacyHookShim(configPath, target string) error {
 
 type hookInstallEvent struct {
 	ConfigEvent string
-	CodexEvent  string
+	NativeEvent string
 	Matcher     string
 	Status      string
 }
@@ -2010,30 +2122,32 @@ func installedHookEvents() []hookInstallEvent {
 	return []hookInstallEvent{
 		{
 			ConfigEvent: "session_start",
-			CodexEvent:  "SessionStart",
+			NativeEvent: "SessionStart",
 			Matcher:     "startup|resume|clear|compact",
 			Status:      "Buffering paxm session memory",
 		},
 		{
 			ConfigEvent: "user_input",
-			CodexEvent:  "UserPromptSubmit",
+			NativeEvent: "UserPromptSubmit",
 			Status:      "Recalling paxm memory",
 		},
 		{
 			ConfigEvent: "turn_end",
-			CodexEvent:  "Stop",
+			NativeEvent: "Stop",
 			Status:      "Buffering paxm turn memory",
 		},
 	}
 }
 
-func hookInstallEventsForTarget(target string) []hookInstallEvent {
-	if target == "pi" {
-		userInput, _ := hookInstallEventByConfig("user_input")
-		turnEnd, _ := hookInstallEventByConfig("turn_end")
-		return []hookInstallEvent{userInput, turnEnd}
+func hookInstallEventsForAgent(agent config.AgentConfig) []hookInstallEvent {
+	events := make([]hookInstallEvent, 0, len(agent.Hooks))
+	for _, installEvent := range installedHookEvents() {
+		hook, ok := agent.Hooks[installEvent.ConfigEvent]
+		if ok && (hook.Recall.Enabled || hook.Write.Enabled) {
+			events = append(events, installEvent)
+		}
 	}
-	return installedHookEvents()
+	return events
 }
 
 func hookInstallEventByConfig(configEvent string) (hookInstallEvent, bool) {
@@ -2059,7 +2173,11 @@ func installHookShim(configPath, target, event string) (string, error) {
 		binaryPath = "paxm"
 	}
 	scriptPath := filepath.Join(hooksDir, target+"-"+event)
-	script := "#!/bin/sh\nexec " + shellQuote(binaryPath) + " --config " + shellQuote(config.ExpandPath(configPath)) + " __hook --target " + shellQuote(target) + " --event " + shellQuote(event) + " --json\n"
+	outputFlag := " --json"
+	if target == "claude" {
+		outputFlag = ""
+	}
+	script := "#!/bin/sh\nexec " + shellQuote(binaryPath) + " --config " + shellQuote(config.ExpandPath(configPath)) + " __hook --target " + shellQuote(target) + " --event " + shellQuote(event) + outputFlag + "\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		return "", err
 	}
@@ -2086,6 +2204,21 @@ func codexConfigPath() string {
 	return filepath.Join(config.ExpandPath(codexHome), "config.toml")
 }
 
+func claudeSettingsPath() string {
+	if path := os.Getenv("PAXM_CLAUDE_SETTINGS"); path != "" {
+		return config.ExpandPath(path)
+	}
+	claudeConfigDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if claudeConfigDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return filepath.Join(".claude", "settings.json")
+		}
+		claudeConfigDir = filepath.Join(home, ".claude")
+	}
+	return filepath.Join(config.ExpandPath(claudeConfigDir), "settings.json")
+}
+
 func piAgentDir() string {
 	if path := os.Getenv("PAXM_PI_AGENT_DIR"); path != "" {
 		return config.ExpandPath(path)
@@ -2107,11 +2240,8 @@ func piExtensionPath() string {
 func installPiGlobalHook(path string, scriptPaths map[string]string) error {
 	userInputScriptPath := strings.TrimSpace(scriptPaths["user_input"])
 	turnEndScriptPath := strings.TrimSpace(scriptPaths["turn_end"])
-	if userInputScriptPath == "" {
-		return errors.New("pi hook requires a user_input hook shim")
-	}
-	if turnEndScriptPath == "" {
-		return errors.New("pi hook requires a turn_end hook shim")
+	if userInputScriptPath == "" && turnEndScriptPath == "" {
+		return errors.New("pi hook requires at least one hook shim")
 	}
 	path = config.ExpandPath(path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -2213,6 +2343,7 @@ function runPaxmHook(command: string, payload: unknown, ctx: any, notifyOnFailur
 }
 
 function flushTurn(triggerEvent: string, event: any, ctx: any): void {
+  if (paxmTurnEndHookCommand === "") return;
   const resolvedCtx = activeCtx(ctx);
   const messages = turnMessages;
   if (messages.length === 0 && lastPrompt.trim() === "") return;
@@ -2270,15 +2401,18 @@ export default function (pi: ExtensionAPI) {
   });
 
   onRuntimeEvent("message_end", (event, ctx) => {
+    if (paxmTurnEndHookCommand === "") return;
     activeCtx(ctx);
     appendPiMessage(event?.message, "message_end");
   });
 
   onRuntimeEvent("turn_end", (event, ctx) => {
+    if (paxmTurnEndHookCommand === "") return;
     flushTurn("turn_end", event, ctx);
   });
 
   onRuntimeEvent("session_shutdown", (event, ctx) => {
+    if (paxmTurnEndHookCommand === "") return;
     flushTurn("session_shutdown", event, ctx);
     lastPrompt = "";
     turnMessages = [];
@@ -2287,7 +2421,10 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     const resolvedCtx = activeCtx(ctx);
     lastPrompt = typeof event.prompt === "string" ? event.prompt : "";
-    appendBufferedMessage("user", lastPrompt, "before_agent_start");
+    if (paxmTurnEndHookCommand !== "") {
+      appendBufferedMessage("user", lastPrompt, "before_agent_start");
+    }
+    if (paxmUserInputHookCommand === "") return;
 
     const payload = {
       schema_version: "paxm.pi.user_input.v1",
@@ -2356,8 +2493,122 @@ func installCodexGlobalHook(path, scriptPath, configEvent string) error {
 		return nil
 	}
 
-	updated := upsertCodexHook(content, installEvent.CodexEvent, entry)
+	updated := upsertCodexHook(content, installEvent.NativeEvent, entry)
 	return writeCodexConfig(path, contentBytes, updated)
+}
+
+type claudeHookHandler struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+	Timeout int    `json:"timeout,omitempty"`
+}
+
+type claudeHookGroup struct {
+	Matcher string              `json:"matcher,omitempty"`
+	Hooks   []claudeHookHandler `json:"hooks"`
+}
+
+func installClaudeGlobalHooks(path string, scriptPaths map[string]string) error {
+	path = config.ExpandPath(path)
+	original, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	settings := make(map[string]json.RawMessage)
+	if len(bytesTrimSpace(original)) > 0 {
+		if err := json.Unmarshal(original, &settings); err != nil {
+			return fmt.Errorf("decode Claude Code settings %s: %w", path, err)
+		}
+	}
+	hooks := make(map[string][]json.RawMessage)
+	if rawHooks := settings["hooks"]; len(bytesTrimSpace(rawHooks)) > 0 && string(bytesTrimSpace(rawHooks)) != "null" {
+		if err := json.Unmarshal(rawHooks, &hooks); err != nil {
+			return fmt.Errorf("decode Claude Code hooks %s: %w", path, err)
+		}
+	}
+	changed := false
+	hasHook := false
+	for _, installEvent := range installedHookEvents() {
+		scriptPath := strings.TrimSpace(scriptPaths[installEvent.ConfigEvent])
+		if scriptPath == "" {
+			continue
+		}
+		hasHook = true
+		command := shellQuote(scriptPath)
+		alreadyInstalled := false
+		for _, rawGroup := range hooks[installEvent.NativeEvent] {
+			if claudeHookGroupHasCommand(rawGroup, command, scriptPath) {
+				alreadyInstalled = true
+				break
+			}
+		}
+		if alreadyInstalled {
+			continue
+		}
+		group := claudeHookGroup{
+			Matcher: installEvent.Matcher,
+			Hooks: []claudeHookHandler{{
+				Type:    "command",
+				Command: command,
+				Timeout: 60,
+			}},
+		}
+		groupBytes, err := json.Marshal(group)
+		if err != nil {
+			return err
+		}
+		hooks[installEvent.NativeEvent] = append(hooks[installEvent.NativeEvent], groupBytes)
+		changed = true
+	}
+	if !hasHook {
+		return errors.New("Claude Code hook requires at least one hook shim")
+	}
+	if !changed {
+		return nil
+	}
+	hooksBytes, err := json.Marshal(hooks)
+	if err != nil {
+		return err
+	}
+	settings["hooks"] = hooksBytes
+	return writeClaudeSettings(path, original, settings)
+}
+
+func claudeHookGroupHasCommand(rawGroup json.RawMessage, command, scriptPath string) bool {
+	var group struct {
+		Hooks []struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(rawGroup, &group); err != nil {
+		return false
+	}
+	for _, hook := range group.Hooks {
+		if hook.Command == command || hook.Command == scriptPath || strings.Contains(hook.Command, scriptPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeClaudeSettings(path string, original []byte, settings map[string]json.RawMessage) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if len(original) > 0 {
+		backupPath := path + ".paxm.bak"
+		if _, err := os.Stat(backupPath); errors.Is(err, os.ErrNotExist) {
+			if err := os.WriteFile(backupPath, original, 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	updated, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	updated = append(updated, '\n')
+	return os.WriteFile(path, updated, 0o600)
 }
 
 func writeCodexConfig(path string, original []byte, updated string) error {
@@ -2592,47 +2843,161 @@ func writeRecallMarkdown(w io.Writer, result facade.RecallResult) {
 }
 
 func writeHistorySummary(w io.Writer, summary telemetry.HistorySummary) {
-	fmt.Fprintf(w, "paxm history (last %d days)\n", summary.Days)
+	fmt.Fprintln(w, "== paxm history ==")
+	fmt.Fprintf(w, "window: last %d days\n", summary.Days)
 	if summary.Totals.Events == 0 {
+		fmt.Fprintln(w, "status: quiet")
+		fmt.Fprintln(w)
 		fmt.Fprintln(w, "no telemetry events recorded yet")
-		fmt.Fprintf(w, "logs: %s\n", summary.Storage.EventsFile)
-		fmt.Fprintf(w, "metrics: %s\n", summary.Storage.MetricsFile)
+		writeHistoryTable(w, "storage", []string{"file", "path"}, [][]string{
+			{"events", summary.Storage.EventsFile},
+			{"metrics", summary.Storage.MetricsFile},
+		})
 		return
 	}
-	fmt.Fprintf(w, "recalls: %d, hits: %d, inserted: %d\n", summary.Totals.Recalls, summary.Totals.Hits, summary.Totals.Inserted)
-	fmt.Fprintf(w, "writes: %d, refs: %d, flushes: %d\n", summary.Totals.Writes, summary.Totals.Refs, summary.Totals.Flushes)
-	fmt.Fprintf(w, "events: %d, successes: %d, errors: %d, provider_errors: %d\n", summary.Totals.Events, summary.Totals.Successes, summary.Totals.Errors, summary.Totals.ProviderErrors)
-	fmt.Fprintf(w, "storage: events=%dB total=%dB max=%dB files=%d\n", summary.Storage.EventBytes, summary.Storage.TotalBytes, summary.Storage.MaxBytes, summary.Storage.MaxFiles)
+	fmt.Fprintf(w, "status: %s\n", historyStatus(summary.Totals))
+	writeHistoryTable(w, "overview", []string{"metric", "value"}, [][]string{
+		{"events", formatInt(summary.Totals.Events)},
+		{"successes", formatInt(summary.Totals.Successes)},
+		{"errors", formatInt(summary.Totals.Errors)},
+		{"skipped", formatInt(summary.Totals.Skipped)},
+		{"provider_errors", formatInt(summary.Totals.ProviderErrors)},
+	})
+	writeHistoryTable(w, "recall funnel", []string{"recalls", "hits", "inserted", "insert_rate"}, [][]string{{
+		formatInt(summary.Totals.Recalls),
+		formatInt(summary.Totals.Hits),
+		formatInt(summary.Totals.Inserted),
+		formatPercent(summary.Totals.Inserted, summary.Totals.Hits),
+	}})
+	providerWrites := sumNamedCounters(summary.Providers, func(counter telemetry.Counter) int { return counter.Writes })
+	providerRefs := sumNamedCounters(summary.Providers, func(counter telemetry.Counter) int { return counter.Refs })
+	writeHistoryTable(w, "write pipeline", []string{"write_events", "items", "provider_writes", "provider_refs", "flushes", "provider_ref_rate"}, [][]string{{
+		formatInt(summary.Totals.Writes),
+		formatInt(summary.Totals.Items),
+		formatInt(providerWrites),
+		formatInt(providerRefs),
+		formatInt(summary.Totals.Flushes),
+		formatPercent(providerRefs, providerWrites),
+	}})
+	writeHistoryTable(w, "storage", []string{"events_bytes", "total_bytes", "max_bytes", "files"}, [][]string{{
+		formatInt64(summary.Storage.EventBytes),
+		formatInt64(summary.Storage.TotalBytes),
+		formatInt64(summary.Storage.MaxBytes),
+		formatInt(summary.Storage.MaxFiles),
+	}})
 	if len(summary.Daily) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "by day:")
+		rows := make([][]string, 0, len(summary.Daily))
 		for _, day := range summary.Daily {
-			fmt.Fprintf(w, "  %s recalls=%d hits=%d inserted=%d writes=%d errors=%d\n", day.Date, day.Counter.Recalls, day.Counter.Hits, day.Counter.Inserted, day.Counter.Writes, day.Counter.Errors)
+			rows = append(rows, []string{
+				day.Date,
+				formatInt(day.Counter.Recalls),
+				formatInt(day.Counter.Hits),
+				formatInt(day.Counter.Inserted),
+				formatInt(day.Counter.Writes),
+				formatInt(day.Counter.Errors),
+			})
 		}
+		writeHistoryTable(w, "by day", []string{"date", "recalls", "hits", "inserted", "writes", "errors"}, rows)
 	}
-	writeNamedCounters(w, "by profile:", summary.Profiles, func(counter telemetry.Counter) string {
-		return fmt.Sprintf("recalls=%d hits=%d inserted=%d writes=%d errors=%d", counter.Recalls, counter.Hits, counter.Inserted, counter.Writes, counter.Errors)
+	writeNamedCounters(w, "by profile", []string{"profile", "recalls", "hits", "inserted", "writes", "errors"}, summary.Profiles, func(counter telemetry.Counter) []string {
+		return []string{formatInt(counter.Recalls), formatInt(counter.Hits), formatInt(counter.Inserted), formatInt(counter.Writes), formatInt(counter.Errors)}
 	})
-	writeNamedCounters(w, "by agent:", summary.Agents, func(counter telemetry.Counter) string {
-		return fmt.Sprintf("passive_recalls=%d passive_writes=%d inserted=%d flushes=%d errors=%d", counter.Recalls, counter.Writes, counter.Inserted, counter.Flushes, counter.Errors)
+	writeNamedCounters(w, "by agent", []string{"agent", "passive_recalls", "passive_writes", "inserted", "flushes", "errors"}, summary.Agents, func(counter telemetry.Counter) []string {
+		return []string{formatInt(counter.Recalls), formatInt(counter.Writes), formatInt(counter.Inserted), formatInt(counter.Flushes), formatInt(counter.Errors)}
 	})
-	writeNamedCounters(w, "by hook:", summary.HookEvents, func(counter telemetry.Counter) string {
-		return fmt.Sprintf("recalls=%d inserted=%d writes=%d flushes=%d errors=%d", counter.Recalls, counter.Inserted, counter.Writes, counter.Flushes, counter.Errors)
+	writeNamedCounters(w, "by hook", []string{"hook", "recalls", "inserted", "writes", "flushes", "errors"}, summary.HookEvents, func(counter telemetry.Counter) []string {
+		return []string{formatInt(counter.Recalls), formatInt(counter.Inserted), formatInt(counter.Writes), formatInt(counter.Flushes), formatInt(counter.Errors)}
 	})
-	writeNamedCounters(w, "by provider:", summary.Providers, func(counter telemetry.Counter) string {
-		return fmt.Sprintf("recalls=%d hits=%d writes=%d refs=%d provider_errors=%d", counter.Recalls, counter.Hits, counter.Writes, counter.Refs, counter.ProviderErrors)
+	writeNamedCounters(w, "by provider", []string{"provider", "recalls", "hits", "writes", "refs", "provider_errors"}, summary.Providers, func(counter telemetry.Counter) []string {
+		return []string{formatInt(counter.Recalls), formatInt(counter.Hits), formatInt(counter.Writes), formatInt(counter.Refs), formatInt(counter.ProviderErrors)}
 	})
 }
 
-func writeNamedCounters(w io.Writer, title string, counters []telemetry.NamedCounter, format func(telemetry.Counter) string) {
+func writeNamedCounters(w io.Writer, title string, headers []string, counters []telemetry.NamedCounter, values func(telemetry.Counter) []string) {
 	if len(counters) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(counters))
+	for _, counter := range counters {
+		rows = append(rows, append([]string{counter.Name}, values(counter.Counter)...))
+	}
+	writeHistoryTable(w, title, headers, rows)
+}
+
+func writeHistoryTable(w io.Writer, title string, headers []string, rows [][]string) {
+	if len(rows) == 0 {
 		return
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, title)
-	for _, counter := range counters {
-		fmt.Fprintf(w, "  %s %s\n", counter.Name, format(counter.Counter))
+	widths := make([]int, len(headers))
+	for i, header := range headers {
+		widths[i] = len(header)
 	}
+	for _, row := range rows {
+		for i := range headers {
+			if i < len(row) && len(row[i]) > widths[i] {
+				widths[i] = len(row[i])
+			}
+		}
+	}
+	writeHistoryRow(w, headers, widths)
+	separator := make([]string, len(headers))
+	for i, width := range widths {
+		separator[i] = strings.Repeat("-", width)
+	}
+	writeHistoryRow(w, separator, widths)
+	for _, row := range rows {
+		writeHistoryRow(w, row, widths)
+	}
+}
+
+func writeHistoryRow(w io.Writer, row []string, widths []int) {
+	for i, width := range widths {
+		value := ""
+		if i < len(row) {
+			value = row[i]
+		}
+		if i == 0 {
+			fmt.Fprintf(w, "  %-*s", width, value)
+			continue
+		}
+		fmt.Fprintf(w, "  %*s", width, value)
+	}
+	fmt.Fprintln(w)
+}
+
+func historyStatus(counter telemetry.Counter) string {
+	if counter.Errors > 0 || counter.ProviderErrors > 0 {
+		return "attention"
+	}
+	if counter.Skipped > 0 {
+		return "partial"
+	}
+	return "ok"
+}
+
+func sumNamedCounters(counters []telemetry.NamedCounter, value func(telemetry.Counter) int) int {
+	total := 0
+	for _, counter := range counters {
+		total += value(counter.Counter)
+	}
+	return total
+}
+
+func formatPercent(numerator, denominator int) string {
+	if denominator == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.1f%%", float64(numerator)*100/float64(denominator))
+}
+
+func formatInt(value int) string {
+	return strconv.Itoa(value)
+}
+
+func formatInt64(value int64) string {
+	return strconv.FormatInt(value, 10)
 }
 
 func firstNonEmpty(values ...string) string {

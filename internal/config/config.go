@@ -274,6 +274,66 @@ func DefaultConfig(configPath string) Config {
 			},
 		},
 		Agents: map[string]AgentConfig{
+			"claude": {
+				Enabled: false,
+				ActiveRecall: ActiveRecallConfig{
+					Enabled: true,
+					Profile: "default",
+					Output:  "markdown",
+				},
+				Hooks: map[string]AgentHookConfig{
+					"session_start": {
+						Write: HookWriteConfig{
+							Enabled:  true,
+							Profile:  "default",
+							Template: "Claude Code session started.\n\nEvent:\n{{ .raw_json }}",
+							Mode:     "session_start",
+							Buffer: HookBufferConfig{
+								Enabled:    true,
+								FlushCount: 10,
+							},
+						},
+					},
+					"user_input": {
+						Recall: HookRecallConfig{
+							Enabled:       true,
+							Profile:       "passive",
+							QueryTemplate: "{{ .prompt }}",
+							MaxResults:    2,
+							Output:        "markdown",
+							Insertion: HookInsertionConfig{
+								MinScore:          0.8,
+								MaxItems:          2,
+								RequireQueryTerms: true,
+							},
+							Initial: defaultInitialHookRecall(),
+						},
+						Write: HookWriteConfig{
+							Enabled:  true,
+							Profile:  "default",
+							Template: "Claude Code user input:\n{{ .prompt }}\n\nEvent:\n{{ .raw_json }}",
+							Mode:     "user_input",
+							Buffer: HookBufferConfig{
+								Enabled:    true,
+								FlushCount: 10,
+							},
+						},
+					},
+					"turn_end": {
+						Write: HookWriteConfig{
+							Enabled:  true,
+							Profile:  "default",
+							Template: "Claude Code turn ended.\n\nEvent:\n{{ .raw_json }}",
+							Mode:     "turn_end",
+							Buffer: HookBufferConfig{
+								Enabled:    true,
+								Flush:      true,
+								FlushCount: 10,
+							},
+						},
+					},
+				},
+			},
 			"codex": {
 				Enabled: true,
 				ActiveRecall: ActiveRecallConfig{
@@ -344,7 +404,7 @@ func DefaultConfig(configPath string) Config {
 				Hooks: map[string]AgentHookConfig{
 					"user_input": {
 						Recall: HookRecallConfig{
-							Enabled:       false,
+							Enabled:       true,
 							Profile:       "passive",
 							QueryTemplate: "{{ .prompt }}",
 							MaxResults:    2,

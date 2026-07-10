@@ -89,6 +89,74 @@ write_profiles:
         required: true
 
 agents:
+  claude:
+    enabled: false
+    active_recall:
+      enabled: true
+      profile: default
+      output: markdown
+    hooks:
+      session_start:
+        write:
+          enabled: true
+          profile: default
+          template: |
+            Claude Code session started.
+
+            Event:
+            {{ .raw_json }}
+          mode: session_start
+          buffer:
+            enabled: true
+            flush_count: 10
+
+      user_input:
+        recall:
+          enabled: true
+          profile: passive
+          query_template: "{{ .prompt }}"
+          max_results: 2
+          output: markdown
+          insertion:
+            min_score: 0.8
+            max_items: 2
+            require_query_terms: true
+          initial:
+            enabled: true
+            profile: passive_initial
+            max_results: 5
+            insertion:
+              min_score: 0.35
+              max_items: 5
+        write:
+          enabled: true
+          profile: default
+          template: |
+            Claude Code user input:
+            {{ .prompt }}
+
+            Event:
+            {{ .raw_json }}
+          mode: user_input
+          buffer:
+            enabled: true
+            flush_count: 10
+
+      turn_end:
+        write:
+          enabled: true
+          profile: default
+          template: |
+            Claude Code turn ended.
+
+            Event:
+            {{ .raw_json }}
+          mode: turn_end
+          buffer:
+            enabled: true
+            flush: true
+            flush_count: 10
+
   codex:
     enabled: true
     active_recall:
@@ -350,10 +418,17 @@ write profile unless another profile is selected.
 ## Agents
 
 `agents.<name>.active_recall` controls explicit recall calls made by that agent
-or by a skill running inside that agent.
+or by a skill running inside that agent. Setup preserves this field for
+compatibility but does not install or configure active recall skills.
 
 `agents.codex.hooks.user_input.recall` controls passive recall from the Codex
 `UserPromptSubmit` hook.
+
+`agents.claude.hooks.user_input.recall` controls passive recall from Claude
+Code's `UserPromptSubmit` hook. Setup registers Claude Code hooks in
+`~/.claude/settings.json`, or under `CLAUDE_CONFIG_DIR` when it is set. The
+settings merge preserves existing hooks and writes a one-time `.paxm.bak`
+backup before changing an existing file.
 
 `agents.pi.hooks.user_input.recall` controls passive recall from Pi's
 `before_agent_start` extension event.
@@ -380,14 +455,19 @@ Hook recall fields:
   recent session keys locally and applies this looser recall profile only once
   per target/session before falling back to the normal strict hook config.
 
-`agents.<name>.hooks.*.write` controls passive hook writes. The built-in Codex
-event names are:
+`agents.<name>.hooks.*.write` controls passive hook writes. Codex and Claude
+Code use the same internal event names:
 
-- `session_start`: Codex `SessionStart`; writes a session-start event into the
+- `session_start`: native `SessionStart`; writes a session-start event into the
   buffer.
-- `user_input`: Codex `UserPromptSubmit`; returns recall output and writes the
+- `user_input`: native `UserPromptSubmit`; returns recall output and writes the
   user input event into the buffer.
-- `turn_end`: Codex `Stop`; writes a turn-end event and flushes the buffer.
+- `turn_end`: native `Stop`; writes a turn-end event and flushes the buffer.
+
+Claude Code supplies `last_assistant_message` in the raw `Stop` payload, so the
+default `turn_end` template sends the final assistant response to the configured
+write providers along with the rest of the event. Claude Code receives admitted
+recall hits as Markdown context from the synchronous `UserPromptSubmit` hook.
 
 For Pi, `turn_end` maps to Pi's runtime `turn_end` event and receives buffered
 Pi messages from the generated extension.
@@ -414,6 +494,20 @@ JSON-RPC plugins decide their own extraction or storage behavior.
 The hook buffer is process memory owned by a short-lived local daemon. It is not
 durable; if the daemon exits before a flush, buffered hook write items can be
 lost.
+
+## Setup And Uninstall
+
+In a TTY, multi-select prompts use up/down, space, and enter. After selecting
+agents, setup configures each one in the fixed order Codex, Claude Code, and Pi.
+Per-agent setup controls only passive recall, passive write, profiles, and write
+events. Non-TTY input retains the numbered selector for scripts and tests.
+
+`paxm uninstall` removes every built-in passive integration. Pass
+`--agent codex`, `--agent claude`, or `--agent pi` to remove one. The command
+preserves hook details in paxm config while setting the selected agent's
+`enabled` field to false, so a later setup can reuse the previous choices.
+Provider config, memory data, telemetry, active skills, the binary, and `.paxm.bak`
+files are not removed.
 
 ## Telemetry
 

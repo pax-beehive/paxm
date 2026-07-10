@@ -63,7 +63,22 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	if hook.Initial.Insertion.MinScore != 0.35 || hook.Initial.Insertion.MaxItems != 5 || hook.Initial.Insertion.RequireQueryTerms {
 		t.Fatalf("unexpected initial insertion policy: %#v", hook.Initial.Insertion)
 	}
+	claude := cfg.Agents["claude"]
+	if claude.Enabled {
+		t.Fatalf("claude hooks should be opt-in by default: %#v", claude)
+	}
+	claudeRecall := claude.Hooks["user_input"].Recall
+	if !claudeRecall.Enabled || claudeRecall.Profile != "passive" || claudeRecall.Initial == nil || claudeRecall.Initial.Profile != "passive_initial" {
+		t.Fatalf("unexpected Claude Code passive recall defaults: %#v", claudeRecall)
+	}
+	claudeTurnEnd := claude.Hooks["turn_end"].Write
+	if !claudeTurnEnd.Enabled || claudeTurnEnd.Mode != "turn_end" || !claudeTurnEnd.Buffer.Flush {
+		t.Fatalf("unexpected Claude Code turn-end defaults: %#v", claudeTurnEnd)
+	}
 	piTurnEnd := cfg.Agents["pi"].Hooks["turn_end"].Write
+	if !cfg.Agents["pi"].Hooks["user_input"].Recall.Enabled {
+		t.Fatalf("pi passive recall should be available when the agent is selected: %#v", cfg.Agents["pi"])
+	}
 	if !piTurnEnd.Enabled || piTurnEnd.Profile != "default" || piTurnEnd.Mode != "turn_end" || !piTurnEnd.Buffer.Flush {
 		t.Fatalf("pi turn_end should default to best-effort buffered write: %#v", piTurnEnd)
 	}

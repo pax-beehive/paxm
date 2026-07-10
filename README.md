@@ -37,25 +37,30 @@ paxm setup
 paxm config doctor
 ```
 
-`paxm setup` is where the user chooses memory providers and agent hooks. Active
-recall requires at least one enabled readable provider. The SQLite provider works
-without an API key; remote providers such as Zep or Mem0 require the user to
-provide their connection details during setup.
+`paxm setup` is where the user chooses memory providers and passive agent
+integrations. In a terminal, use up/down to move, space to toggle, and enter to
+confirm. Selected agents are configured one at a time for passive recall and
+passive writes. Active recall skills are installed separately by the user. The
+SQLite provider works without an API key; remote providers such as Zep or Mem0
+require the user to provide their connection details during setup.
 
-To install the skill for Codex, ask an agent to read this repository, inspect
-`skills/paxm/SKILL.md`, and install the `paxm` skill into the active Codex skill
-directory. A direct local install looks like:
+To install the skill for Codex or Claude Code, ask an agent to read this
+repository, inspect `skills/paxm/SKILL.md`, and install the `paxm` skill into the
+active agent skill directory. Direct local installs look like:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 cp -R skills/paxm "${CODEX_HOME:-$HOME/.codex}/skills/paxm"
+
+mkdir -p "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
+cp -R skills/paxm "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/paxm"
 ```
 
 ## V1 Shape
 
 ```text
 Human setup:
-  paxm setup  # choose providers and agent hooks interactively
+  paxm setup  # choose providers and passive agent integrations interactively
 
 Agent active recall:
   paxm recall --query "what did we decide?" --limit 10 --json
@@ -312,6 +317,10 @@ telemetry:
   query_preview_chars: 80
 ```
 
+The generated config also includes an opt-in `agents.claude` entry with the
+same `session_start`, `user_input`, and `turn_end` lifecycle as Codex. Run
+`paxm setup` and select `claude` to install it.
+
 Multiple enabled provider instances are supported by configuration. The key
 under `providers` is an instance name, not the adapter type, so configs can have
 multiple `mem0` or `jsonrpc` instances such as `mem0_personal`, `mem0_team`, and
@@ -339,7 +348,14 @@ Custom plugin providers are supported with `type: jsonrpc`. V1 supports stdio
 plugins: paxm invokes the configured command with a JSON-RPC 2.0 request for
 `paxm.health`, `paxm.search`, `paxm.put`, or optional `paxm.putBatch`.
 
-`paxm setup` is the interactive entry point for changing provider and hook choices. It uses numbered selectors for memory providers and agent hooks, then writes the paxm config, installs selected hook shims, and registers selected agent integrations. Codex hooks are registered in the user-level Codex config. Pi support is installed as a Pi extension.
+`paxm setup` is the interactive entry point for changing provider and passive
+integration choices. TTY sessions use checkbox selectors; piped input retains
+the numbered text fallback. After the agent selector, each selected agent is
+configured in stable order for passive recall profile, passive write profile,
+and write events. Setup shows a summary before saving, installs only enabled
+hook events, and does not install active recall skills. Codex hooks are
+registered in the user-level Codex config, Claude Code hooks in the user-level
+Claude settings, and Pi support as a Pi extension.
 
 `paxm history` reads local telemetry metrics and summarizes recall frequency,
 hits, hook insertions, writes, provider errors, and storage usage. It breaks
@@ -370,6 +386,23 @@ profile. The buffer lives in a short-lived local daemon and is intentionally not
 durable. Codex may still require you to review and trust the new non-managed
 hooks with `/hooks` before they run.
 
+For Claude Code, setup writes three shims and updates the user-level settings:
+
+```text
+~/.config/paxm/hooks/claude-session_start
+~/.config/paxm/hooks/claude-user_input
+~/.config/paxm/hooks/claude-turn_end
+~/.claude/settings.json
+```
+
+The settings update preserves existing hooks, avoids duplicate paxm entries,
+and creates `~/.claude/settings.json.paxm.bak` before the first modification.
+Claude Code `SessionStart`, `UserPromptSubmit`, and `Stop` map to paxm
+`session_start`, `user_input`, and `turn_end`. Recall is returned as plain
+Markdown from `UserPromptSubmit`, which Claude Code adds to the prompt context.
+The `Stop` payload includes Claude Code's `last_assistant_message`; paxm writes
+that event and flushes the buffered session/user/turn evidence.
+
 For Pi, setup writes paxm hook shims and registers a Pi extension:
 
 ```text
@@ -385,6 +418,27 @@ the paxm `user_input` hook shim. It also buffers the current prompt and Pi
 flush. Because Pi `message_end` and `turn_end` are runtime event-bus events
 rather than the typed `before_agent_start` surface, Pi passive writes are
 best-effort and should be verified with `paxm history`.
+
+## Uninstall Passive Integrations
+
+Remove all paxm-managed passive agent integrations:
+
+```bash
+paxm uninstall
+```
+
+Remove only one integration, or skip confirmation for automation:
+
+```bash
+paxm uninstall --agent claude
+paxm uninstall --agent codex --yes
+```
+
+Uninstall disables the selected agent in paxm config, removes only paxm-owned
+hook entries and shims, and best-effort flushes the hook buffer first. It does
+not delete provider configuration, SQLite or remote memory data, telemetry,
+the paxm binary, settings backups, or active recall skills installed by the
+user. Repeating the command is safe.
 
 ## Releases
 

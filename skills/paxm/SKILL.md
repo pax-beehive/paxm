@@ -30,7 +30,7 @@ If `paxm config doctor` says config is missing or invalid, the user needs one in
 paxm setup
 ```
 
-`paxm setup` lets the user choose memory provider instances and agent hooks. Active recall needs at least one enabled readable provider instance. `sqlite` works without an API key; remote providers such as Zep or Mem0 require the user to provide their own connection details during setup, and JSON-RPC plugin providers require a local plugin command. Passive hook recall only works after hooks are installed by setup, but active commands still work independently.
+`paxm setup` lets the user choose memory provider instances and passive agent integrations for Codex, Claude Code, or Pi. It does not install active recall skills; the user owns that installation. Active recall needs at least one enabled readable provider instance. `sqlite` works without an API key; remote providers such as Zep or Mem0 require the user to provide their own connection details during setup, and JSON-RPC plugin providers require a local plugin command. Passive hook recall only works after hooks are installed by setup, but active commands still work independently.
 
 If the user gives a config path, pass it through every command:
 
@@ -114,5 +114,6 @@ Use this when the user asks whether passive recall fired, why a memory was not r
 - Prefer `--json` for agent consumption because it includes structured scores and provider fields.
 - Keep `--limit` small by default; use `--limit 5` or higher only when the task genuinely needs broader context.
 - Do not run `paxm setup` silently. It is interactive and changes user-owned config and hooks.
+- Do not run `paxm uninstall` silently. It removes passive agent integrations; use `--agent` to scope cleanup and `--yes` only with explicit user approval.
 - Do not edit paxm config files by hand unless the user explicitly asks; prefer `paxm setup` for configuration.
 - Do not treat passive hook behavior as guaranteed unless setup installed hooks and history shows events.

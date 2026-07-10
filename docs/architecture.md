@@ -98,8 +98,8 @@ write profiles.
 
 ## Hook Behavior
 
-V1 installs agent hook integrations through `paxm setup`. Codex has three
-built-in hook shims:
+V1 installs agent hook integrations through `paxm setup`. Codex and Claude Code
+use three native lifecycle hooks:
 
 ```text
 SessionStart      -> session_start
@@ -135,6 +135,20 @@ does not store prompt text.
 `turn_end` appends a write item and flushes the buffer to the configured write
 profile. The buffer is owned by a short-lived local Unix-socket daemon and lives
 only in process memory. It is intentionally not durable.
+
+TTY setup uses terminal checkbox/select controls. Provider instances are
+configured first, then selected agents are configured in stable order. Agent
+setup changes only passive recall and write behavior; active skill installation
+remains user-owned. A final summary is confirmed before config or integration
+files are written. Non-TTY setup keeps the deterministic text prompt fallback.
+
+Claude Code setup structurally merges these hooks into
+`~/.claude/settings.json` and makes a one-time `.paxm.bak` backup. Existing hook
+groups are preserved and paxm command handlers are deduplicated by command path.
+The Claude `user_input` shim emits Markdown because stdout from
+`UserPromptSubmit` is injected into Claude's context. The Claude `turn_end` shim
+receives the native `Stop` event, including `last_assistant_message`, and uses it
+as write evidence without blocking Claude from stopping.
 
 ## Hook Write Capture
 
@@ -176,6 +190,14 @@ Pi `turn_end` and `message_end` are runtime event-bus events rather than the
 typed `before_agent_start` API surface, so this capture path is intentionally
 best-effort. Hook write failures are recorded by paxm telemetry when possible
 but do not block the Pi session.
+
+`paxm uninstall` reconciles the opposite boundary. It best-effort flushes the
+shared hook buffer, disables selected agents without erasing their hook choices,
+removes exact paxm command handlers from Codex or Claude configuration, removes
+Pi's paxm-owned extension directory, and deletes the selected shims. With no
+`--agent`, it also asks the daemon to shut down. Provider config, memory data,
+telemetry, active skills, backups, and the paxm executable remain user-owned and
+are not removed.
 
 ## Local Telemetry
 

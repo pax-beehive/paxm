@@ -3,12 +3,15 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pax-beehive/memory-adaptor/internal/adapters"
 	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
 	"github.com/pax-beehive/memory-adaptor/internal/config"
 	"github.com/pax-beehive/memory-adaptor/internal/facade"
@@ -30,7 +33,7 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Select memory providers to enable") {
 		t.Fatalf("setup did not show provider selector: %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "Select agent hooks to install") {
+	if !strings.Contains(stdout.String(), "Select agents for passive memory") {
 		t.Fatalf("setup did not show hook selector: %s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "installed hook shim") {
@@ -99,17 +102,22 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 	}
 	history := stdout.String()
 	for _, expected := range []string{
-		"paxm history (last 7 days)",
-		"recalls: 2",
-		"writes: 1",
-		"by profile:",
+		"== paxm history ==",
+		"window: last 7 days",
+		"status: ok",
+		"recall funnel",
+		"recalls  hits  inserted  insert_rate",
+		"write pipeline",
+		"write_events  items  provider_writes  provider_refs  flushes  provider_ref_rate",
+		"by profile",
 		"default",
 		"passive",
-		"by agent:",
-		"codex passive_recalls=1 passive_writes=0",
-		"by provider:",
-		"sqlite recalls=2",
-		"writes=1",
+		"by agent",
+		"codex",
+		"passive_recalls",
+		"by provider",
+		"sqlite",
+		"provider_errors",
 	} {
 		if !strings.Contains(history, expected) {
 			t.Fatalf("history missing %q: %s", expected, history)
@@ -148,7 +156,7 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n2\n")
+	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n3\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -210,10 +218,293 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 	if cfg.Agents["codex"].Enabled {
 		t.Fatalf("codex agent should be disabled when only pi is selected: %#v", cfg.Agents["codex"])
 	}
-	for eventName, hook := range cfg.Agents["codex"].Hooks {
-		if hook.Recall.Enabled || hook.Write.Enabled {
-			t.Fatalf("codex hook %s should be disabled: %#v", eventName, cfg.Agents["codex"])
+}
+
+func TestCLISetupInstallsClaudeCodeHooks(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	claudeSettingsPath := filepath.Join(t.TempDir(), "claude", "settings.json")
+	t.Setenv("PAXM_CLAUDE_SETTINGS", claudeSettingsPath)
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n2\n")
+	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	output := stdout.String()
+	if strings.Count(output, "installed hook shim") != 3 {
+		t.Fatalf("Claude Code setup should install three hook shims: %s", output)
+	}
+	if !strings.Contains(output, "registered Claude Code global hook") {
+		t.Fatalf("setup did not report Claude Code registration: %s", output)
+	}
+	if strings.Contains(output, "registered Codex global hook") || strings.Contains(output, "registered Pi agent extension") {
+		t.Fatalf("Claude-only setup registered another agent: %s", output)
+	}
+
+	settingsBytes, err := os.ReadFile(claudeSettingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := string(settingsBytes)
+	if _, err := os.Stat(claudeSettingsPath + ".paxm.bak"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("new Claude Code settings should not create a backup, stat err: %v", err)
+	}
+	for _, expected := range []string{
+		`"SessionStart"`,
+		`"UserPromptSubmit"`,
+		`"Stop"`,
+		`claude-session_start`,
+		`claude-user_input`,
+		`claude-turn_end`,
+		`"timeout": 60`,
+	} {
+		if !strings.Contains(settings, expected) {
+			t.Fatalf("Claude Code settings missing %q: %s", expected, settings)
 		}
+	}
+	for _, event := range []string{"session_start", "user_input", "turn_end"} {
+		shimPath := filepath.Join(filepath.Dir(configPath), "hooks", "claude-"+event)
+		shimBytes, err := os.ReadFile(shimPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(shimBytes), " --json") {
+			t.Fatalf("Claude Code shim should emit plain context: %s", shimBytes)
+		}
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Agents["claude"].Enabled || !cfg.Agents["claude"].Hooks["user_input"].Recall.Enabled {
+		t.Fatalf("Claude Code hooks should be enabled: %#v", cfg.Agents["claude"])
+	}
+	if cfg.Agents["codex"].Enabled || cfg.Agents["pi"].Enabled {
+		t.Fatalf("only Claude Code should be enabled: %#v", cfg.Agents)
+	}
+}
+
+func TestCLISetupConfiguresSelectedAgentsInOrder(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("PAXM_CLAUDE_SETTINGS", filepath.Join(t.TempDir(), "claude", "settings.json"))
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	setupInput := strings.NewReader(strings.Join([]string{
+		"1",                     // sqlite
+		"/custom/memory.sqlite", // path
+		"1",                     // read/write
+		"1",                     // required
+		"1,2",                   // codex and claude
+		"1",                     // codex: recall only
+		"passive",               // codex recall profile
+		"passive_initial",       // codex initial profile
+		"2",                     // claude: write only
+		"default",               // claude write profile
+		"3",                     // claude turn_end only
+		"y",                     // apply
+	}, "\n") + "\n")
+	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+
+	output := stdout.String()
+	codexIndex := strings.Index(output, "Configure Codex (1/2)")
+	claudeIndex := strings.Index(output, "Configure Claude Code (2/2)")
+	if codexIndex == -1 || claudeIndex == -1 || codexIndex > claudeIndex {
+		t.Fatalf("agents were not configured in stable order: %s", output)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codex := cfg.Agents["codex"]
+	if !codex.Enabled || !codex.Hooks["user_input"].Recall.Enabled {
+		t.Fatalf("codex recall should be enabled: %#v", codex)
+	}
+	for eventName, hook := range codex.Hooks {
+		if hook.Write.Enabled {
+			t.Fatalf("codex write hook %s should be disabled: %#v", eventName, hook)
+		}
+	}
+	claude := cfg.Agents["claude"]
+	if !claude.Enabled || claude.Hooks["user_input"].Recall.Enabled {
+		t.Fatalf("claude should be write-only: %#v", claude)
+	}
+	for eventName, hook := range claude.Hooks {
+		wantEnabled := eventName == "turn_end"
+		if hook.Write.Enabled != wantEnabled {
+			t.Fatalf("claude write hook %s enabled=%t, want %t", eventName, hook.Write.Enabled, wantEnabled)
+		}
+	}
+	hooksDir := filepath.Join(filepath.Dir(configPath), "hooks")
+	for _, path := range []string{
+		filepath.Join(hooksDir, "codex-user_input"),
+		filepath.Join(hooksDir, "claude-turn_end"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("enabled hook shim missing: %s: %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(hooksDir, "codex-session_start"),
+		filepath.Join(hooksDir, "codex-turn_end"),
+		filepath.Join(hooksDir, "claude-session_start"),
+		filepath.Join(hooksDir, "claude-user_input"),
+	} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("disabled hook shim should not exist: %s (stat err: %v)", path, err)
+		}
+	}
+}
+
+func TestCLIUninstallRemovesOnlySelectedAgentAndIsIdempotent(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	claudeSettingsPath := filepath.Join(t.TempDir(), "claude", "settings.json")
+	codexConfigPath := filepath.Join(t.TempDir(), "codex.toml")
+	t.Setenv("PAXM_CLAUDE_SETTINGS", claudeSettingsPath)
+	t.Setenv("PAXM_CODEX_CONFIG", codexConfigPath)
+	if err := os.MkdirAll(filepath.Dir(claudeSettingsPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existingClaudeHook := `{
+  "hooks": {
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "/tmp/existing-claude-hook"}]}
+    ]
+  }
+}
+`
+	if err := os.WriteFile(claudeSettingsPath, []byte(existingClaudeHook), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n1,2\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	for _, path := range []string{hookSessionStatePath(configPath), hookSocketPath(configPath)} {
+		if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Main([]string{"--config", configPath, "uninstall", "--agent", "claude", "--yes"}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("uninstall failed with code %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "uninstalled Claude Code passive integration") {
+		t.Fatalf("unexpected uninstall output: %s", stdout.String())
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Agents["claude"].Enabled {
+		t.Fatalf("claude should be disabled: %#v", cfg.Agents["claude"])
+	}
+	if !cfg.Agents["codex"].Enabled {
+		t.Fatalf("codex should remain enabled: %#v", cfg.Agents["codex"])
+	}
+	settingsBytes, err := os.ReadFile(claudeSettingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := string(settingsBytes)
+	if !strings.Contains(settings, "/tmp/existing-claude-hook") || strings.Contains(settings, "/hooks/claude-") {
+		t.Fatalf("Claude settings were not cleaned selectively: %s", settings)
+	}
+	for _, event := range installedHookEvents() {
+		shimPath := filepath.Join(filepath.Dir(configPath), "hooks", "claude-"+event.ConfigEvent)
+		if _, err := os.Stat(shimPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Claude shim still exists: %s (stat err: %v)", shimPath, err)
+		}
+		codexShimPath := filepath.Join(filepath.Dir(configPath), "hooks", "codex-"+event.ConfigEvent)
+		if _, err := os.Stat(codexShimPath); err != nil {
+			t.Fatalf("Codex shim should remain: %s: %v", codexShimPath, err)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Main([]string{"--config", configPath, "uninstall", "--agent", "claude", "--yes"}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("idempotent uninstall failed with code %d: %s", code, stderr.String())
+	}
+}
+
+func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	claudeSettingsPath := filepath.Join(t.TempDir(), "claude", "settings.json")
+	codexConfigPath := filepath.Join(t.TempDir(), "codex.toml")
+	piAgentDir := filepath.Join(t.TempDir(), "pi-agent")
+	t.Setenv("PAXM_CLAUDE_SETTINGS", claudeSettingsPath)
+	t.Setenv("PAXM_CODEX_CONFIG", codexConfigPath)
+	t.Setenv("PAXM_PI_AGENT_DIR", piAgentDir)
+
+	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\nall\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	hooksDir := filepath.Join(filepath.Dir(configPath), "hooks")
+	for _, path := range []string{hookSessionStatePath(configPath), hookSocketPath(configPath)} {
+		if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Main([]string{"--config", configPath, "uninstall", "--yes"}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("uninstall failed with code %d: %s", code, stderr.String())
+	}
+	for _, name := range []string{"Codex", "Claude Code", "Pi"} {
+		if !strings.Contains(stdout.String(), "uninstalled "+name+" passive integration") {
+			t.Fatalf("uninstall output missing %s: %s", name, stdout.String())
+		}
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, agent := range cfg.Agents {
+		if agent.Enabled {
+			t.Fatalf("agent %s should be disabled: %#v", name, agent)
+		}
+	}
+	for _, target := range []string{"codex", "claude", "pi"} {
+		for _, event := range installedHookEvents() {
+			path := filepath.Join(hooksDir, target+"-"+event.ConfigEvent)
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("hook shim still exists: %s (stat err: %v)", path, err)
+			}
+		}
+	}
+	for _, path := range []string{codexConfigPath, claudeSettingsPath} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), "/hooks/codex-") || strings.Contains(string(content), "/hooks/claude-") {
+			t.Fatalf("agent config still contains paxm hook: %s", content)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(piAgentDir, "extensions", "paxm-hook")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Pi extension still exists, stat err: %v", err)
+	}
+	if _, err := os.Stat(hooksDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("shared hook state directory still exists, stat err: %v", err)
 	}
 }
 
@@ -248,6 +539,60 @@ func TestInternalHookDoesNotBufferWhenHookWriteDisabled(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"target": "pi"`) {
 		t.Fatalf("unexpected hook output: %s", stdout.String())
+	}
+}
+
+func TestHookBufferShutdownFlushesPendingItems(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	provider := cfg.Providers["sqlite"]
+	provider.Path = filepath.Join(t.TempDir(), "memory.sqlite")
+	cfg.Providers["sqlite"] = provider
+	router, err := adapters.DefaultRegistry().BuildRouter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := facade.New(cfg, router)
+	buffer := []facade.IngestInput{{
+		Text:    "shutdown flush sentinel",
+		Profile: "default",
+		Source:  "test",
+	}}
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() {
+		_ = serverConn.Close()
+		_ = clientConn.Close()
+	})
+	type result struct {
+		flushed  int
+		shutdown bool
+		err      error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		flushed, shutdown, err := handleHookBufferConn(context.Background(), service, serverConn, &buffer)
+		resultCh <- result{flushed: flushed, shutdown: shutdown, err: err}
+	}()
+	if err := writeJSON(clientConn, hookBufferRequest{Action: "shutdown"}); err != nil {
+		t.Fatal(err)
+	}
+	var response hookBufferResponse
+	if err := json.NewDecoder(clientConn).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	got := <-resultCh
+	if got.err != nil || !got.shutdown || got.flushed != 1 || !response.OK || response.Flushed != 1 {
+		t.Fatalf("unexpected shutdown result: result=%#v response=%#v", got, response)
+	}
+	if len(buffer) != 0 {
+		t.Fatalf("buffer was not cleared: %#v", buffer)
+	}
+	recalled, err := service.Recall(context.Background(), facade.RecallInput{Query: "shutdown flush sentinel", Profile: "default", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recalled.Hits) == 0 || !strings.Contains(recalled.Hits[0].Text, "shutdown flush sentinel") {
+		t.Fatalf("flushed item was not persisted: %#v", recalled.Hits)
 	}
 }
 
@@ -580,6 +925,72 @@ func TestCLISetupRequiresAProvider(t *testing.T) {
 	}
 }
 
+func TestCLISetupCancellationDoesNotWriteFiles(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\nnone\nn\n")
+
+	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
+		t.Fatalf("cancelled setup failed with code %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "setup cancelled") {
+		t.Fatalf("setup did not report cancellation: %s", stdout.String())
+	}
+	if _, err := os.Stat(configPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled setup wrote config, stat err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(configPath), "hooks")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled setup wrote hooks, stat err: %v", err)
+	}
+}
+
+func TestCLISetupReusesDisabledAgentPassiveChoices(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	claude := cfg.Agents["claude"]
+	claude.Enabled = false
+	userInput := claude.Hooks["user_input"]
+	userInput.Recall.Enabled = false
+	userInput.Write.Enabled = false
+	claude.Hooks["user_input"] = userInput
+	sessionStart := claude.Hooks["session_start"]
+	sessionStart.Write.Enabled = false
+	claude.Hooks["session_start"] = sessionStart
+	turnEnd := claude.Hooks["turn_end"]
+	turnEnd.Write.Enabled = true
+	claude.Hooks["turn_end"] = turnEnd
+	cfg.Agents["claude"] = claude
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PAXM_CLAUDE_SETTINGS", filepath.Join(t.TempDir(), "claude", "settings.json"))
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+
+	setupInput := strings.NewReader("\n\n\n\n2\n\n\n\n\ny\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Main([]string{"--config", configPath, "setup", "--force"}, setupInput, &stdout, &stderr); code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+
+	updated, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude = updated.Agents["claude"]
+	if !claude.Enabled || claude.Hooks["user_input"].Recall.Enabled {
+		t.Fatalf("Claude passive behavior was not preserved: %#v", claude)
+	}
+	for eventName, hook := range claude.Hooks {
+		wantEnabled := eventName == "turn_end"
+		if hook.Write.Enabled != wantEnabled {
+			t.Fatalf("Claude write event %s enabled=%t, want %t", eventName, hook.Write.Enabled, wantEnabled)
+		}
+	}
+}
+
 func assertWriteOnlyConfig(t *testing.T, configPath string) {
 	t.Helper()
 
@@ -604,13 +1015,8 @@ func assertWriteOnlyConfig(t *testing.T, configPath string) {
 	if len(writeProfile.Providers) != 1 || writeProfile.Providers[0].Name != "sqlite" || !writeProfile.Providers[0].Required {
 		t.Fatalf("unexpected default write profile: %#v", writeProfile)
 	}
-	if cfg.Agents["codex"].Enabled || cfg.Agents["pi"].Enabled {
+	if cfg.Agents["claude"].Enabled || cfg.Agents["codex"].Enabled || cfg.Agents["pi"].Enabled {
 		t.Fatalf("agents should be disabled when no hooks are selected: %#v", cfg.Agents)
-	}
-	for eventName, hook := range cfg.Agents["codex"].Hooks {
-		if hook.Recall.Enabled || hook.Write.Enabled {
-			t.Fatalf("codex hook %s should be disabled: %#v", eventName, cfg.Agents["codex"])
-		}
 	}
 }
 
@@ -692,6 +1098,66 @@ func TestInstallCodexGlobalHookRegistersAllEvents(t *testing.T) {
 	}
 }
 
+func TestInstallClaudeGlobalHooksPreservesExistingHooksAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "settings.json")
+	original := `{
+  "permissions": {"allow": ["Bash(go test:*)"]},
+  "hooks": {
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "/tmp/existing-hook"}]}
+    ]
+  }
+}
+`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	scriptPaths := make(map[string]string)
+	for _, event := range installedHookEvents() {
+		scriptPaths[event.ConfigEvent] = filepath.Join(t.TempDir(), "claude-"+event.ConfigEvent)
+	}
+	if err := installClaudeGlobalHooks(path, scriptPaths); err != nil {
+		t.Fatal(err)
+	}
+	if err := installClaudeGlobalHooks(path, scriptPaths); err != nil {
+		t.Fatal(err)
+	}
+
+	contentBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(contentBytes)
+	for _, expected := range []string{
+		`"permissions"`,
+		`Bash(go test:*)`,
+		`/tmp/existing-hook`,
+		`"SessionStart"`,
+		`"UserPromptSubmit"`,
+		`"Stop"`,
+		`"matcher": "startup|resume|clear|compact"`,
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("Claude Code settings missing %q: %s", expected, content)
+		}
+	}
+	for _, event := range installedHookEvents() {
+		if count := strings.Count(content, "claude-"+event.ConfigEvent); count != 1 {
+			t.Fatalf("Claude Code hook %s installed %d times: %s", event.ConfigEvent, count, content)
+		}
+	}
+	backup, err := os.ReadFile(path + ".paxm.bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != original {
+		t.Fatalf("Claude Code backup changed:\n%s", backup)
+	}
+}
+
 func TestCLIDoesNotExposeHookOrProviderCommands(t *testing.T) {
 	t.Parallel()
 
@@ -720,6 +1186,9 @@ func TestCLIDoesNotExposeHookOrProviderCommands(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "__hook") || strings.Contains(stdout.String(), "hook run") {
 		t.Fatalf("hidden hook commands leaked in help: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "uninstall [--agent AGENT] [--yes]") {
+		t.Fatalf("uninstall command missing from help: %s", stdout.String())
 	}
 }
 
