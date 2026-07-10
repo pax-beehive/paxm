@@ -3,13 +3,16 @@ package memory
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 )
 
 type fakeProvider struct {
 	name      string
 	searchErr error
 	putErr    error
+	healthErr error
 	hits      []MemoryHit
 	refs      []MemoryRef
 }
@@ -36,7 +39,7 @@ func (p fakeProvider) Put(context.Context, MemoryItem) (MemoryRef, error) {
 }
 
 func (p fakeProvider) Health(context.Context) error {
-	return nil
+	return p.healthErr
 }
 
 type captureBatchProvider struct {
@@ -238,4 +241,141 @@ func TestRouterPutBatchUsesProviderBatchAPI(t *testing.T) {
 	if len(result.Refs) != 2 || result.Refs[0].Provider != "writer" || result.Refs[1].Provider != "writer" {
 		t.Fatalf("unexpected batch refs: %#v", result.Refs)
 	}
+}
+
+func TestRouterValidationHealthAndErrorTables(t *testing.T) {
+	t.Parallel()
+
+	t.Run("constructor validation", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			bindings []ProviderBinding
+			wantErr  string
+		}{
+			{name: "nil provider", bindings: []ProviderBinding{{}}, wantErr: "provider is nil"},
+			{name: "empty name", bindings: []ProviderBinding{{Provider: fakeProvider{name: ""}}}, wantErr: "provider name is empty"},
+			{name: "duplicate name", bindings: []ProviderBinding{{Provider: fakeProvider{name: "a"}}, {Provider: fakeProvider{name: "a"}}}, wantErr: "duplicated"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if _, err := NewRouter(tt.bindings); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("NewRouter() error = %v, want %q", err, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("health", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			bindings  []ProviderBinding
+			wantErr   string
+			wantCount int
+			wantOK    map[string]bool
+		}{
+			{name: "no providers", wantErr: "no memory providers are enabled"},
+			{
+				name: "optional health error is reported without failing",
+				bindings: []ProviderBinding{
+					{Provider: fakeProvider{name: "required"}, Required: true},
+					{Provider: fakeProvider{name: "optional", healthErr: errors.New("offline")}},
+				},
+				wantCount: 2,
+				wantOK:    map[string]bool{"required": true, "optional": false},
+			},
+			{
+				name: "required health error fails",
+				bindings: []ProviderBinding{
+					{Provider: fakeProvider{name: "required", healthErr: errors.New("down")}, Required: true},
+				},
+				wantErr:   "required: down",
+				wantCount: 1,
+				wantOK:    map[string]bool{"required": false},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				router, err := NewRouter(tt.bindings)
+				if err != nil {
+					t.Fatal(err)
+				}
+				statuses, err := router.Health(context.Background())
+				if tt.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Fatalf("Health() error = %v, want %q", err, tt.wantErr)
+					}
+				} else if err != nil {
+					t.Fatalf("Health() error = %v", err)
+				}
+				if len(statuses) != tt.wantCount {
+					t.Fatalf("statuses = %#v, want %d", statuses, tt.wantCount)
+				}
+				for _, status := range statuses {
+					if want, ok := tt.wantOK[status.Provider]; ok && status.OK != want {
+						t.Fatalf("status for %s = %#v, want ok=%v", status.Provider, status, want)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("search and put errors", func(t *testing.T) {
+		router, err := NewRouter([]ProviderBinding{
+			{Provider: fakeProvider{name: "reader", searchErr: errors.New("search down")}, Read: true, Required: true},
+			{Provider: fakeProvider{name: "writer", putErr: errors.New("write down")}, Write: true, Required: true},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tests := []struct {
+			name string
+			run  func() error
+			want string
+		}{
+			{name: "missing search route", run: func() error {
+				_, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "q"}, SearchPolicy{Providers: []ProviderRoute{{Name: "missing"}}})
+				return err
+			}, want: `provider "missing" in search policy is not enabled`},
+			{name: "required search provider error", run: func() error {
+				_, err := router.Search(context.Background(), SearchQuery{Text: "q"})
+				return err
+			}, want: "reader: search down"},
+			{name: "missing put route", run: func() error {
+				_, err := router.PutWithPolicy(context.Background(), MemoryItem{Text: "m"}, PutPolicy{Providers: []ProviderRoute{{Name: "missing"}}})
+				return err
+			}, want: `provider "missing" in put policy is not enabled`},
+			{name: "required put provider error", run: func() error {
+				_, err := router.Put(context.Background(), MemoryItem{Text: "m"})
+				return err
+			}, want: "writer: write down"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if err := tt.run(); err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("%s error = %v, want %q", tt.name, err, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("score helpers", func(t *testing.T) {
+		if got := normalizedRelevance(MemoryHit{Relevance: -1}); got != 0 {
+			t.Fatalf("negative relevance = %v", got)
+		}
+		if got := normalizedRelevance(MemoryHit{Relevance: 2}); got != 1 {
+			t.Fatalf("clamped relevance = %v", got)
+		}
+		if got := normalizedRelevance(MemoryHit{Score: 0.4}); got != 0.4 {
+			t.Fatalf("score fallback relevance = %v", got)
+		}
+		if got := recencyScore(time.Now().Add(time.Hour), 0.5); got != 0.5 {
+			t.Fatalf("future recency score = %v", got)
+		}
+		if got := recencyScore(time.Time{}, 0.5); got != 0 {
+			t.Fatalf("zero recency score = %v", got)
+		}
+		if got := dedupeKey(MemoryHit{Provider: "p", ID: "id"}); got != "id:p:id" {
+			t.Fatalf("dedupeKey(id) = %q", got)
+		}
+	})
 }

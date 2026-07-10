@@ -3,6 +3,7 @@ package sessions
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,6 +53,94 @@ func TestReadPiTurnsAndCutoff(t *testing.T) {
 	assertTurn(t, turns, "pi-session", "/repo", "first", "answer one")
 }
 
+func TestRootAndDiscoverTables(t *testing.T) {
+	t.Run("root environment overrides", func(t *testing.T) {
+		base := t.TempDir()
+		tests := []struct {
+			name    string
+			agent   string
+			env     map[string]string
+			want    string
+			wantErr string
+		}{
+			{name: "codex explicit sessions", agent: "codex", env: map[string]string{"PAXM_CODEX_SESSIONS": filepath.Join(base, "codex-sessions")}, want: filepath.Join(base, "codex-sessions")},
+			{name: "codex home", agent: "codex", env: map[string]string{"CODEX_HOME": filepath.Join(base, "codex-home")}, want: filepath.Join(base, "codex-home", "sessions")},
+			{name: "claude explicit sessions", agent: "claude", env: map[string]string{"PAXM_CLAUDE_SESSIONS": filepath.Join(base, "claude-sessions")}, want: filepath.Join(base, "claude-sessions")},
+			{name: "claude config dir", agent: "claude", env: map[string]string{"CLAUDE_CONFIG_DIR": filepath.Join(base, "claude")}, want: filepath.Join(base, "claude", "projects")},
+			{name: "pi explicit sessions", agent: "pi", env: map[string]string{"PAXM_PI_SESSIONS": filepath.Join(base, "pi-sessions")}, want: filepath.Join(base, "pi-sessions")},
+			{name: "pi session dir", agent: "pi", env: map[string]string{"PI_CODING_AGENT_SESSION_DIR": filepath.Join(base, "pi-session-dir")}, want: filepath.Join(base, "pi-session-dir")},
+			{name: "pi agent dir", agent: "pi", env: map[string]string{"PI_CODING_AGENT_DIR": filepath.Join(base, "pi-agent")}, want: filepath.Join(base, "pi-agent", "sessions")},
+			{name: "unsupported", agent: "other", wantErr: "unsupported session agent"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				clearSessionEnv(t)
+				for key, value := range tt.env {
+					t.Setenv(key, value)
+				}
+				got, err := Root(tt.agent)
+				if tt.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Fatalf("Root() error = %v, want %q", err, tt.wantErr)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("Root() error = %v", err)
+				}
+				if got != tt.want {
+					t.Fatalf("Root() = %q, want %q", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("discover jsonl files", func(t *testing.T) {
+		clearSessionEnv(t)
+		root := t.TempDir()
+		t.Setenv("PAXM_CODEX_SESSIONS", root)
+		if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("ignore"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "a.jsonl"), []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		nested := filepath.Join(root, "nested")
+		if err := os.MkdirAll(nested, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(nested, "c.JSONL"), []byte("{}\n{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		files, err := Discover("codex")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(files) != 2 {
+			t.Fatalf("Discover() files = %#v", files)
+		}
+		if files[0].Path != filepath.Join(root, "a.jsonl") || files[1].Path != filepath.Join(nested, "c.JSONL") {
+			t.Fatalf("files were not sorted or filtered: %#v", files)
+		}
+		if files[0].Size != 3 || files[1].Size != 6 {
+			t.Fatalf("file sizes were not recorded: %#v", files)
+		}
+	})
+
+	t.Run("discover missing root is empty", func(t *testing.T) {
+		clearSessionEnv(t)
+		t.Setenv("PAXM_CODEX_SESSIONS", filepath.Join(t.TempDir(), "missing"))
+		files, err := Discover("codex")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(files) != 0 {
+			t.Fatalf("Discover() = %#v, want empty", files)
+		}
+	})
+}
+
 func assertTurn(t *testing.T, turns []Turn, sessionID, workspace, user, assistant string) {
 	t.Helper()
 	if len(turns) != 1 {
@@ -73,4 +162,19 @@ func writeSessionFile(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func clearSessionEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"PAXM_CODEX_SESSIONS",
+		"CODEX_HOME",
+		"PAXM_CLAUDE_SESSIONS",
+		"CLAUDE_CONFIG_DIR",
+		"PAXM_PI_SESSIONS",
+		"PI_CODING_AGENT_SESSION_DIR",
+		"PI_CODING_AGENT_DIR",
+	} {
+		t.Setenv(key, "")
+	}
 }

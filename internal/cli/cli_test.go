@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/pax-beehive/memory-adaptor/internal/config"
 	"github.com/pax-beehive/memory-adaptor/internal/facade"
 	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
 )
 
 func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
@@ -1227,5 +1230,448 @@ func TestCLIVersion(t *testing.T) {
 	}
 	if strings.TrimSpace(stdout.String()) == "" {
 		t.Fatalf("version output was empty")
+	}
+}
+
+func TestSetupOptionHelpersTable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("provider and agent options", func(t *testing.T) {
+		cfg := config.Config{
+			Providers: map[string]config.ProviderConfig{
+				"custom": {Type: "custom"},
+				"mem":    {Type: "mem0"},
+				"rpc":    {Type: "jsonrpc"},
+				"sqlite": {Type: "sqlite"},
+				"zed":    {Type: "zep"},
+			},
+			Agents: map[string]config.AgentConfig{
+				"other":  {Enabled: true},
+				"pi":     {Enabled: true},
+				"codex":  {Enabled: true},
+				"claude": {Enabled: true},
+			},
+		}
+		if got, want := providerOptionIDs(cfg), []string{"sqlite", "zed", "mem", "rpc", "custom"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("providerOptionIDs() = %#v, want %#v", got, want)
+		}
+		wantHooks := []setupOption{
+			{ID: "codex", Label: "Codex"},
+			{ID: "claude", Label: "Claude Code"},
+			{ID: "pi", Label: "Pi"},
+			{ID: "other", Label: "other"},
+		}
+		if got := hookOptions(cfg); !reflect.DeepEqual(got, wantHooks) {
+			t.Fatalf("hookOptions() = %#v, want %#v", got, wantHooks)
+		}
+	})
+
+	t.Run("labels and priorities", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			providerName string
+			provider     config.ProviderConfig
+			wantLabel    string
+			wantPriority int
+		}{
+			{name: "sqlite default", providerName: "sqlite", provider: config.ProviderConfig{Type: "sqlite"}, wantLabel: "SQLite", wantPriority: 0},
+			{name: "named zep", providerName: "team", provider: config.ProviderConfig{Type: "zep"}, wantLabel: "team (Zep)", wantPriority: 1},
+			{name: "named mem0", providerName: "company", provider: config.ProviderConfig{Type: "mem0"}, wantLabel: "company (Mem0)", wantPriority: 2},
+			{name: "jsonrpc default", providerName: "jsonrpc", provider: config.ProviderConfig{Type: "jsonrpc"}, wantLabel: "JSON-RPC", wantPriority: 3},
+			{name: "unknown", providerName: "other", provider: config.ProviderConfig{Type: "other"}, wantLabel: "other", wantPriority: 100},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if got := providerPromptLabel(tt.providerName, tt.provider); got != tt.wantLabel {
+					t.Fatalf("providerPromptLabel() = %q, want %q", got, tt.wantLabel)
+				}
+				if got := providerOptionPriority(tt.provider.Type); got != tt.wantPriority {
+					t.Fatalf("providerOptionPriority() = %d, want %d", got, tt.wantPriority)
+				}
+			})
+		}
+	})
+
+	t.Run("provider routing modes", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			mode       string
+			required   bool
+			wantMode   string
+			wantPolicy string
+			wantRead   bool
+			wantWrite  bool
+		}{
+			{name: "read write required", mode: "read_write", required: true, wantMode: "read_write", wantPolicy: "required", wantRead: true, wantWrite: true},
+			{name: "read only best effort", mode: "read_only", required: false, wantMode: "read_only", wantPolicy: "best_effort", wantRead: true},
+			{name: "write only required", mode: "write_only", required: true, wantMode: "write_only", wantPolicy: "required", wantWrite: true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+				cfg.Providers["archive"] = config.ProviderConfig{Type: "sqlite", Enabled: true}
+				removeProviderFromDefaultProfiles(&cfg, "archive")
+				setDefaultProviderMode(&cfg, "archive", tt.mode, tt.required)
+				if got := currentProviderMode(cfg, "archive"); got != tt.wantMode {
+					t.Fatalf("currentProviderMode() = %q, want %q", got, tt.wantMode)
+				}
+				if got := currentProviderPolicy(cfg, "archive"); got != tt.wantPolicy {
+					t.Fatalf("currentProviderPolicy() = %q, want %q", got, tt.wantPolicy)
+				}
+				if got := recallProfileHasProvider(cfg.RecallProfiles["default"], "archive"); got != tt.wantRead {
+					t.Fatalf("read route = %v, want %v", got, tt.wantRead)
+				}
+				if got := writeProfileHasProvider(cfg.WriteProfiles["default"], "archive"); got != tt.wantWrite {
+					t.Fatalf("write route = %v, want %v", got, tt.wantWrite)
+				}
+			})
+		}
+	})
+
+	t.Run("selection helpers", func(t *testing.T) {
+		options := []setupOption{{ID: "b"}, {ID: "a"}}
+		defaults := map[string]bool{"a": true, "ignored": true}
+		if got, want := defaultSelections(options, defaults), map[string]bool{"a": true, "b": false}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("defaultSelections() = %#v, want %#v", got, want)
+		}
+		if !anySelected(map[string]bool{"a": false, "b": true}) || anySelected(map[string]bool{"a": false}) {
+			t.Fatal("anySelected returned unexpected result")
+		}
+		if got, want := sortedSelected(map[string]bool{"b": true, "a": false}), []string{"a", "b"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("sortedSelected() = %#v, want %#v", got, want)
+		}
+		if got := boolInt(true); got != 1 {
+			t.Fatalf("boolInt(true) = %d", got)
+		}
+		if got := boolInt(false); got != 0 {
+			t.Fatalf("boolInt(false) = %d", got)
+		}
+	})
+}
+
+func TestPromptParserHelpersTable(t *testing.T) {
+	t.Parallel()
+
+	options := []setupOption{{ID: "one", Label: "One"}, {ID: "two", Label: "Two"}}
+
+	t.Run("bool", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			input   string
+			def     bool
+			want    bool
+			wantOut string
+		}{
+			{name: "yes", input: "y\n", want: true},
+			{name: "no", input: "no\n", def: true, want: false},
+			{name: "default", input: "\n", def: true, want: true},
+			{name: "invalid then eof returns default", input: "maybe", want: false, wantOut: "Please answer yes or no."},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var out bytes.Buffer
+				got, err := promptBool(bufio.NewReader(strings.NewReader(tt.input)), &out, "Continue?", tt.def)
+				if err != nil {
+					t.Fatalf("promptBool() error = %v", err)
+				}
+				if got != tt.want {
+					t.Fatalf("promptBool() = %v, want %v", got, tt.want)
+				}
+				if tt.wantOut != "" && !strings.Contains(out.String(), tt.wantOut) {
+					t.Fatalf("prompt output missing %q: %s", tt.wantOut, out.String())
+				}
+			})
+		}
+	})
+
+	t.Run("single select", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			input   string
+			def     string
+			want    string
+			wantErr string
+		}{
+			{name: "default", input: "\n", def: "two", want: "two"},
+			{name: "number", input: "1\n", def: "two", want: "one"},
+			{name: "id", input: "two\n", def: "one", want: "two"},
+			{name: "fallback default", input: "\n", def: "missing", want: "one"},
+			{name: "no options", input: "\n", wantErr: "has no options"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var out bytes.Buffer
+				selectOptions := options
+				if tt.wantErr != "" {
+					selectOptions = nil
+				}
+				got, err := promptSingleSelect(bufio.NewReader(strings.NewReader(tt.input)), &out, "Pick", selectOptions, tt.def)
+				if tt.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Fatalf("promptSingleSelect() error = %v, want %q", err, tt.wantErr)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("promptSingleSelect() error = %v", err)
+				}
+				if got != tt.want {
+					t.Fatalf("promptSingleSelect() = %q, want %q", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("multi select", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			input string
+			want  map[string]bool
+		}{
+			{name: "defaults", input: "\n", want: map[string]bool{"one": true, "two": false}},
+			{name: "all", input: "all\n", want: map[string]bool{"one": true, "two": true}},
+			{name: "none", input: "none\n", want: map[string]bool{"one": false, "two": false}},
+			{name: "numbers", input: "2\n", want: map[string]bool{"one": false, "two": true}},
+			{name: "invalid then eof defaults", input: "9", want: map[string]bool{"one": true, "two": false}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var out bytes.Buffer
+				got, err := promptMultiSelect(bufio.NewReader(strings.NewReader(tt.input)), &out, "Pick many", options, map[string]bool{"one": true})
+				if err != nil {
+					t.Fatalf("promptMultiSelect() error = %v", err)
+				}
+				if !reflect.DeepEqual(got, tt.want) {
+					t.Fatalf("promptMultiSelect() = %#v, want %#v", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("direct helpers", func(t *testing.T) {
+		selected, err := parseMultiSelect("1, 2", options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := map[string]bool{"one": true, "two": true}; !reflect.DeepEqual(selected, want) {
+			t.Fatalf("parseMultiSelect() = %#v, want %#v", selected, want)
+		}
+		if _, err := parseMultiSelect("bad", options); err == nil {
+			t.Fatal("expected parseMultiSelect error")
+		}
+		if got := defaultSelectionText(options, map[string]bool{"two": true}); got != "2" {
+			t.Fatalf("defaultSelectionText() = %q", got)
+		}
+		if got := optionIndex(options, "missing"); got != -1 {
+			t.Fatalf("optionIndex() = %d", got)
+		}
+		if got, err := promptString(bufio.NewReader(strings.NewReader("\n")), &bytes.Buffer{}, "Path", "default"); err != nil || got != "default" {
+			t.Fatalf("promptString() = %q, %v", got, err)
+		}
+		if got := minInt(3, 10); got != 3 {
+			t.Fatalf("minInt() = %d", got)
+		}
+	})
+}
+
+func TestCodexTomlAndPathHelpersTable(t *testing.T) {
+	t.Run("paths from environment", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(dir, "codex.toml"))
+		t.Setenv("PAXM_CLAUDE_SETTINGS", filepath.Join(dir, "claude.json"))
+		t.Setenv("PAXM_PI_AGENT_DIR", filepath.Join(dir, "pi-agent"))
+		if got := codexConfigPath(); got != filepath.Join(dir, "codex.toml") {
+			t.Fatalf("codexConfigPath() = %q", got)
+		}
+		if got := claudeSettingsPath(); got != filepath.Join(dir, "claude.json") {
+			t.Fatalf("claudeSettingsPath() = %q", got)
+		}
+		if got := piAgentDir(); got != filepath.Join(dir, "pi-agent") {
+			t.Fatalf("piAgentDir() = %q", got)
+		}
+		if got := piExtensionPath(); got != filepath.Join(dir, "pi-agent", "extensions", "paxm-hook", "index.ts") {
+			t.Fatalf("piExtensionPath() = %q", got)
+		}
+	})
+
+	t.Run("inline toml arrays", func(t *testing.T) {
+		tests := []struct {
+			name string
+			body string
+			want []string
+		}{
+			{name: "nested and quoted comma", body: `{ command = "a,b" }, { hooks = [{ command = "c" }] }`, want: []string{`{ command = "a,b" }`, `{ hooks = [{ command = "c" }] }`}},
+			{name: "empty", body: " ", want: nil},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if got := splitTopLevelInlineEntries(tt.body); !reflect.DeepEqual(got, tt.want) {
+					t.Fatalf("splitTopLevelInlineEntries() = %#v, want %#v", got, tt.want)
+				}
+			})
+		}
+
+		line := `UserPromptSubmit = [{ command = "keep" }, { command = "codex-user_prompt" }]` + "\n"
+		if got := removeInlineTomlArrayEntries(line, "codex-user_prompt"); strings.Contains(got, "codex-user_prompt") || !strings.HasSuffix(got, "\n") {
+			t.Fatalf("removeInlineTomlArrayEntries() = %q", got)
+		}
+		if got := appendInlineTomlArray("Stop = []\n", `{ command = "paxm" }`); got != "Stop = [{ command = \"paxm\" }]\n" {
+			t.Fatalf("appendInlineTomlArray(empty) = %q", got)
+		}
+		if got := appendInlineTomlArray("Stop = [old]\n", "new"); got != "Stop = [old, new]\n" {
+			t.Fatalf("appendInlineTomlArray(existing) = %q", got)
+		}
+	})
+
+	t.Run("codex hook upsert and prune", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			content   string
+			eventName string
+			entry     string
+			want      []string
+		}{
+			{name: "empty config", eventName: "Stop", entry: `{ command = "paxm" }`, want: []string{"[hooks]", `Stop = [{ command = "paxm" }]`}},
+			{name: "append hooks section", content: "model = \"gpt\"\n", eventName: "Stop", entry: `{ command = "paxm" }`, want: []string{"model = \"gpt\"", "[hooks]", `Stop = [{ command = "paxm" }]`}},
+			{name: "append existing event", content: "[hooks]\nStop = [{ command = \"old\" }]\n", eventName: "Stop", entry: `{ command = "paxm" }`, want: []string{"old", "paxm"}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got := upsertCodexHook(tt.content, tt.eventName, tt.entry)
+				for _, want := range tt.want {
+					if !strings.Contains(got, want) {
+						t.Fatalf("upsertCodexHook() missing %q: %s", want, got)
+					}
+				}
+			})
+		}
+
+		pruned, changed := pruneLegacyCodexUserPromptHook("[hooks]\nUserPromptSubmit = [{ command = \"keep\" }, { command = \"codex-user_prompt\" }]\n")
+		if !changed || strings.Contains(pruned, "codex-user_prompt") {
+			t.Fatalf("pruneLegacyCodexUserPromptHook() = changed %v content %q", changed, pruned)
+		}
+		if same, changed := pruneLegacyCodexUserPromptHook("[hooks]\nStop = []\n"); changed || same == "" {
+			t.Fatalf("unexpected prune on clean config: changed=%v content=%q", changed, same)
+		}
+	})
+
+	t.Run("quoting and config flags", func(t *testing.T) {
+		if got := shellQuote("a'b"); got != `'a'"'"'b'` {
+			t.Fatalf("shellQuote() = %q", got)
+		}
+		if got := shellQuote(""); got != "''" {
+			t.Fatalf("shellQuote(empty) = %q", got)
+		}
+		if got := escapeTomlString(`a\"b`); got != `a\\\"b` {
+			t.Fatalf("escapeTomlString() = %q", got)
+		}
+		if got := jsonStringLiteral("a\nb"); got != "\"a\\nb\"" {
+			t.Fatalf("jsonStringLiteral() = %q", got)
+		}
+		args, cfg, err := extractConfigFlag([]string{"--config", "cfg.yaml", "recall", "--query", "x"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg != "cfg.yaml" || !reflect.DeepEqual(args, []string{"recall", "--query", "x"}) {
+			t.Fatalf("extractConfigFlag() args=%#v cfg=%q", args, cfg)
+		}
+		args, cfg, err = extractConfigFlag([]string{"--config=inline.yaml", "version"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg != "inline.yaml" || !reflect.DeepEqual(args, []string{"version"}) {
+			t.Fatalf("extractConfigFlag(inline) args=%#v cfg=%q", args, cfg)
+		}
+		if _, _, err := extractConfigFlag([]string{"--config"}); err == nil {
+			t.Fatal("expected missing config path error")
+		}
+	})
+}
+
+func TestHistoryFormattingHelpersTable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		summary telemetry.HistorySummary
+		want    []string
+	}{
+		{
+			name: "quiet history",
+			summary: telemetry.HistorySummary{
+				Days: 7,
+				Storage: telemetry.StorageInfo{
+					EventsFile:  "/tmp/events.jsonl",
+					MetricsFile: "/tmp/metrics.json",
+				},
+			},
+			want: []string{"status: quiet", "no telemetry events recorded yet", "storage"},
+		},
+		{
+			name: "active history",
+			summary: telemetry.HistorySummary{
+				Days: 1,
+				Totals: telemetry.Counter{
+					Events:         4,
+					Successes:      3,
+					Errors:         1,
+					Recalls:        2,
+					Hits:           5,
+					Inserted:       1,
+					Writes:         2,
+					Items:          3,
+					Flushes:        1,
+					ProviderErrors: 1,
+				},
+				Daily:      []telemetry.DatedCounter{{Date: "2026-07-09", Counter: telemetry.Counter{Recalls: 2, Hits: 5, Inserted: 1, Writes: 2, Errors: 1}}},
+				Profiles:   []telemetry.NamedCounter{{Name: "default", Counter: telemetry.Counter{Recalls: 2, Hits: 5}}},
+				Agents:     []telemetry.NamedCounter{{Name: "codex", Counter: telemetry.Counter{Recalls: 2, Writes: 1, Inserted: 1, Flushes: 1}}},
+				HookEvents: []telemetry.NamedCounter{{Name: "codex/user_input", Counter: telemetry.Counter{Recalls: 2, Inserted: 1}}},
+				Providers:  []telemetry.NamedCounter{{Name: "sqlite", Counter: telemetry.Counter{Writes: 2, Refs: 1, Recalls: 2, Hits: 5, ProviderErrors: 1}}},
+				Storage: telemetry.StorageInfo{
+					EventBytes: 10,
+					TotalBytes: 20,
+					MaxBytes:   30,
+					MaxFiles:   2,
+				},
+			},
+			want: []string{"status: attention", "overview", "recall funnel", "20.0%", "write pipeline", "50.0%", "by day", "by profile", "by agent", "by hook", "by provider"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			writeHistorySummary(&out, tt.summary)
+			for _, want := range tt.want {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("history output missing %q: %s", want, out.String())
+				}
+			}
+		})
+	}
+
+	statusTests := []struct {
+		counter telemetry.Counter
+		want    string
+	}{
+		{counter: telemetry.Counter{Errors: 1}, want: "attention"},
+		{counter: telemetry.Counter{ProviderErrors: 1}, want: "attention"},
+		{counter: telemetry.Counter{Skipped: 1}, want: "partial"},
+		{counter: telemetry.Counter{}, want: "ok"},
+	}
+	for _, tt := range statusTests {
+		if got := historyStatus(tt.counter); got != tt.want {
+			t.Fatalf("historyStatus() = %q, want %q", got, tt.want)
+		}
+	}
+	if got := sumNamedCounters([]telemetry.NamedCounter{{Counter: telemetry.Counter{Hits: 2}}, {Counter: telemetry.Counter{Hits: 3}}}, func(counter telemetry.Counter) int { return counter.Hits }); got != 5 {
+		t.Fatalf("sumNamedCounters() = %d", got)
+	}
+	if got := formatPercent(1, 0); got != "n/a" {
+		t.Fatalf("formatPercent() = %q", got)
+	}
+	if got := firstNonEmpty("", " ", "x"); got != "x" {
+		t.Fatalf("firstNonEmpty() = %q", got)
 	}
 }

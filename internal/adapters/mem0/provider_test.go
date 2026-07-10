@@ -3,14 +3,24 @@ package mem0
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pax-beehive/memory-adaptor/internal/config"
 	"github.com/pax-beehive/memory-adaptor/internal/memory"
 )
+
+type httpDoerFunc func(*http.Request) (*http.Response, error)
+
+func (f httpDoerFunc) Do(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestNewValidatesMem0Config(t *testing.T) {
 	t.Parallel()
@@ -168,4 +178,183 @@ func TestHealthChecksOpenAPI(t *testing.T) {
 	if err := provider.Health(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestProviderHTTPAndMappingHelpersTable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("constructor name auth and health errors", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			provider string
+			cfg      config.ProviderConfig
+			client   httpDoer
+			ctx      func() context.Context
+			wantName string
+			wantErr  string
+			wantAuth string
+			wantXKey string
+		}{
+			{
+				name:     "empty provider name",
+				provider: "",
+				cfg:      config.ProviderConfig{UserID: "user"},
+				client:   http.DefaultClient,
+				wantErr:  "provider name is required",
+			},
+			{
+				name:     "nil client",
+				provider: "mem0",
+				cfg:      config.ProviderConfig{UserID: "user"},
+				wantErr:  "http client is required",
+			},
+			{
+				name:     "bearer auth and status detail",
+				provider: "company",
+				cfg:      config.ProviderConfig{UserID: "user", APIKey: "Bearer token"},
+				client: httpDoerFunc(func(request *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusBadGateway,
+						Status:     "502 Bad Gateway",
+						Body:       io.NopCloser(strings.NewReader(`{"detail":"offline"}`)),
+						Request:    request,
+					}, nil
+				}),
+				wantName: "company",
+				wantErr:  "offline",
+				wantAuth: "Bearer token",
+			},
+			{
+				name:     "x api key health success",
+				provider: "mem0",
+				cfg:      config.ProviderConfig{AgentID: "agent", APIKey: "plain-key"},
+				client: httpDoerFunc(func(request *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Status:     "200 OK",
+						Body:       io.NopCloser(strings.NewReader(`{}`)),
+						Request:    request,
+					}, nil
+				}),
+				wantName: "mem0",
+				wantXKey: "plain-key",
+			},
+			{
+				name:     "canceled context",
+				provider: "mem0",
+				cfg:      config.ProviderConfig{RunID: "run"},
+				client:   http.DefaultClient,
+				ctx: func() context.Context {
+					ctx, cancel := context.WithCancel(context.Background())
+					cancel()
+					return ctx
+				},
+				wantName: "mem0",
+				wantErr:  context.Canceled.Error(),
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var seenAuth, seenXKey string
+				client := tt.client
+				if clientFunc, ok := client.(httpDoerFunc); ok {
+					client = httpDoerFunc(func(request *http.Request) (*http.Response, error) {
+						seenAuth = request.Header.Get("Authorization")
+						seenXKey = request.Header.Get("X-API-Key")
+						return clientFunc(request)
+					})
+				}
+				provider, err := newWithClient(tt.provider, tt.cfg, client)
+				if err != nil {
+					if tt.wantErr == "" || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Fatalf("newWithClient() error = %v, want %q", err, tt.wantErr)
+					}
+					return
+				}
+				if provider.Name() != tt.wantName {
+					t.Fatalf("Name() = %q, want %q", provider.Name(), tt.wantName)
+				}
+				ctx := context.Background()
+				if tt.ctx != nil {
+					ctx = tt.ctx()
+				}
+				err = provider.Health(ctx)
+				if tt.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Fatalf("Health() error = %v, want %q", err, tt.wantErr)
+					}
+					if errors.Is(err, context.Canceled) {
+						return
+					}
+				} else if err != nil {
+					t.Fatalf("Health() error = %v", err)
+				}
+				if seenAuth != tt.wantAuth || seenXKey != tt.wantXKey {
+					t.Fatalf("auth headers = %q/%q, want %q/%q", seenAuth, seenXKey, tt.wantAuth, tt.wantXKey)
+				}
+			})
+		}
+	})
+
+	t.Run("response helpers", func(t *testing.T) {
+		objects := map[string]any{
+			"result": []any{
+				map[string]any{"memory_id": "mem-1", "data": "first", "similarity": json.Number("2"), "metadata": map[string]any{"project": "paxm"}},
+				map[string]any{"uuid": "mem-2", "content": "second", "score": "-1", "createdAt": "2026-07-09T01:02:03Z"},
+				"ignored",
+			},
+		}
+		refs := refsFromResponse("mem0", objects)
+		if len(refs) != 2 || refs[0].ID != "mem-1" || refs[1].ID != "mem-2" {
+			t.Fatalf("refsFromResponse() = %#v", refs)
+		}
+		hits := hitsFromResponse(objects)
+		if len(hits) != 2 {
+			t.Fatalf("hitsFromResponse() = %#v", hits)
+		}
+		if hits[0].Relevance != 1.0/3.0 || hits[0].RawScoreKind != "mem0_similarity" || hits[0].Metadata["project"] != "paxm" {
+			t.Fatalf("first hit was not normalized: %#v", hits[0])
+		}
+		if hits[1].Relevance != 0 || hits[1].CreatedAt.IsZero() {
+			t.Fatalf("second hit was not normalized: %#v", hits[1])
+		}
+		if got := resultObjects("not objects"); got != nil {
+			t.Fatalf("resultObjects(non-object) = %#v", got)
+		}
+	})
+
+	t.Run("scalar helpers", func(t *testing.T) {
+		floatTests := []struct {
+			name string
+			in   any
+			want float64
+			ok   bool
+		}{
+			{name: "float", in: 0.5, want: 0.5, ok: true},
+			{name: "json number", in: json.Number("0.7"), want: 0.7, ok: true},
+			{name: "string", in: "0.9", want: 0.9, ok: true},
+			{name: "bad string", in: "bad"},
+			{name: "nil", in: nil},
+		}
+		for _, tt := range floatTests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, ok := floatField(tt.in)
+				if got != tt.want || ok != tt.ok {
+					t.Fatalf("floatField() = %v, %v; want %v, %v", got, ok, tt.want, tt.ok)
+				}
+			})
+		}
+		if got := normalizeScore(-1); got != 0 {
+			t.Fatalf("normalizeScore(-1) = %v", got)
+		}
+		if got := normalizeScore(2); got != 1.0/3.0 {
+			t.Fatalf("normalizeScore(2) = %v", got)
+		}
+		if got := stringField(map[string]any{"n": json.Number("12"), "empty": " "}, "empty", "n"); got != "12" {
+			t.Fatalf("stringField() = %q", got)
+		}
+		if got := toMem0Metadata(memory.MemoryItem{ID: "id", Source: "source", Metadata: map[string]string{"user_id": "ignored", "k": "v"}, CreatedAt: time.Date(2026, 7, 9, 1, 2, 3, 0, time.UTC)}); !reflect.DeepEqual(got["k"], "v") || got["user_id"] != nil || got["paxm_created_at"] == nil {
+			t.Fatalf("toMem0Metadata() = %#v", got)
+		}
+	})
 }

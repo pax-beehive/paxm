@@ -56,20 +56,7 @@ func (r Runner) Run(ctx context.Context, options RunOptions) (Status, error) {
 	}
 	defer release()
 
-	started := time.Now().UTC()
-	status := Status{
-		State:      "running",
-		Mode:       firstNonEmpty(options.Mode, "foreground"),
-		RunID:      options.RunID,
-		PID:        processID(),
-		Agent:      options.Agent,
-		Provider:   options.Provider,
-		StartedAt:  started,
-		TotalFiles: len(options.Files),
-	}
-	for _, file := range options.Files {
-		status.TotalBytes += file.Size
-	}
+	status := initialStatus(options)
 	if err := r.publish(options, status); err != nil {
 		return status, err
 	}
@@ -77,78 +64,168 @@ func (r Runner) Run(ctx context.Context, options RunOptions) (Status, error) {
 		options.Started(status)
 	}
 
+	operationErrors, err := r.processBackfillFiles(ctx, options, &status)
+	if err != nil {
+		return status, err
+	}
+	return r.finishBackfillRun(options, status, operationErrors)
+}
+
+func initialStatus(options RunOptions) Status {
+	status := Status{
+		State:      "running",
+		Mode:       firstNonEmpty(options.Mode, "foreground"),
+		RunID:      options.RunID,
+		PID:        processID(),
+		Agent:      options.Agent,
+		Provider:   options.Provider,
+		StartedAt:  time.Now().UTC(),
+		TotalFiles: len(options.Files),
+	}
+	for _, file := range options.Files {
+		status.TotalBytes += file.Size
+	}
+	return status
+}
+
+func (r Runner) processBackfillFiles(ctx context.Context, options RunOptions, status *Status) ([]error, error) {
 	var operationErrors []error
 	var nextUpload time.Time
 	for _, file := range options.Files {
-		if err := ctx.Err(); err != nil {
-			status.State = "paused"
-			status.FinishedAt = time.Now().UTC()
-			_ = r.publish(options, status)
-			return status, err
-		}
-		turns, readErr := sessions.ReadFile(options.Agent, file.Path, options.Cutoff)
-		fileStartBytes := status.ProcessedBytes
-		if readErr != nil {
-			status.Failed++
-			operationErrors = append(operationErrors, readErr)
-		} else {
-			var items []facade.IngestInput
-			for _, turn := range turns {
-				items = append(items, turnItems(turn)...)
-			}
-			status.Discovered += len(items)
-			_ = r.publish(options, status)
-			for index, item := range items {
-				done, checkErr := r.Store.Succeeded(options.Scope, item.ID)
-				if checkErr != nil {
-					return status, checkErr
-				}
-				if done {
-					status.Skipped++
-					status.ProcessedBytes = fileStartBytes + file.Size*int64(index+1)/int64(len(items))
-					_ = r.publish(options, status)
-					continue
-				}
-				if wait := time.Until(nextUpload); options.RateInterval > 0 && wait > 0 {
-					timer := time.NewTimer(wait)
-					select {
-					case <-ctx.Done():
-						timer.Stop()
-						status.State = "paused"
-						status.FinishedAt = time.Now().UTC()
-						_ = r.publish(options, status)
-						return status, ctx.Err()
-					case <-timer.C:
-					}
-				}
-				result, ingestErr := r.Service.IngestBatchToProvider(ctx, options.Provider, facade.IngestBatchInput{Items: []facade.IngestInput{item}})
-				nextUpload = time.Now().Add(options.RateInterval)
-				if ingestErr != nil {
-					status.Failed++
-					operationErrors = append(operationErrors, fmt.Errorf("%s: %w", item.ID, ingestErr))
-					status.ProcessedBytes = fileStartBytes + file.Size*int64(index+1)/int64(len(items))
-					_ = r.publish(options, status)
-					continue
-				}
-				providerRef := ""
-				if len(result.Refs) > 0 {
-					providerRef = result.Refs[0].ID
-				}
-				if err := r.Store.MarkSucceeded(options.Scope, item.ID, providerRef); err != nil {
-					return status, err
-				}
-				status.Uploaded++
-				status.ProcessedBytes = fileStartBytes + file.Size*int64(index+1)/int64(len(items))
-				_ = r.publish(options, status)
-			}
-		}
-		status.ProcessedFiles++
-		status.ProcessedBytes = fileStartBytes + file.Size
-		updateRates(&status)
-		if err := r.publish(options, status); err != nil {
-			return status, err
+		fileErrors, err := r.processBackfillFile(ctx, options, status, file, &nextUpload)
+		operationErrors = append(operationErrors, fileErrors...)
+		if err != nil {
+			return operationErrors, err
 		}
 	}
+	return operationErrors, nil
+}
+
+func (r Runner) processBackfillFile(ctx context.Context, options RunOptions, status *Status, file sessions.File, nextUpload *time.Time) ([]error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, r.pauseBackfill(options, status, err)
+	}
+	turns, readErr := sessions.ReadFile(options.Agent, file.Path, options.Cutoff)
+	fileStartBytes := status.ProcessedBytes
+	if readErr != nil {
+		status.Failed++
+		return []error{readErr}, r.finishBackfillFile(options, status, fileStartBytes, file.Size)
+	}
+
+	items := ingestItems(turns)
+	status.Discovered += len(items)
+	_ = r.publish(options, *status)
+	operationErrors, err := r.processBackfillItems(ctx, options, status, fileProgress{startBytes: fileStartBytes, size: file.Size, total: len(items)}, items, nextUpload)
+	if err != nil {
+		return operationErrors, err
+	}
+	return operationErrors, r.finishBackfillFile(options, status, fileStartBytes, file.Size)
+}
+
+func ingestItems(turns []sessions.Turn) []facade.IngestInput {
+	var items []facade.IngestInput
+	for _, turn := range turns {
+		items = append(items, turnItems(turn)...)
+	}
+	return items
+}
+
+type fileProgress struct {
+	startBytes int64
+	size       int64
+	total      int
+}
+
+func (r Runner) processBackfillItems(ctx context.Context, options RunOptions, status *Status, progress fileProgress, items []facade.IngestInput, nextUpload *time.Time) ([]error, error) {
+	var operationErrors []error
+	for index, item := range items {
+		operationErr, err := r.processBackfillItem(ctx, options, status, progress, index, item, nextUpload)
+		if operationErr != nil {
+			operationErrors = append(operationErrors, operationErr)
+		}
+		if err != nil {
+			return operationErrors, err
+		}
+	}
+	return operationErrors, nil
+}
+
+func (r Runner) processBackfillItem(ctx context.Context, options RunOptions, status *Status, progress fileProgress, index int, item facade.IngestInput, nextUpload *time.Time) (error, error) {
+	done, checkErr := r.Store.Succeeded(options.Scope, item.ID)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	processedBytes := progress.itemBytes(index)
+	if done {
+		status.Skipped++
+		status.ProcessedBytes = processedBytes
+		_ = r.publish(options, *status)
+		return nil, nil
+	}
+	if err := waitForNextUpload(ctx, *nextUpload, options.RateInterval); err != nil {
+		return nil, r.pauseBackfill(options, status, err)
+	}
+	result, ingestErr := r.Service.IngestBatchToProvider(ctx, options.Provider, facade.IngestBatchInput{Items: []facade.IngestInput{item}})
+	*nextUpload = time.Now().Add(options.RateInterval)
+	if ingestErr != nil {
+		status.Failed++
+		status.ProcessedBytes = processedBytes
+		_ = r.publish(options, *status)
+		return fmt.Errorf("%s: %w", item.ID, ingestErr), nil
+	}
+	if err := r.Store.MarkSucceeded(options.Scope, item.ID, firstProviderRef(result)); err != nil {
+		return nil, err
+	}
+	status.Uploaded++
+	status.ProcessedBytes = processedBytes
+	_ = r.publish(options, *status)
+	return nil, nil
+}
+
+func (progress fileProgress) itemBytes(index int) int64 {
+	if progress.total == 0 {
+		return progress.startBytes + progress.size
+	}
+	return progress.startBytes + progress.size*int64(index+1)/int64(progress.total)
+}
+
+func waitForNextUpload(ctx context.Context, nextUpload time.Time, interval time.Duration) error {
+	wait := time.Until(nextUpload)
+	if interval <= 0 || wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (r Runner) finishBackfillFile(options RunOptions, status *Status, fileStartBytes, fileSize int64) error {
+	status.ProcessedFiles++
+	status.ProcessedBytes = fileStartBytes + fileSize
+	updateRates(status)
+	return r.publish(options, *status)
+}
+
+func (r Runner) pauseBackfill(options RunOptions, status *Status, err error) error {
+	status.State = "paused"
+	status.FinishedAt = time.Now().UTC()
+	_ = r.publish(options, *status)
+	return err
+}
+
+func firstProviderRef(result facade.IngestResult) string {
+	if len(result.Refs) == 0 {
+		return ""
+	}
+	return result.Refs[0].ID
+}
+
+func (r Runner) finishBackfillRun(options RunOptions, status Status, operationErrors []error) (Status, error) {
 	status.FinishedAt = time.Now().UTC()
 	status.State = "completed"
 	if len(operationErrors) > 0 {

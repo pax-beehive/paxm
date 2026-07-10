@@ -26,6 +26,18 @@ type backfillStartResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
+type backfillRunArgs struct {
+	agentName        string
+	providerName     string
+	before           string
+	rate             string
+	maxDuration      time.Duration
+	backgroundMode   bool
+	backgroundWorker bool
+	runID            string
+	startResultPath  string
+}
+
 func (r runner) runBackfill(args []string) error {
 	if len(args) == 0 {
 		return errors.New("backfill requires scan, run, or status")
@@ -95,6 +107,54 @@ func (r runner) runBackfillScan(args []string) error {
 }
 
 func (r runner) runBackfillRun(args []string) error {
+	runArgs, err := r.parseBackfillRunArgs(args)
+	if err != nil {
+		return err
+	}
+	agent, err := validateBackfillAgent(runArgs.agentName)
+	if err != nil {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
+	}
+	provider := strings.TrimSpace(runArgs.providerName)
+	if provider == "" {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, errors.New("backfill run requires --provider"))
+	}
+	interval, err := parseBackfillRate(runArgs.rate)
+	if err != nil {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
+	}
+	cfg, service, err := r.loadRuntime()
+	if err != nil {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
+	}
+	providerCfg, ok := cfg.Providers[provider]
+	if !ok || !providerCfg.Enabled {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, fmt.Errorf("provider %q is not enabled", provider))
+	}
+	cutoff, err := backfillCutoff(runArgs.before, cfg.Agents[agent])
+	if err != nil {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
+	}
+	if runArgs.backgroundMode && !runArgs.backgroundWorker {
+		return r.startBackgroundBackfill(agent, provider, cutoff, runArgs.rate, runArgs.maxDuration)
+	}
+	files, err := sessions.Discover(agent)
+	if err != nil {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
+	}
+	store, err := backfill.Open(backfillStateDir(cfg, r.configFile()))
+	if err != nil {
+		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
+	}
+	defer store.Close()
+	options := r.backfillRunOptions(runArgs, agent, provider, files, cutoff, interval)
+	ctx, cleanup := backfillRunContext(runArgs.maxDuration)
+	defer cleanup()
+	status, runErr := (backfill.Runner{Store: store, Service: service}).Run(ctx, options)
+	return r.finishBackfillRun(runArgs, status, runErr)
+}
+
+func (r runner) parseBackfillRunArgs(args []string) (backfillRunArgs, error) {
 	flags := flag.NewFlagSet("backfill run", flag.ContinueOnError)
 	flags.SetOutput(r.stderr)
 	agentName := flags.String("agent", "", "agent session source")
@@ -107,67 +167,48 @@ func (r runner) runBackfillRun(args []string) error {
 	runID := flags.String("run-id", "", "internal run id")
 	startResultPath := flags.String("start-result", "", "internal background startup result")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return backfillRunArgs{}, err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("backfill run does not accept positional arguments")
+		return backfillRunArgs{}, errors.New("backfill run does not accept positional arguments")
 	}
-	agent, err := validateBackfillAgent(*agentName)
-	if err != nil {
-		return r.finishBackfillWorkerStart(*startResultPath, err)
+	return backfillRunArgs{
+		agentName:        *agentName,
+		providerName:     *providerName,
+		before:           *before,
+		rate:             *rate,
+		maxDuration:      *maxDuration,
+		backgroundMode:   *backgroundMode,
+		backgroundWorker: *backgroundWorker,
+		runID:            *runID,
+		startResultPath:  *startResultPath,
+	}, nil
+}
+
+func backfillRunContext(maxDuration time.Duration) (context.Context, func()) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	if maxDuration <= 0 {
+		return ctx, stop
 	}
-	provider := strings.TrimSpace(*providerName)
-	if provider == "" {
-		return r.finishBackfillWorkerStart(*startResultPath, errors.New("backfill run requires --provider"))
+	timeoutCtx, cancel := context.WithTimeout(ctx, maxDuration)
+	return timeoutCtx, func() {
+		cancel()
+		stop()
 	}
-	interval, err := parseBackfillRate(*rate)
-	if err != nil {
-		return r.finishBackfillWorkerStart(*startResultPath, err)
+}
+
+func (r runner) backfillRunOptions(args backfillRunArgs, agent, provider string, files []sessions.File, cutoff time.Time, interval time.Duration) backfill.RunOptions {
+	runID := args.runID
+	if runID == "" {
+		runID = backfill.NewRunID()
 	}
-	cfg, service, err := r.loadRuntime()
-	if err != nil {
-		return r.finishBackfillWorkerStart(*startResultPath, err)
-	}
-	providerCfg, ok := cfg.Providers[provider]
-	if !ok || !providerCfg.Enabled {
-		return r.finishBackfillWorkerStart(*startResultPath, fmt.Errorf("provider %q is not enabled", provider))
-	}
-	cutoff, err := backfillCutoff(*before, cfg.Agents[agent])
-	if err != nil {
-		return r.finishBackfillWorkerStart(*startResultPath, err)
-	}
-	if *backgroundMode && !*backgroundWorker {
-		return r.startBackgroundBackfill(agent, provider, cutoff, *rate, *maxDuration)
-	}
-	files, err := sessions.Discover(agent)
-	if err != nil {
-		return r.finishBackfillWorkerStart(*startResultPath, err)
-	}
-	stateDir := backfillStateDir(cfg, r.configFile())
-	store, err := backfill.Open(stateDir)
-	if err != nil {
-		return r.finishBackfillWorkerStart(*startResultPath, err)
-	}
-	defer store.Close()
-	if *runID == "" {
-		*runID = backfill.NewRunID()
-	}
-	scope := backfill.Scope(r.configFile(), agent, provider)
 	mode := "foreground"
-	if *backgroundWorker {
+	if args.backgroundWorker {
 		mode = "background"
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	if *maxDuration > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, *maxDuration)
-		defer cancel()
-	}
 	options := backfill.RunOptions{
-		Scope:        scope,
-		RunID:        *runID,
+		Scope:        backfill.Scope(r.configFile(), agent, provider),
+		RunID:        runID,
 		Mode:         mode,
 		Agent:        agent,
 		Provider:     provider,
@@ -175,19 +216,22 @@ func (r runner) runBackfillRun(args []string) error {
 		Cutoff:       cutoff,
 		RateInterval: interval,
 	}
-	if *backgroundWorker {
+	if args.backgroundWorker {
 		options.Started = func(status backfill.Status) {
-			_ = writeBackfillStartResult(*startResultPath, backfillStartResult{Started: true, RunID: status.RunID})
+			_ = writeBackfillStartResult(args.startResultPath, backfillStartResult{Started: true, RunID: status.RunID})
 		}
 	} else {
 		options.Progress = newBackfillProgressWriter(r.stdout)
 	}
-	status, runErr := (backfill.Runner{Store: store, Service: service}).Run(ctx, options)
-	if *backgroundWorker && status.StartedAt.IsZero() {
-		_ = writeBackfillStartResult(*startResultPath, backfillStartResult{Error: errorText(runErr)})
+	return options
+}
+
+func (r runner) finishBackfillRun(args backfillRunArgs, status backfill.Status, runErr error) error {
+	if args.backgroundWorker && status.StartedAt.IsZero() {
+		_ = writeBackfillStartResult(args.startResultPath, backfillStartResult{Error: errorText(runErr)})
 	}
 	if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, context.Canceled) {
-		if !*backgroundWorker {
+		if !args.backgroundWorker {
 			fmt.Fprintf(r.stdout, "Backfill paused: uploaded=%d skipped=%d failed=%d\n", status.Uploaded, status.Skipped, status.Failed)
 		}
 		return nil
@@ -195,7 +239,7 @@ func (r runner) runBackfillRun(args []string) error {
 	if runErr != nil {
 		return runErr
 	}
-	if !*backgroundWorker {
+	if !args.backgroundWorker {
 		fmt.Fprintf(r.stdout, "Backfill complete: uploaded=%d skipped=%d failed=%d\n", status.Uploaded, status.Skipped, status.Failed)
 	}
 	return nil

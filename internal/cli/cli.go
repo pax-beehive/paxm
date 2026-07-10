@@ -120,19 +120,9 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	prompter := newSetupPrompter(r.stdin, r.stdout)
-	configExists := config.Exists(path)
-	if configExists && !*force {
-		if *yes {
-			return fmt.Errorf("config already exists at %s; use --force to overwrite", path)
-		}
-		overwrite, err := prompter.confirm(fmt.Sprintf("Update existing config at %s?", path), false)
-		if err != nil {
-			return r.finishSetupPrompt(err)
-		}
-		if !overwrite {
-			fmt.Fprintln(r.stdout, "setup cancelled")
-			return nil
-		}
+	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, *force, *yes)
+	if err != nil || !proceed {
+		return err
 	}
 	cfg, err := setupBaseConfig(path, configExists)
 	if err != nil {
@@ -141,62 +131,19 @@ func (r runner) runSetup(args []string) error {
 	selectedProviders := defaultSelections(providerOptions(cfg), cfgProviderEnabled(cfg))
 	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
 	if !*yes {
-		var err error
-		selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(cfg), selectedProviders)
-		if err != nil {
-			return r.finishSetupPrompt(err)
-		}
-		for _, providerName := range providerOptionIDs(cfg) {
-			if !selectedProviders[providerName] {
-				continue
-			}
-			if err := promptProviderInstance(prompter.reader, prompter.output, &cfg, providerName); err != nil {
-				return r.finishSetupPrompt(err)
-			}
-		}
-		selectedHooks, err = prompter.multiSelect("Select agents for passive memory", hookOptions(cfg), selectedHooks)
-		if err != nil {
-			return r.finishSetupPrompt(err)
-		}
-		if err := configureSelectedAgents(prompter, &cfg, selectedHooks); err != nil {
-			return r.finishSetupPrompt(err)
+		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
+		if err != nil || !proceed {
+			return err
 		}
 	}
 	if !anySelected(selectedProviders) {
 		return errors.New("setup requires at least one memory provider")
 	}
-
-	for name, provider := range cfg.Providers {
-		provider.Enabled = selectedProviders[name]
-		cfg.Providers[name] = provider
-		if !provider.Enabled {
-			removeProviderFromDefaultProfiles(&cfg, name)
-		}
-	}
-	for name, selected := range selectedHooks {
-		if !selected {
-			continue
-		}
-		agent := cfg.Agents[name]
-		if agentPassiveWriteEnabled(agent) && strings.TrimSpace(agent.PassiveWriteStartedAt) == "" {
-			agent.PassiveWriteStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			cfg.Agents[name] = agent
-		}
-	}
-	if *yes {
-		for name, agent := range cfg.Agents {
-			agent.Enabled = selectedHooks[name]
-			cfg.Agents[name] = agent
-		}
-	} else {
-		writeSetupSummary(r.stdout, cfg, selectedProviders, selectedHooks)
-		apply, err := prompter.confirm("Apply this setup?", true)
-		if err != nil {
-			return r.finishSetupPrompt(err)
-		}
-		if !apply {
-			fmt.Fprintln(r.stdout, "setup cancelled")
-			return nil
+	applySetupSelections(&cfg, selectedProviders, selectedHooks, *yes)
+	if !*yes {
+		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
+		if err != nil || !proceed {
+			return err
 		}
 	}
 	zepUserResult, err := maybeEnsureZepUser(context.Background(), cfg)
@@ -214,6 +161,95 @@ func (r runner) runSetup(args []string) error {
 		}
 		fmt.Fprintf(r.stdout, "ensured Zep user: %s (%s)\n", zepUserResult.UserID, status)
 	}
+	return r.installSelectedHookIntegrations(path, cfg, selectedHooks)
+}
+
+func (r runner) confirmSetupOverwrite(path string, prompter *setupPrompter, force, yes bool) (bool, bool, error) {
+	configExists := config.Exists(path)
+	if !configExists || force {
+		return configExists, true, nil
+	}
+	if yes {
+		return configExists, false, fmt.Errorf("config already exists at %s; use --force to overwrite", path)
+	}
+	overwrite, err := prompter.confirm(fmt.Sprintf("Update existing config at %s?", path), false)
+	if err != nil {
+		return configExists, false, r.finishSetupPrompt(err)
+	}
+	if !overwrite {
+		fmt.Fprintln(r.stdout, "setup cancelled")
+		return configExists, false, nil
+	}
+	return configExists, true, nil
+}
+
+func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Config, selectedProviders, selectedHooks map[string]bool) (map[string]bool, map[string]bool, bool, error) {
+	var err error
+	selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(*cfg), selectedProviders)
+	if err != nil {
+		return nil, nil, false, r.finishSetupPrompt(err)
+	}
+	for _, providerName := range providerOptionIDs(*cfg) {
+		if !selectedProviders[providerName] {
+			continue
+		}
+		if err := promptProviderInstance(prompter.reader, prompter.output, cfg, providerName); err != nil {
+			return nil, nil, false, r.finishSetupPrompt(err)
+		}
+	}
+	selectedHooks, err = prompter.multiSelect("Select agents for passive memory", hookOptions(*cfg), selectedHooks)
+	if err != nil {
+		return nil, nil, false, r.finishSetupPrompt(err)
+	}
+	if err := configureSelectedAgents(prompter, cfg, selectedHooks); err != nil {
+		return nil, nil, false, r.finishSetupPrompt(err)
+	}
+	return selectedProviders, selectedHooks, true, nil
+}
+
+func applySetupSelections(cfg *config.Config, selectedProviders, selectedHooks map[string]bool, yes bool) {
+	for name, provider := range cfg.Providers {
+		provider.Enabled = selectedProviders[name]
+		cfg.Providers[name] = provider
+		if !provider.Enabled {
+			removeProviderFromDefaultProfiles(cfg, name)
+		}
+	}
+	for name, selected := range selectedHooks {
+		if selected {
+			enablePassiveWriteStart(cfg, name)
+		}
+	}
+	if yes {
+		for name, agent := range cfg.Agents {
+			agent.Enabled = selectedHooks[name]
+			cfg.Agents[name] = agent
+		}
+	}
+}
+
+func enablePassiveWriteStart(cfg *config.Config, name string) {
+	agent := cfg.Agents[name]
+	if agentPassiveWriteEnabled(agent) && strings.TrimSpace(agent.PassiveWriteStartedAt) == "" {
+		agent.PassiveWriteStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		cfg.Agents[name] = agent
+	}
+}
+
+func (r runner) confirmSetupSummary(prompter *setupPrompter, cfg config.Config, selectedProviders, selectedHooks map[string]bool) (bool, error) {
+	writeSetupSummary(r.stdout, cfg, selectedProviders, selectedHooks)
+	apply, err := prompter.confirm("Apply this setup?", true)
+	if err != nil {
+		return false, r.finishSetupPrompt(err)
+	}
+	if !apply {
+		fmt.Fprintln(r.stdout, "setup cancelled")
+		return false, nil
+	}
+	return true, nil
+}
+
+func (r runner) installSelectedHookIntegrations(path string, cfg config.Config, selectedHooks map[string]bool) error {
 	for _, name := range sortedSelected(selectedHooks) {
 		if !selectedHooks[name] {
 			continue

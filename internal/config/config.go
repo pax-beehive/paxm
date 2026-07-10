@@ -724,44 +724,58 @@ func normalizeAgent(agent AgentConfig) AgentConfig {
 		delete(agent.Hooks, "user_prompt")
 	}
 	for name, hook := range agent.Hooks {
-		if name == "user_input" && hook.Recall.Enabled && hook.Recall.Initial == nil {
-			hook.Recall.Initial = defaultInitialHookRecall()
-		}
-		if hook.Recall.Profile == "" {
-			hook.Recall.Profile = "default"
-		}
-		if hook.Recall.Output == "" {
-			hook.Recall.Output = "markdown"
-		}
-		if hook.Recall.Initial != nil {
-			if hook.Recall.Initial.Profile == "" {
-				hook.Recall.Initial.Profile = hook.Recall.Profile
-			}
-			if hook.Recall.Initial.QueryTemplate == "" {
-				hook.Recall.Initial.QueryTemplate = hook.Recall.QueryTemplate
-			}
-			if hook.Recall.Initial.MaxResults == 0 {
-				hook.Recall.Initial.MaxResults = hook.Recall.MaxResults
-			}
-		}
-		if hook.Write.Profile == "" {
-			hook.Write.Profile = "default"
-		}
-		if hook.Write.Template == "" {
-			hook.Write.Template = "{{ .prompt }}"
-		}
-		if hook.Write.Mode == "" {
-			hook.Write.Mode = "prompt"
-		}
-		if hook.Write.Enabled && !hook.Write.Buffer.Enabled {
-			hook.Write.Buffer.Enabled = true
-		}
-		if hook.Write.Buffer.Enabled && hook.Write.Buffer.FlushCount == 0 {
-			hook.Write.Buffer.FlushCount = 10
-		}
+		hook = normalizeHookRecall(name, hook)
+		hook = normalizeHookWrite(hook)
 		agent.Hooks[name] = hook
 	}
 	return agent
+}
+
+func normalizeHookRecall(name string, hook AgentHookConfig) AgentHookConfig {
+	if name == "user_input" && hook.Recall.Enabled && hook.Recall.Initial == nil {
+		hook.Recall.Initial = defaultInitialHookRecall()
+	}
+	if hook.Recall.Profile == "" {
+		hook.Recall.Profile = "default"
+	}
+	if hook.Recall.Output == "" {
+		hook.Recall.Output = "markdown"
+	}
+	if hook.Recall.Initial != nil {
+		normalizeInitialHookRecall(hook.Recall.Initial, hook.Recall)
+	}
+	return hook
+}
+
+func normalizeInitialHookRecall(initial *HookInitialRecall, recall HookRecallConfig) {
+	if initial.Profile == "" {
+		initial.Profile = recall.Profile
+	}
+	if initial.QueryTemplate == "" {
+		initial.QueryTemplate = recall.QueryTemplate
+	}
+	if initial.MaxResults == 0 {
+		initial.MaxResults = recall.MaxResults
+	}
+}
+
+func normalizeHookWrite(hook AgentHookConfig) AgentHookConfig {
+	if hook.Write.Profile == "" {
+		hook.Write.Profile = "default"
+	}
+	if hook.Write.Template == "" {
+		hook.Write.Template = "{{ .prompt }}"
+	}
+	if hook.Write.Mode == "" {
+		hook.Write.Mode = "prompt"
+	}
+	if hook.Write.Enabled && !hook.Write.Buffer.Enabled {
+		hook.Write.Buffer.Enabled = true
+	}
+	if hook.Write.Buffer.Enabled && hook.Write.Buffer.FlushCount == 0 {
+		hook.Write.Buffer.FlushCount = 10
+	}
+	return hook
 }
 
 func passiveInitialRecallProfileFrom(base RecallProfileConfig) RecallProfileConfig {

@@ -25,6 +25,12 @@ type SearchResult struct {
 	ProviderErrors []ProviderError `json:"provider_errors,omitempty"`
 }
 
+type searchResponse struct {
+	binding ProviderBinding
+	hits    []MemoryHit
+	err     error
+}
+
 type PutResult struct {
 	Refs           []MemoryRef     `json:"refs"`
 	ProviderErrors []ProviderError `json:"provider_errors,omitempty"`
@@ -58,17 +64,7 @@ func (r *Router) Search(ctx context.Context, query SearchQuery) (SearchResult, e
 }
 
 func (r *Router) SearchWithPolicy(ctx context.Context, query SearchQuery, policy SearchPolicy) (SearchResult, error) {
-	var readable []ProviderBinding
-	var err error
-	if len(policy.Providers) > 0 {
-		readable, err = r.bindingsForRoutes(policy.Providers, "search")
-	} else {
-		for _, binding := range r.providers {
-			if binding.Read {
-				readable = append(readable, binding)
-			}
-		}
-	}
+	readable, err := r.readableBindings(policy)
 	if err != nil {
 		return SearchResult{}, err
 	}
@@ -79,88 +75,118 @@ func (r *Router) SearchWithPolicy(ctx context.Context, query SearchQuery, policy
 		query.Limit = policy.Limit
 	}
 
-	type response struct {
-		binding ProviderBinding
-		hits    []MemoryHit
-		err     error
+	result, requiredErrs := collectSearchResponses(searchProviders(ctx, query, readable), policy)
+	if len(requiredErrs) > 0 {
+		return result, errors.Join(requiredErrs...)
 	}
+	sortSearchHits(result.Hits)
+	if query.Limit > 0 && len(result.Hits) > query.Limit {
+		result.Hits = result.Hits[:query.Limit]
+	}
+	return result, nil
+}
 
-	responses := make(chan response, len(readable))
+func (r *Router) readableBindings(policy SearchPolicy) ([]ProviderBinding, error) {
+	if len(policy.Providers) > 0 {
+		return r.bindingsForRoutes(policy.Providers, "search")
+	}
+	var readable []ProviderBinding
+	for _, binding := range r.providers {
+		if binding.Read {
+			readable = append(readable, binding)
+		}
+	}
+	return readable, nil
+}
+
+func searchProviders(ctx context.Context, query SearchQuery, readable []ProviderBinding) []searchResponse {
+	responses := make(chan searchResponse, len(readable))
 	var wg sync.WaitGroup
 	for _, binding := range readable {
 		wg.Add(1)
 		go func(binding ProviderBinding) {
 			defer wg.Done()
 			hits, err := binding.Provider.Search(ctx, query)
-			responses <- response{binding: binding, hits: hits, err: err}
+			responses <- searchResponse{binding: binding, hits: hits, err: err}
 		}(binding)
 	}
 	wg.Wait()
 	close(responses)
 
+	collected := make([]searchResponse, 0, len(readable))
+	for response := range responses {
+		collected = append(collected, response)
+	}
+	return collected
+}
+
+func collectSearchResponses(responses []searchResponse, policy SearchPolicy) (SearchResult, []error) {
 	var result SearchResult
 	var requiredErrs []error
 	seen := make(map[string]struct{})
-	for res := range responses {
-		name := res.binding.Provider.Name()
-		if res.err != nil {
-			providerErr := ProviderError{
-				Provider: name,
-				Required: res.binding.Required,
-				Op:       "search",
-				Error:    res.err.Error(),
-			}
-			result.ProviderErrors = append(result.ProviderErrors, providerErr)
-			if res.binding.Required {
-				requiredErrs = append(requiredErrs, fmt.Errorf("%s: %w", name, res.err))
-			}
+	for _, response := range responses {
+		providerErr := appendSearchResponse(&result, seen, response, policy)
+		if providerErr != nil {
+			requiredErrs = append(requiredErrs, providerErr)
+		}
+	}
+	return result, requiredErrs
+}
+
+func appendSearchResponse(result *SearchResult, seen map[string]struct{}, response searchResponse, policy SearchPolicy) error {
+	name := response.binding.Provider.Name()
+	if response.err != nil {
+		result.ProviderErrors = append(result.ProviderErrors, ProviderError{
+			Provider: name,
+			Required: response.binding.Required,
+			Op:       "search",
+			Error:    response.err.Error(),
+		})
+		if response.binding.Required {
+			return fmt.Errorf("%s: %w", name, response.err)
+		}
+		return nil
+	}
+	weight := response.binding.Weight
+	if weight == 0 {
+		weight = 1
+	}
+	minRelevance := policy.MinRelevance
+	if response.binding.MinRelevance != 0 {
+		minRelevance = response.binding.MinRelevance
+	}
+	minScore := policy.MinScore
+	if response.binding.MinScore != 0 {
+		minScore = response.binding.MinScore
+	}
+	for _, hit := range response.hits {
+		hit.Provider = name
+		relevance := normalizedRelevance(hit)
+		if relevance < minRelevance {
 			continue
 		}
-		weight := res.binding.Weight
-		if weight == 0 {
-			weight = 1
+		hit.Relevance = relevance
+		hit.Score = relevance*weight + recencyScore(hit.CreatedAt, policy.RecencyBoost)
+		if hit.Score < minScore {
+			continue
 		}
-		minRelevance := policy.MinRelevance
-		if res.binding.MinRelevance != 0 {
-			minRelevance = res.binding.MinRelevance
+		key := dedupeKey(hit)
+		if _, exists := seen[key]; exists {
+			continue
 		}
-		minScore := policy.MinScore
-		if res.binding.MinScore != 0 {
-			minScore = res.binding.MinScore
-		}
-		for _, hit := range res.hits {
-			hit.Provider = name
-			relevance := normalizedRelevance(hit)
-			if relevance < minRelevance {
-				continue
-			}
-			hit.Relevance = relevance
-			hit.Score = relevance*weight + recencyScore(hit.CreatedAt, policy.RecencyBoost)
-			if hit.Score < minScore {
-				continue
-			}
-			key := dedupeKey(hit)
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-			result.Hits = append(result.Hits, hit)
-		}
+		seen[key] = struct{}{}
+		result.Hits = append(result.Hits, hit)
 	}
-	if len(requiredErrs) > 0 {
-		return result, errors.Join(requiredErrs...)
-	}
+	return nil
+}
 
-	sort.SliceStable(result.Hits, func(i, j int) bool {
-		if result.Hits[i].Score == result.Hits[j].Score {
-			return result.Hits[i].CreatedAt.After(result.Hits[j].CreatedAt)
+func sortSearchHits(hits []MemoryHit) {
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score == hits[j].Score {
+			return hits[i].CreatedAt.After(hits[j].CreatedAt)
 		}
-		return result.Hits[i].Score > result.Hits[j].Score
+		return hits[i].Score > hits[j].Score
 	})
-	if query.Limit > 0 && len(result.Hits) > query.Limit {
-		result.Hits = result.Hits[:query.Limit]
-	}
-	return result, nil
 }
 
 func (r *Router) Put(ctx context.Context, item MemoryItem) (PutResult, error) {
