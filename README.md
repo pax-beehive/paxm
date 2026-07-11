@@ -59,7 +59,7 @@ paxm setup --integration codex-plugin
 Install the pinned plugin release from the public GitHub marketplace:
 
 ```bash
-codex plugin marketplace add pax-beehive/memory-adaptor --ref paxm-memory-v0.1.0
+codex plugin marketplace add pax-beehive/memory-adaptor --ref paxm-memory-v0.1.1
 codex plugin add paxm-memory@pax-agent-nexus
 codex plugin list
 ```
@@ -75,7 +75,7 @@ paxm remember --text "Codex plugin smoke test"
 paxm recall --query "Codex plugin smoke test" --limit 3
 ```
 
-The plugin installs the pinned `paxm` binary (`v0.1.12` by default) through the
+The plugin installs the pinned `paxm` binary (`v0.1.13` by default) through the
 official release installer. It does not install provider credentials or bypass
 Codex hook trust. To pin a different CLI release, set `PAXM_VERSION` before
 running the plugin's setup skill.

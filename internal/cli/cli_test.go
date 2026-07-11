@@ -672,6 +672,125 @@ func TestInternalHookDoesNotBufferWhenHookWriteDisabled(t *testing.T) {
 	}
 }
 
+func TestInternalCodexUserInputHookEmitsNativeContext(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	cfg.Providers["sqlite"] = config.ProviderConfig{
+		Type:    "sqlite",
+		Enabled: true,
+		Path:    filepath.Join(t.TempDir(), "memory.sqlite"),
+	}
+	codex := cfg.Agents["codex"]
+	codex.Enabled = true
+	codex.Integration.Owner = config.IntegrationOwnerCodexPlugin
+	userInput := codex.Hooks["user_input"]
+	userInput.Recall.Enabled = true
+	userInput.Recall.Profile = "default"
+	userInput.Recall.MaxResults = 3
+	userInput.Recall.Insertion = config.HookInsertionConfig{MaxItems: 3}
+	userInput.Recall.Initial = &config.HookInitialRecall{Enabled: false}
+	userInput.Write.Enabled = false
+	codex.Hooks["user_input"] = userInput
+	cfg.Agents["codex"] = codex
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PAXM_INTEGRATION_OWNER", config.IntegrationOwnerCodexPlugin)
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hookSourceAllowed(loaded, facade.HookEvent{Target: "codex", Event: "user_input"}) {
+		t.Fatalf("plugin-owned Codex hook source was unexpectedly rejected: owner=%q env=%q", loaded.Agents["codex"].Integration.Owner, os.Getenv("PAXM_INTEGRATION_OWNER"))
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"--config", configPath, "remember", "--profile", "stm", "--text", "codex native hook contract"}, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("remember failed with code %d: %s", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"--config", configPath, "recall", "--query", "codex native hook contract", "--json"}, nil, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "codex native hook contract") {
+		t.Fatalf("acceptance fixture was not recallable, code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	eventJSON := `{"prompt":"codex native hook contract","workspace":"/tmp/project"}`
+	code = Main([]string{"--config", configPath, "recall", "--hook-event", "--json"}, strings.NewReader(eventJSON), &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "codex native hook contract") {
+		t.Fatalf("hook fixture was not recallable, code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	event := strings.NewReader(eventJSON)
+	code = Main([]string{"--config", configPath, "__hook", "--target", "codex", "--event", "user_input", "--json"}, event, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("hook failed with code %d: %s", code, stderr.String())
+	}
+
+	var output struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+		Target string `json:"target"`
+		Event  string `json:"event"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("hook did not emit valid JSON: %v\n%s", err, stdout.String())
+	}
+	if output.HookSpecificOutput.HookEventName != "UserPromptSubmit" {
+		t.Fatalf("unexpected hook event name: %#v", output)
+	}
+	if !strings.Contains(output.HookSpecificOutput.AdditionalContext, "codex native hook contract") {
+		t.Fatalf("native context omitted recalled memory: %#v", output)
+	}
+	if output.Target != "" || output.Event != "" {
+		t.Fatalf("internal paxm hook fields leaked into Codex output: %#v", output)
+	}
+}
+
+func TestInternalCodexUserInputHookIsSilentWithoutHits(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	cfg.Providers["sqlite"] = config.ProviderConfig{
+		Type:    "sqlite",
+		Enabled: true,
+		Path:    filepath.Join(t.TempDir(), "memory.sqlite"),
+	}
+	codex := cfg.Agents["codex"]
+	codex.Enabled = true
+	codex.Integration.Owner = config.IntegrationOwnerCodexPlugin
+	userInput := codex.Hooks["user_input"]
+	userInput.Recall.Enabled = true
+	userInput.Recall.Profile = "default"
+	userInput.Recall.MaxResults = 3
+	userInput.Recall.Insertion = config.HookInsertionConfig{MaxItems: 3}
+	userInput.Recall.Initial = &config.HookInitialRecall{Enabled: false}
+	userInput.Write.Enabled = false
+	codex.Hooks["user_input"] = userInput
+	cfg.Agents["codex"] = codex
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PAXM_INTEGRATION_OWNER", config.IntegrationOwnerCodexPlugin)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	event := strings.NewReader(`{"prompt":"memory that does not exist","workspace":"/tmp/project"}`)
+	code := Main([]string{"--config", configPath, "__hook", "--target", "codex", "--event", "user_input", "--json"}, event, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("hook failed with code %d: %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("no-hit Codex hook should be silent, got: %s", stdout.String())
+	}
+}
+
 func TestDecodeHookEventExtractsSafeWriteFields(t *testing.T) {
 	event, err := decodeHookEvent([]byte(`{
 		"session_id": "volatile-session",

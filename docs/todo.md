@@ -1,9 +1,10 @@
 # paxm TODO
 
 The detailed delivery plan is in [`docs/roadmap.md`](roadmap.md). The v0.1
-Codex plugin slice is scaffolded under `plugins/paxm-memory/`; the remaining
-work here is clean-machine testing, binary/plugin release pairing, and public
-distribution.
+Codex plugin slice is scaffolded under `plugins/paxm-memory/`. The initial
+real-task blocker and successful remediation run are recorded in
+[`docs/acceptance/phase-1-v0.1.md`](acceptance/phase-1-v0.1.md). The compatible
+release pairing is binary `v0.1.13` with plugin `v0.1.1`.
 
 ## Codex Plugin Distribution
 

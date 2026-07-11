@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -520,7 +521,7 @@ func (r runner) runRecall(args []string) error {
 		if err != nil {
 			return err
 		}
-		return r.executeHook(event, *jsonOut)
+		return r.executeHook(event, *jsonOut, false)
 	}
 	q := firstNonEmpty(*query, *queryShort)
 	if *stdin {
@@ -595,7 +596,7 @@ func (r runner) runRemember(args []string) error {
 	return nil
 }
 
-func (r runner) executeHook(event facade.HookEvent, jsonOut bool) error {
+func (r runner) executeHook(event facade.HookEvent, jsonOut, codexNative bool) error {
 	cfg, service, err := r.loadRuntime()
 	if err != nil {
 		return err
@@ -614,6 +615,9 @@ func (r runner) executeHook(event facade.HookEvent, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
+	if codexNative {
+		return writeCodexUserPromptHookOutput(r.stdout, result)
+	}
 	if jsonOut {
 		return writeJSON(r.stdout, result)
 	}
@@ -622,6 +626,33 @@ func (r runner) executeHook(event facade.HookEvent, jsonOut bool) error {
 	}
 	writeRecallMarkdown(r.stdout, *result.Recall)
 	return nil
+}
+
+type codexUserPromptHookOutput struct {
+	HookSpecificOutput codexUserPromptHookSpecificOutput `json:"hookSpecificOutput"`
+}
+
+type codexUserPromptHookSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+func writeCodexUserPromptHookOutput(w io.Writer, result facade.HookResult) error {
+	if result.Skipped || result.Recall == nil || len(result.Recall.Hits) == 0 {
+		return nil
+	}
+	var context bytes.Buffer
+	writeRecallMarkdown(&context, *result.Recall)
+	additionalContext := strings.TrimSpace(context.String())
+	if additionalContext == "" {
+		return nil
+	}
+	return writeJSON(w, codexUserPromptHookOutput{
+		HookSpecificOutput: codexUserPromptHookSpecificOutput{
+			HookEventName:     "UserPromptSubmit",
+			AdditionalContext: "Relevant memory recalled by paxm:\n\n" + additionalContext,
+		},
+	})
 }
 
 type hookBufferRequest struct {
@@ -708,7 +739,8 @@ func (r runner) runInternalHook(args []string) error {
 		}
 	}
 	if event.Event == "user_input" {
-		return r.executeHook(event, *jsonOut)
+		codexNative := *jsonOut && event.Target == "codex" && event.Event == "user_input"
+		return r.executeHook(event, *jsonOut, codexNative)
 	}
 	return nil
 }

@@ -2,9 +2,10 @@
 
 `paxm` binary releases are built from git tags.
 
-The v0.1 plugin distribution is paired with binary `v0.1.12` and plugin
-`v0.1.0`. The plugin installer pins that binary version by default because it
-uses `paxm setup --integration codex-plugin`.
+The current v0.1 plugin distribution is paired with binary `v0.1.13` and plugin
+`v0.1.1`. The plugin installer pins that binary version by default because it
+uses `paxm setup --integration codex-plugin` and requires Codex-native
+`UserPromptSubmit` output for passive recall.
 
 ## Automated Release
 

@@ -123,14 +123,15 @@ v0.1 acceptance checks:
 The first public-compatible pairing is:
 
 ```text
-paxm binary: v0.1.12
-plugin:     v0.1.0
+paxm binary: v0.1.13
+plugin:     v0.1.1
 marketplace: pax-agent-nexus
 ```
 
-The plugin installer pins `PAXM_VERSION` to `v0.1.12` by default because the
-plugin-aware setup flag is not available in the existing `v0.1.11` binary. A
-user may override the version explicitly when testing a compatible build.
+The plugin installer pins `PAXM_VERSION` to `v0.1.13` by default. This binary
+adds the Codex-native `UserPromptSubmit` output required for passive recall;
+`v0.1.12` emitted paxm's internal hook result and Codex rejected it. A user may
+override the version explicitly when testing a compatible build.
 
 The repo-scoped marketplace lives at
 `.agents/plugins/marketplace.json` and points at `./plugins/paxm-memory`. The
