@@ -182,26 +182,43 @@ func TestRouterSearchAppliesPolicyThresholds(t *testing.T) {
 func TestRouterSearchOversamplesProviderCandidatesBeforeFinalLimit(t *testing.T) {
 	t.Parallel()
 
-	provider := &captureSearchProvider{fakeProvider: fakeProvider{name: "a", hits: []MemoryHit{
-		{ID: "1", Text: "one", Relevance: 1},
-		{ID: "2", Text: "two", Relevance: 0.9},
-		{ID: "3", Text: "three", Relevance: 0.8},
-		{ID: "4", Text: "four", Relevance: 0.7},
-	}}}
-	router, err := NewRouter([]ProviderBinding{{Provider: provider, Read: true}})
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "triple small result limit", limit: 3, wantLimit: 9},
+		{name: "cap oversampling", limit: 40, wantLimit: 100},
+		{name: "never reduce requested limit", limit: 101, wantLimit: 101},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := &captureSearchProvider{fakeProvider: fakeProvider{name: "a", hits: []MemoryHit{
+				{ID: "1", Text: "one", Relevance: 1},
+				{ID: "2", Text: "two", Relevance: 0.9},
+				{ID: "3", Text: "three", Relevance: 0.8},
+				{ID: "4", Text: "four", Relevance: 0.7},
+			}}}
+			router, err := NewRouter([]ProviderBinding{{Provider: provider, Read: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{Limit: 3})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(provider.queries) != 1 || provider.queries[0].Limit != 9 {
-		t.Fatalf("provider candidate limit = %#v, want 9", provider.queries)
-	}
-	if len(result.Hits) != 3 {
-		t.Fatalf("final result count = %d, want 3", len(result.Hits))
+			result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{Limit: tt.limit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.queries) != 1 || provider.queries[0].Limit != tt.wantLimit {
+				t.Fatalf("provider candidate limit = %#v, want %d", provider.queries, tt.wantLimit)
+			}
+			if len(result.Hits) != 4 && tt.limit >= 4 {
+				t.Fatalf("final result count = %d, want 4", len(result.Hits))
+			}
+			if len(result.Hits) != 3 && tt.limit == 3 {
+				t.Fatalf("final result count = %d, want 3", len(result.Hits))
+			}
+		})
 	}
 }
 

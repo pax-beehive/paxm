@@ -96,6 +96,9 @@ func providerCandidateLimit(resultLimit int) int {
 		return 0
 	}
 	const maxProviderCandidates = 100
+	if resultLimit >= maxProviderCandidates {
+		return resultLimit
+	}
 	if resultLimit >= maxProviderCandidates/3 {
 		return maxProviderCandidates
 	}

@@ -598,8 +598,11 @@ func TestHookBufferShutdownFlushesPendingItems(t *testing.T) {
 		err      error
 	}
 	resultCh := make(chan result, 1)
+	cleanupScheduled := make(chan struct{}, 1)
 	go func() {
-		flushed, shutdown, err := handleHookBufferConn(context.Background(), service, serverConn, &buffer, func() {})
+		flushed, shutdown, err := handleHookBufferConn(context.Background(), service, serverConn, &buffer, func() {
+			cleanupScheduled <- struct{}{}
+		})
 		resultCh <- result{flushed: flushed, shutdown: shutdown, err: err}
 	}()
 	if err := writeJSON(clientConn, hookBufferRequest{Action: "shutdown"}); err != nil {
@@ -615,6 +618,11 @@ func TestHookBufferShutdownFlushesPendingItems(t *testing.T) {
 	}
 	if len(buffer) != 0 {
 		t.Fatalf("buffer was not cleared: %#v", buffer)
+	}
+	select {
+	case <-cleanupScheduled:
+	default:
+		t.Fatal("shutdown flush did not schedule cleanup")
 	}
 	recalled, err := service.Recall(context.Background(), facade.RecallInput{Query: "shutdown flush sentinel", Profile: "default", Limit: 3})
 	if err != nil {
