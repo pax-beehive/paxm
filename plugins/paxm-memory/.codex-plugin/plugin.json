@@ -1,0 +1,24 @@
+{
+  "name": "paxm-memory",
+  "version": "0.1.0",
+  "description": "Install and use Pax Agent neXus as Codex's local-first agent memory layer.",
+  "author": {
+    "name": "PAX",
+    "url": "https://paxtech.net"
+  },
+  "homepage": "https://paxtech.net",
+  "repository": "https://github.com/pax-beehive/memory-adaptor",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "agents", "codex", "recall", "local-first"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Pax Agent neXus",
+    "shortDescription": "A trustworthy local memory layer for Codex.",
+    "longDescription": "Pax Agent neXus guides installation, provider setup, active recall, and passive Codex memory hooks while keeping credentials and policy under user control.",
+    "developerName": "PAX",
+    "category": "Productivity",
+    "capabilities": [],
+    "websiteURL": "https://paxtech.net",
+    "defaultPrompt": "Help me set up Pax Agent neXus memory for this Codex task."
+  }
+}

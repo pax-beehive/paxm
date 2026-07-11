@@ -137,6 +137,26 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsKnownIntegrationOwners(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	for _, owner := range []string{"", IntegrationOwnerPaxm, IntegrationOwnerCodexPlugin} {
+		codex := cfg.Agents["codex"]
+		codex.Integration.Owner = owner
+		cfg.Agents["codex"] = codex
+		if err := Validate(cfg); err != nil {
+			t.Fatalf("Validate() owner %q: %v", owner, err)
+		}
+	}
+	codex := cfg.Agents["codex"]
+	codex.Integration.Owner = "unknown"
+	cfg.Agents["codex"] = codex
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "invalid integration owner") {
+		t.Fatalf("Validate() error = %v, want invalid integration owner", err)
+	}
+}
+
 func TestPassiveRecallProfileBuildersCopyBaseRoutes(t *testing.T) {
 	t.Parallel()
 

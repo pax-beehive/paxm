@@ -129,6 +129,53 @@ func TestCLISetupRememberRecallAndHookEvent(t *testing.T) {
 	}
 }
 
+func TestCLISetupCodexPluginOwnsHooks(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	codexConfigPath := filepath.Join(t.TempDir(), "codex.toml")
+	t.Setenv("PAXM_CODEX_CONFIG", codexConfigPath)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if code := Main([]string{"--config", configPath, "setup", "--integration", "codex-plugin"}, strings.NewReader("\n\n\n\n\n"), &stdout, &stderr); code != 0 {
+		t.Fatalf("plugin setup failed with code %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Codex hooks are owned by the paxm-memory plugin") {
+		t.Fatalf("plugin ownership was not reported: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "registered Codex global hook") {
+		t.Fatalf("plugin setup should not register a global Codex hook: %s", stdout.String())
+	}
+	if _, err := os.Stat(codexConfigPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("plugin setup should not create Codex config, stat err: %v", err)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner := cfg.Agents["codex"].Integration.Owner; owner != config.IntegrationOwnerCodexPlugin {
+		t.Fatalf("Codex integration owner = %q, want %q", owner, config.IntegrationOwnerCodexPlugin)
+	}
+}
+
+func TestCLIHookSourceMatchesConfiguredCodexOwner(t *testing.T) {
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	event := facade.HookEvent{Target: "codex", Event: "user_input"}
+	if !hookSourceAllowed(cfg, event) {
+		t.Fatal("paxm-owned Codex hooks should be allowed without a plugin marker")
+	}
+	codex := cfg.Agents["codex"]
+	codex.Integration.Owner = config.IntegrationOwnerCodexPlugin
+	cfg.Agents["codex"] = codex
+	if hookSourceAllowed(cfg, event) {
+		t.Fatal("legacy paxm hook should be ignored after plugin ownership is configured")
+	}
+	t.Setenv("PAXM_INTEGRATION_OWNER", config.IntegrationOwnerCodexPlugin)
+	if !hookSourceAllowed(cfg, event) {
+		t.Fatal("plugin hook should be allowed after plugin ownership is configured")
+	}
+}
+
 func TestCLILogsTailHumanAndJSON(t *testing.T) {
 	t.Parallel()
 

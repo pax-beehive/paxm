@@ -47,6 +47,13 @@ passive writes. Active recall skills are installed separately by the user. The
 SQLite provider works without an API key; remote providers such as Zep or Mem0
 require the user to provide their connection details during setup.
 
+When Codex is using the bundled `paxm-memory` plugin, let the plugin own Codex's
+hooks so paxm does not register a duplicate global hook:
+
+```bash
+paxm setup --integration codex-plugin
+```
+
 To install the skill for Codex or Claude Code, ask an agent to read this
 repository, inspect `skills/paxm/SKILL.md`, and install the `paxm` skill into the
 active agent skill directory. Direct local installs look like:

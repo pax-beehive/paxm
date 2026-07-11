@@ -158,8 +158,12 @@ func (r runner) runSetup(args []string) error {
 	fs.SetOutput(r.stderr)
 	force := fs.Bool("force", false, "overwrite an existing config")
 	yes := fs.Bool("yes", false, "accept default setup answers")
+	integration := fs.String("integration", config.IntegrationOwnerPaxm, "hook owner: paxm or codex-plugin")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *integration != config.IntegrationOwnerPaxm && *integration != config.IntegrationOwnerCodexPlugin {
+		return fmt.Errorf("unsupported setup integration %q; expected paxm or codex-plugin", *integration)
 	}
 
 	path := r.configFile()
@@ -184,6 +188,10 @@ func (r runner) runSetup(args []string) error {
 		return errors.New("setup requires at least one memory provider")
 	}
 	applySetupSelections(&cfg, selectedProviders, selectedHooks, *yes)
+	if agent, ok := cfg.Agents["codex"]; ok {
+		agent.Integration.Owner = *integration
+		cfg.Agents["codex"] = agent
+	}
 	if !*yes {
 		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
 		if err != nil || !proceed {
@@ -296,6 +304,20 @@ func (r runner) confirmSetupSummary(prompter *setupPrompter, cfg config.Config, 
 func (r runner) installSelectedHookIntegrations(path string, cfg config.Config, selectedHooks map[string]bool) error {
 	for _, name := range sortedSelected(selectedHooks) {
 		if !selectedHooks[name] {
+			continue
+		}
+		if name == "codex" && strings.EqualFold(cfg.Agents[name].Integration.Owner, config.IntegrationOwnerCodexPlugin) {
+			// Remove legacy paxm-managed Codex registrations before handing
+			// ownership to the plugin. Plugin hooks are discovered and trusted by
+			// Codex itself; paxm must not register a second copy.
+			marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "codex-")
+			if err := removeCodexGlobalHooks(codexConfigPath(), marker); err != nil {
+				return err
+			}
+			if err := removeAgentHookShims(path, name); err != nil {
+				return err
+			}
+			fmt.Fprintln(r.stdout, "Codex hooks are owned by the paxm-memory plugin")
 			continue
 		}
 		if err := removeLegacyHookShim(path, name); err != nil {
@@ -672,6 +694,9 @@ func (r runner) runInternalHook(args []string) error {
 		return err
 	}
 	if cfg, cfgErr := config.Load(r.configFile()); cfgErr == nil {
+		if !hookSourceAllowed(cfg, event) {
+			return nil
+		}
 		event = r.markInitialUserInputRecall(cfg, event)
 		if hookWriteEnabled(cfg, event) {
 			bufferStarted := time.Now()
@@ -686,6 +711,15 @@ func (r runner) runInternalHook(args []string) error {
 		return r.executeHook(event, *jsonOut)
 	}
 	return nil
+}
+
+func hookSourceAllowed(cfg config.Config, event facade.HookEvent) bool {
+	if event.Target != "codex" {
+		return true
+	}
+	pluginConfigured := strings.EqualFold(cfg.Agents["codex"].Integration.Owner, config.IntegrationOwnerCodexPlugin)
+	pluginSource := strings.EqualFold(os.Getenv("PAXM_INTEGRATION_OWNER"), config.IntegrationOwnerCodexPlugin)
+	return pluginConfigured == pluginSource
 }
 
 func (r runner) runHookDaemon(args []string) error {
@@ -1226,7 +1260,7 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout, "paxm - memory adapter CLI")
 	fmt.Fprintln(r.stdout)
 	fmt.Fprintln(r.stdout, "Usage:")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup")
+	fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup [--integration paxm|codex-plugin]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] uninstall [--agent AGENT] [--yes]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--limit N] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --profile stm|ltm --text TEXT")

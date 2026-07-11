@@ -2,6 +2,10 @@
 
 `paxm` binary releases are built from git tags.
 
+The v0.1 plugin distribution is paired with binary `v0.1.12` and plugin
+`v0.1.0`. The plugin installer pins that binary version by default because it
+uses `paxm setup --integration codex-plugin`.
+
 ## Automated Release
 
 1. Make sure `main` is up to date and clean.
@@ -24,6 +28,19 @@
 
 5. GitHub Actions runs `.github/workflows/release.yml` and publishes release
    assets.
+
+## Plugin Distribution
+
+After the binary release is available:
+
+1. Validate `plugins/paxm-memory/` with the plugin validator and shell syntax
+   checks.
+2. Confirm `.agents/plugins/marketplace.json` points at the plugin directory.
+3. Test installation from the repo marketplace in Codex, including a new task,
+   hook trust review, setup, remember/recall, disable, and re-enable.
+4. Create the plugin release tag only after the binary compatibility check is
+   green. Pin public marketplace updates to the reviewed release tag or commit
+   rather than `main`.
 
 ## Local Release Build
 

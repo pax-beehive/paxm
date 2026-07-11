@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$PLUGIN_ROOT/hooks/paxm-hook.sh\" session_start",
+            "statusMessage": "Loading paxm memory",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$PLUGIN_ROOT/hooks/paxm-hook.sh\" user_input",
+            "statusMessage": "Recalling paxm memory",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$PLUGIN_ROOT/hooks/paxm-hook.sh\" turn_end",
+            "statusMessage": "Saving paxm memory",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

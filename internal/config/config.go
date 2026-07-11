@@ -116,9 +116,23 @@ type WriteProfileConfig struct {
 type AgentConfig struct {
 	Enabled               bool                       `json:"enabled" yaml:"enabled"`
 	PassiveWriteStartedAt string                     `json:"passive_write_started_at,omitempty" yaml:"passive_write_started_at,omitempty"`
+	Integration           AgentIntegrationConfig     `json:"integration,omitempty" yaml:"integration,omitempty"`
 	ActiveRecall          ActiveRecallConfig         `json:"active_recall,omitempty" yaml:"active_recall,omitempty"`
 	Hooks                 map[string]AgentHookConfig `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 }
+
+// AgentIntegrationConfig records which installation surface owns the agent's
+// lifecycle hooks. An empty owner preserves the original paxm-managed
+// behavior. The explicit owner prevents a Codex plugin and paxm setup from
+// registering the same hooks twice.
+type AgentIntegrationConfig struct {
+	Owner string `json:"owner,omitempty" yaml:"owner,omitempty"`
+}
+
+const (
+	IntegrationOwnerPaxm        = "paxm"
+	IntegrationOwnerCodexPlugin = "codex-plugin"
+)
 
 type ActiveRecallConfig struct {
 	Enabled bool   `json:"enabled" yaml:"enabled"`
@@ -511,6 +525,14 @@ func Save(path string, cfg Config) error {
 }
 
 func Validate(cfg Config) error {
+	for name, agent := range cfg.Agents {
+		owner := strings.TrimSpace(strings.ToLower(agent.Integration.Owner))
+		if owner == "" || owner == IntegrationOwnerPaxm || owner == IntegrationOwnerCodexPlugin {
+			continue
+		}
+		return fmt.Errorf("agent %q has invalid integration owner %q; expected paxm or codex-plugin", name, agent.Integration.Owner)
+	}
+
 	recallNames := sortedKeys(cfg.RecallProfiles)
 	for _, name := range recallNames {
 		for _, tier := range cfg.RecallProfiles[name].Tiers {

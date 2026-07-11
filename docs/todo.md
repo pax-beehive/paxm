@@ -1,5 +1,10 @@
 # paxm TODO
 
+The detailed delivery plan is in [`docs/roadmap.md`](roadmap.md). The v0.1
+Codex plugin slice is scaffolded under `plugins/paxm-memory/`; the remaining
+work here is clean-machine testing, binary/plugin release pairing, and public
+distribution.
+
 ## Codex Plugin Distribution
 
 Build a lightweight Codex plugin as the user-facing distribution layer for
@@ -13,9 +18,11 @@ Target shape:
 paxm-memory/
   .codex-plugin/plugin.json
   skills/paxm/SKILL.md
+  skills/paxm-setup/SKILL.md
   hooks/hooks.json
   hooks/paxm-hook.sh
   scripts/install-paxm.sh
+  scripts/setup-paxm.sh
   assets/
 ```
 
@@ -30,6 +37,10 @@ The plugin should:
   providers, credentials, and hook behavior;
 - use plugin hook trust review instead of trying to silently enable hooks.
 
+The v0.1 implementation uses `paxm setup --integration codex-plugin` to make
+plugin hook ownership explicit and remove legacy paxm-managed Codex hook
+registrations before the plugin starts handling events.
+
 Non-goals:
 
 - Do not replace the standalone `paxm` CLI with a plugin-only runtime.
@@ -40,9 +51,11 @@ Non-goals:
 
 Open design questions:
 
-- Whether the plugin should be repo-local first (`.agents/plugins/marketplace.json`)
-  or personal/global first (`~/.agents/plugins/marketplace.json`).
+- The repo-local marketplace is now the first distribution path:
+  `.agents/plugins/marketplace.json`. A personal marketplace remains useful for
+  private local development but is not the public release contract.
 - Whether `paxm` should support an explicit plugin data install location such as
   `${PLUGIN_DATA}/bin/paxm` in addition to normal `PATH` lookup.
 - Whether the plugin should register the existing `paxm mcp serve` command for
-  users automatically after MCP trust review.
+  users automatically after the binary bootstrap and plugin-owned hook flow are
+  stable. MCP is intentionally deferred from v0.1.

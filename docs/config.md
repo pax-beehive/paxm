@@ -457,6 +457,21 @@ tries one final flush on `session_shutdown`. Pi's `turn_end` event is used
 through the runtime event bus, so treat it as best-effort rather than a hard
 delivery guarantee.
 
+`agents.<name>.integration.owner` records which installation surface owns the
+agent lifecycle hooks. An empty value preserves the original paxm-managed
+behavior. For Codex plugin installations, run:
+
+```bash
+paxm setup --integration codex-plugin
+```
+
+This records `owner: codex-plugin`, removes legacy paxm-managed Codex hook
+registrations, and lets the bundled `paxm-memory` plugin provide the hooks. The
+plugin marks its calls with `PAXM_INTEGRATION_OWNER=codex-plugin`; paxm ignores
+plugin calls until that owner is configured and ignores legacy Codex calls after
+ownership is transferred. This prevents duplicate recall and write events when
+both installation surfaces are present.
+
 Hook recall fields:
 
 - `profile`: recall profile used to fetch candidates. The default hook uses

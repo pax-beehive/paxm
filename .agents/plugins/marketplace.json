@@ -1,0 +1,20 @@
+{
+  "name": "pax-agent-nexus",
+  "interface": {
+    "displayName": "Pax Agent Nexus"
+  },
+  "plugins": [
+    {
+      "name": "paxm-memory",
+      "source": {
+        "source": "local",
+        "path": "./plugins/paxm-memory"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
