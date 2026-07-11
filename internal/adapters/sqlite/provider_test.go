@@ -101,6 +101,31 @@ func TestProviderSearchFiltersTierAndExpiry(t *testing.T) {
 	}
 }
 
+func TestProviderRejectsLifecycleFingerprintConflict(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := memory.MemoryItem{
+		ID:   "ltm_fixed",
+		Text: "first durable fact",
+		Metadata: map[string]string{
+			memory.MetadataFingerprint: "fingerprint-a",
+			memory.MetadataOccurrences: "1",
+		},
+	}
+	if _, err := provider.Put(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	item.Text = "different durable fact"
+	item.Metadata[memory.MetadataFingerprint] = "fingerprint-b"
+	if _, err := provider.Put(context.Background(), item); err == nil || !strings.Contains(err.Error(), "fingerprint conflict") {
+		t.Fatalf("conflicting Put() error = %v, want fingerprint conflict", err)
+	}
+}
+
 func TestProviderCleanupExpiredDeletesRows(t *testing.T) {
 	t.Parallel()
 

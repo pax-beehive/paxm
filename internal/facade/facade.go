@@ -38,14 +38,15 @@ type RecallResult struct {
 }
 
 type IngestInput struct {
-	ID        string            `json:"id,omitempty"`
-	Text      string            `json:"text"`
-	Profile   string            `json:"profile,omitempty"`
-	Source    string            `json:"source,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	CreatedAt time.Time         `json:"created_at,omitempty"`
-	Tier      memory.MemoryTier `json:"tier,omitempty"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	ID            string            `json:"id,omitempty"`
+	Text          string            `json:"text"`
+	AdmissionText string            `json:"-"`
+	Profile       string            `json:"profile,omitempty"`
+	Source        string            `json:"source,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	CreatedAt     time.Time         `json:"created_at,omitempty"`
+	Tier          memory.MemoryTier `json:"tier,omitempty"`
+	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
 }
 
 type IngestResult struct {
@@ -187,13 +188,14 @@ func memoryItemFromIngestInput(input IngestInput) (memory.MemoryItem, string, bo
 		profile = "default"
 	}
 	return memory.MemoryItem{
-		ID:        input.ID,
-		Text:      text,
-		Source:    input.Source,
-		Metadata:  input.Metadata,
-		CreatedAt: effectiveCreatedAt(input.CreatedAt),
-		Tier:      input.Tier,
-		ExpiresAt: input.ExpiresAt,
+		ID:            input.ID,
+		Text:          text,
+		AdmissionText: input.AdmissionText,
+		Source:        input.Source,
+		Metadata:      input.Metadata,
+		CreatedAt:     effectiveCreatedAt(input.CreatedAt),
+		Tier:          input.Tier,
+		ExpiresAt:     input.ExpiresAt,
 	}, profile, true
 }
 
@@ -297,11 +299,16 @@ func (s *Service) HookWriteItem(event HookEvent) (IngestInput, bool, error) {
 	if event.Workspace != "" {
 		metadata["workspace"] = event.Workspace
 	}
+	admissionText := ""
+	if event.Event == "user_input" {
+		admissionText = event.Prompt
+	}
 	return IngestInput{
-		Text:     text,
-		Profile:  eventCfg.Write.Profile,
-		Source:   "hook:" + event.Target + ":" + event.Event,
-		Metadata: metadata,
+		Text:          text,
+		AdmissionText: admissionText,
+		Profile:       eventCfg.Write.Profile,
+		Source:        "hook:" + event.Target + ":" + event.Event,
+		Metadata:      metadata,
 	}, true, nil
 }
 

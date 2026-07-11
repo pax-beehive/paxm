@@ -446,6 +446,15 @@ overwritten.
 selected. Agent skills should use `--profile stm` for short-lived task state and
 `--profile ltm` for durable preferences, decisions, or recurring fixes.
 
+For LTM writes without an explicit ID, paxm derives a stable ID from normalized
+text and optional `workspace` metadata. SQLite consolidates exact repeats and
+stores lifecycle metadata under `paxm_fingerprint`, `paxm_occurrences`,
+`paxm_first_seen_at`, and `paxm_last_seen_at`. Different workspaces remain
+separate. STM and explicit-ID writes are not content-addressed. Near-duplicate or
+contradictory wording is not merged automatically. Passive `user_input` writes
+use the prompt as their stable identity basis while retaining the full rendered
+hook template as stored evidence.
+
 ## Agents
 
 `agents.<name>.active_recall` controls explicit recall calls made by that agent

@@ -267,6 +267,7 @@ func (r *Router) PutBatchWithPolicy(ctx context.Context, items []MemoryItem, pol
 		return PutResult{}, nil
 	}
 	items = applyPutPolicy(items, policy)
+	items = admitLongTermMemories(items)
 
 	type response struct {
 		binding ProviderBinding

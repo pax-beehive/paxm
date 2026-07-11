@@ -120,6 +120,11 @@ Use long-term memory only for durable, reusable facts:
 paxm remember --profile ltm --text "Decision: paxm setup owns provider and hook configuration; visible hook install/test commands are intentionally omitted."
 ```
 
+Paxm consolidates exact repeated LTM text when no explicit ID is supplied. This
+does not make semantic duplicates or conflicting statements safe: keep durable
+memories concise and consistently worded, and verify current source before
+relying on facts that may drift.
+
 Good `ltm` candidates:
 
 - user preferences that should affect future agent behavior;

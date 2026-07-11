@@ -110,6 +110,29 @@ state and `ltm` only for durable facts. Configuration rejects unknown tier names
 requires every `stm` profile to have a positive expiry, and rejects expiry on
 `ltm` profiles.
 
+Before provider fan-out, LTM items without an explicit ID pass through a
+deterministic admission module. It canonicalizes text case and whitespace,
+includes `workspace` metadata in the identity scope when present, and assigns a
+SHA-256 content ID plus lifecycle metadata. SQLite consolidates repeated IDs in
+the same transaction, increments the occurrence count, keeps the earliest
+`first_seen_at`, and advances `last_seen_at`. This works for both sequential
+writes and duplicate items in one hook-buffer batch. STM items remain event-like
+records, and explicit IDs remain authoritative so historical backfill identity
+does not change.
+
+`user_input` hooks separate identity from storage evidence: the stable prompt is
+used as the admission text, while the rendered template including raw event data
+remains the stored text. This prevents changing session IDs and other volatile
+hook fields from producing a new LTM identity. Other hook events use their full
+rendered text because collapsing different assistant outcomes under one prompt
+would lose meaningful evidence.
+
+The admission module only consolidates exact canonical matches. It does not use
+an LLM, infer semantic equivalence, resolve conflicting facts, promote STM, or
+supersede another memory. Remote adapters receive the stable ID and lifecycle
+metadata, but the backing provider still decides whether repeated writes are
+physically deduplicated.
+
 ## Agent Entries
 
 An agent entry describes how an agent uses memory. It does not duplicate provider
@@ -214,8 +237,9 @@ as write evidence without blocking Claude from stopping.
 
 Paxm does not run a shared memory-extraction or summarization step before
 writing. Hook writes render the configured `hooks.*.write.template` into a text
-payload, attach hook metadata, and route that `MemoryItem` to the configured
-write profile. The provider decides what to do with that text:
+payload, attach hook metadata, apply deterministic LTM admission when applicable,
+and route that `MemoryItem` to the configured write profile. The provider decides
+what to do with that text:
 
 - `sqlite` stores the rendered text directly.
 - `zep` writes the rendered text as a text episode and leaves graph extraction

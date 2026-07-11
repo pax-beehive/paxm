@@ -409,6 +409,19 @@ Passive hook writes use the `ltm` write profile by default. Active agents should
 write short-lived task state to `stm` and reserve `ltm` for durable preferences,
 decisions, and recurring fixes.
 
+LTM writes without an explicit ID pass through deterministic admission before
+provider fan-out. Paxm normalizes text case and whitespace, scopes it by the
+`workspace` metadata value when present, and assigns a stable content-derived ID
+plus `paxm_fingerprint`, `paxm_occurrences`, `paxm_first_seen_at`, and
+`paxm_last_seen_at` metadata. SQLite uses that identity to consolidate exact
+repeats while preserving the first creation time and updating occurrence/seen
+metadata. STM writes and explicit IDs, including backfill IDs, are unchanged.
+This is exact consolidation, not semantic or LLM-based conflict resolution;
+remote providers receive the stable identity metadata but retain their own
+deduplication behavior. For passive `user_input` writes, the stable prompt is
+used as the identity basis while the stored text still retains the configured
+full hook evidence, so volatile session fields do not defeat consolidation.
+
 Expired memory cleanup is hook-triggered and best effort. After a successful
 hook-buffer flush or immediate hook write, the hook daemon schedules cleanup on
 a single background worker for providers that support it; SQLite deletes a
