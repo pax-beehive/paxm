@@ -23,7 +23,7 @@ offering installation. Explain that the installer downloads a pinned release
 binary and ask for explicit approval before running:
 
 ```bash
-export PAXM_VERSION=v0.1.14
+export PAXM_VERSION=v0.1.18
 curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
 ```
 

@@ -66,16 +66,42 @@ integration.
 
 ## Quick start
 
-Install the latest signed release asset for your platform:
+Choose the path for the agent you use. The Codex plugin is the shortest path:
+
+### Codex plugin
+
+```bash
+codex plugin marketplace add pax-beehive/paxm --ref paxm-memory-v0.1.3
+codex plugin add paxm-memory@pax-agent-nexus
+paxm setup --integration codex-plugin
+```
+
+Start a new Codex task and trust the Pax Agent neXus hooks when `/hooks` asks.
+The plugin installs its reviewed paxm binary, registers active-memory skills,
+and owns the passive Codex hooks. Provider credentials remain user-managed.
+
+### Claude Code plugin
+
+Install the paxm CLI, then install the Claude Code plugin:
 
 ```bash
 curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
+claude plugin marketplace add pax-beehive/paxm
+claude plugin install paxm-claude@pax-memory
+paxm setup --integration claude-plugin
 ```
 
-Run the interactive setup. SQLite provides a complete local flow without an
-API key.
+The Claude plugin includes active-memory skills, the paxm MCP server, and five
+lifecycle hooks: `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
+`PostToolUseFailure`, and `Stop`.
+
+### CLI, MCP, or Pi
+
+Install the latest release and run interactive setup. SQLite provides a full
+local flow without an account or API key.
 
 ```bash
+curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
 paxm setup
 paxm config doctor
 ```
@@ -88,8 +114,8 @@ paxm recall --query "local memory layer"
 paxm history --days 7
 ```
 
-Setup can also install passive integrations for Codex, Claude Code, and Pi.
-Provider credentials and hook installation remain explicit user choices.
+Select Pi during setup to install its passive extension. Any MCP-compatible
+client can use `paxm mcp serve` without installing passive hooks.
 
 ## How it works
 
@@ -166,20 +192,23 @@ so an agent cannot silently take ownership of user configuration.
 
 ### Codex plugin
 
-```bash
-codex plugin marketplace add pax-beehive/paxm --ref paxm-memory-v0.1.2
-codex plugin add paxm-memory@pax-agent-nexus
-paxm setup --integration codex-plugin
-```
+The Codex plugin packages the paxm setup skill, active memory skill, and native
+Codex hooks. It does not install provider credentials or bypass Codex hook
+trust. Use `paxm setup --integration codex-plugin` so only the plugin owns the
+Codex lifecycle hooks.
 
-Start a new Codex task and trust the Pax Agent neXus hooks when `/hooks` asks.
-The plugin does not install provider credentials or bypass hook trust.
+### Claude Code plugin
 
-### Claude Code and Pi
+The Claude Code plugin is a first-class integration, not a generic setup shim.
+It packages skills, an MCP server, and five native lifecycle hooks. Its setup
+migration removes only legacy paxm-managed Claude hooks, preserves unrelated
+hooks, and records `claude-plugin` ownership.
 
-Run `paxm setup`, select the agents you use, and choose passive recall, passive
-write, or both. Paxm preserves unrelated existing hooks and writes backups
-before modifying Claude Code settings.
+### Pi extension
+
+Pi support is installed through `paxm setup`. The extension handles passive
+prompt recall and buffers visible user, assistant, and tool events into one
+turn-end memory while excluding thinking blocks.
 
 See the complete [configuration guide](docs/config.md) for generated paths,
 event mappings, profile settings, and uninstall behavior.

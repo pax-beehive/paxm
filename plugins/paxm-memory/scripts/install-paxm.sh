@@ -3,7 +3,7 @@ set -eu
 
 repo="${PAXM_REPO:-pax-beehive/paxm}"
 url="https://github.com/${repo}/releases/latest/download/install.sh"
-export PAXM_VERSION="${PAXM_VERSION:-v0.1.14}"
+export PAXM_VERSION="${PAXM_VERSION:-v0.1.18}"
 
 printf '%s\n' "This installs the paxm release binary from ${repo}."
 printf '%s\n' "Pinned paxm version: ${PAXM_VERSION}"
