@@ -153,13 +153,16 @@ and later recall paths, including passive recall-envelope and active recall-tool
 echo suppression. `evals/lifecycle/suite.json` adds 40 cases covering
 active/passive recall after runtime restart, duplicate-write consolidation, and
 recall-echo suppression. `paxm eval run` can save and compare compatible result
-files, and measured regression budgets for all three suites run in CI.
+files. Provider-quality budgets remain available for opt-in benchmarking; CI
+uses the adapter contract gate instead.
 
-These deterministic suites currently score at or near 100%. Treat them as
-contract tests: they prove production paths remain intact, but they do not yet
-discriminate between plausible ranking, admission, or consolidation strategies.
-The next Phase 2 slice is therefore a separate challenge set whose purpose is
-to expose quality differences rather than preserve a perfect score.
+Paxm's hard quality gate is adapter fidelity, not provider retrieval quality.
+The eval gate checks that visible content and metadata cross the write boundary
+intact, that recall echoes and hidden reasoning are removed as specified, and
+that writes are acknowledged. Go contract tests with capture providers cover
+recall request forwarding, result mapping, routing, and failure/recovery policy.
+Recall@K, MRR, semantic ranking, and provider consolidation quality remain
+observable benchmark metrics and do not block paxm changes.
 
 An opt-in cross-agent tracer also exists under `evals/cross-agent`. It runs Pi
 producer sessions and fresh Claude Code control/passive/active consumers in
@@ -189,12 +192,14 @@ Each scenario should contain:
 Start with a 100-case deterministic SQLite baseline built from sanitized,
 versioned scenario families. Cover active recall, initial passive recall, later
 passive recall, distractor suppression, ranking, STM and LTM retrieval, result
-limits, and contextual metadata. The deterministic retrieval, write, and
-lifecycle suites now form the CI contract layer.
+limits, and contextual metadata. CI runs retrieval as a non-gating benchmark,
+uses conversation-write assertions for the eval-level adapter gate, and relies
+on focused Go contract tests for routing, result mapping, queues, and lifecycle.
 
-### Challenge Set
+### Optional Provider Challenge Set
 
-Build a separate non-gating quality suite with intentionally difficult cases:
+Provider benchmarking may use a separate opt-in challenge suite with
+intentionally difficult cases:
 
 - indirect and synonymous queries that do not repeat memory wording;
 - 20-100 strong distractors, including the correct entity with a wrong value;
@@ -204,9 +209,9 @@ Build a separate non-gating quality suite with intentionally difficult cases:
 - near-duplicate, partial-update, and contradictory consolidation cases;
 - top-1 and top-3 ranking quality, not only whether a target appears anywhere.
 
-The initial challenge score should be recorded as a measured baseline, not
-forced to 100%. Improvements to retrieval or memory policy should raise this
-score without violating the deterministic contract suites.
+Challenge scores belong to the configured memory provider and profile. They may
+help users compare deployments, but they are not a paxm release gate and must
+not pull semantic ranking or memory consolidation into the adapter layer.
 
 ### Measurements
 
@@ -227,8 +232,8 @@ profiles, providers, or code revisions.
 ### Initial Exit Criteria
 
 - The repository has a versioned baseline scenario suite.
-- The first baseline contains exactly 100 validated cases and CI executes all
-  of them through the production runtime and facade.
+- The first baseline contains exactly 100 validated cases. CI executes them
+  through the production runtime as a non-gating provider benchmark.
 - CI can run the deterministic local-provider portion without external API
   keys.
 - Remote-provider evaluations are opt-in and clearly separated from the local
@@ -238,8 +243,8 @@ profiles, providers, or code revisions.
 - Acceptable regression budgets are recorded once the first baseline is known;
   numeric targets should come from measured results rather than being invented
   in advance.
-- A versioned challenge set produces a non-saturated baseline that can
-  distinguish policy and ranking changes.
+- Adapter contract gates cover write fidelity, cleaning, routing, durable
+  delivery, recall request forwarding, result mapping, and observability.
 
 ## Phase 3: Native macOS Application
 

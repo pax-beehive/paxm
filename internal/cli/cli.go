@@ -597,7 +597,7 @@ func writeRecallJSON(w io.Writer, result facade.RecallResult, mode string) error
 
 func (r runner) runEval(args []string) error {
 	if len(args) == 0 || args[0] != "run" {
-		return errors.New("usage: paxm eval run --suite PATH [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]")
+		return errors.New("usage: paxm eval run --suite PATH [--gate none|adapter|quality] [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]")
 	}
 	fs := flag.NewFlagSet("eval run", flag.ContinueOnError)
 	fs.SetOutput(r.stderr)
@@ -606,8 +606,18 @@ func (r runner) runEval(args []string) error {
 	comparePath := fs.String("compare", "", "compare with a prior result JSON")
 	budgetPath := fs.String("budget", "", "enforce a regression budget JSON")
 	outputPath := fs.String("output", "", "write the current result JSON")
+	gate := fs.String("gate", "none", "failure policy: none, adapter, or quality")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if *gate != "quality" && *gate != "adapter" && *gate != "none" {
+		return fmt.Errorf("unsupported eval gate %q", *gate)
+	}
+	if *gate == "adapter" && *budgetPath != "" {
+		return errors.New("--budget measures provider quality and cannot be used with --gate adapter")
+	}
+	if *gate == "none" && *budgetPath != "" {
+		return errors.New("--budget cannot be enforced with --gate none")
 	}
 	suite, err := paxeval.Load(*suitePath)
 	if err != nil {
@@ -666,6 +676,24 @@ func (r runner) runEval(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *gate == "adapter" {
+		if result.AdapterContractCases == 0 {
+			return errors.New("adapter gate requires a suite with conversation writes")
+		}
+		if result.ExecutionFailed > 0 {
+			return fmt.Errorf("eval execution failed: %d cases had runtime or provider errors", result.ExecutionFailed)
+		}
+		if result.AdapterContractFailed > 0 {
+			return fmt.Errorf("adapter contract failed: %d of %d cases failed", result.AdapterContractFailed, result.AdapterContractCases)
+		}
+		return nil
+	}
+	if *gate == "none" {
+		if result.ExecutionFailed > 0 {
+			return fmt.Errorf("eval execution failed: %d cases had runtime or provider errors", result.ExecutionFailed)
+		}
+		return nil
+	}
 	if result.Failed > 0 {
 		return fmt.Errorf("eval failed: %d of %d cases failed", result.Failed, result.CaseCount)
 	}
@@ -686,7 +714,13 @@ func writeEvalComparison(w io.Writer, comparison paxeval.Comparison) {
 func writeEvalReport(w io.Writer, result paxeval.Result) {
 	fmt.Fprintf(w, "paxm eval: %s (v%d)\n", result.Suite, result.Version)
 	fmt.Fprintf(w, "cases: %d  passed: %d  failed: %d  duration: %dms\n", result.CaseCount, result.Passed, result.Failed, result.DurationMS)
+	if result.ExecutionFailed > 0 {
+		fmt.Fprintf(w, "execution failures: %d\n", result.ExecutionFailed)
+	}
 	fmt.Fprintf(w, "recall@k: %.3f  precision@k: %.3f  mrr: %.3f  false-positive rate: %.3f\n", result.RecallAtK, result.PrecisionAtK, result.MRR, result.FalsePositiveRate)
+	if result.AdapterContractCases > 0 {
+		fmt.Fprintf(w, "adapter contract: %d/%d passed  failed: %d\n", result.AdapterContractPassed, result.AdapterContractCases, result.AdapterContractFailed)
+	}
 	if result.WriteCaseCount > 0 {
 		fmt.Fprintf(w, "writes: %d/%d  write recall: %.3f  write precision: %.3f  write false-positive rate: %.3f\n", result.Writes, result.WriteCaseCount, result.WriteRecall, result.WritePrecision, result.WriteFalsePositiveRate)
 		fmt.Fprintf(w, "results: %d  returned context: %d bytes  write total: %.3fms  recall total: %.3fms\n", result.ResultCount, result.ReturnedContextBytes, float64(result.WriteDurationUS)/1000, float64(result.RecallDurationUS)/1000)
@@ -722,6 +756,9 @@ func writeEvalReport(w io.Writer, result paxeval.Result) {
 		}
 		if len(item.MetadataMismatches) > 0 {
 			fmt.Fprintf(w, " metadata=%s", strings.Join(item.MetadataMismatches, ","))
+		}
+		if len(item.AdapterContractErrors) > 0 {
+			fmt.Fprintf(w, " adapter=%s", strings.Join(item.AdapterContractErrors, ","))
 		}
 		fmt.Fprintln(w)
 	}

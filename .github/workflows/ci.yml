@@ -21,9 +21,7 @@ jobs:
         run: go test ./...
       - name: Vet
         run: go vet ./...
-      - name: Run 100-case SQLite recall baseline
-        run: go run ./cmd/paxm eval run --suite evals/baseline --budget evals/baseline/budget.json
-      - name: Run 50-case SQLite conversation-to-write baseline
-        run: go run ./cmd/paxm eval run --suite evals/conversation-write --budget evals/conversation-write/budget.json
-      - name: Run 40-case SQLite memory lifecycle baseline
-        run: go run ./cmd/paxm eval run --suite evals/lifecycle --budget evals/lifecycle/budget.json
+      - name: Report 100-case provider benchmark (non-gating)
+        run: go run ./cmd/paxm eval run --suite evals/baseline --gate none
+      - name: Run 50-case adapter write contract
+        run: go run ./cmd/paxm eval run --suite evals/conversation-write --gate adapter

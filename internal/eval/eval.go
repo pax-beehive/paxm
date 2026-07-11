@@ -87,6 +87,10 @@ type Result struct {
 	CaseCount              int           `json:"case_count"`
 	Passed                 int           `json:"passed"`
 	Failed                 int           `json:"failed"`
+	AdapterContractCases   int           `json:"adapter_contract_cases,omitempty"`
+	AdapterContractPassed  int           `json:"adapter_contract_passed,omitempty"`
+	AdapterContractFailed  int           `json:"adapter_contract_failed,omitempty"`
+	ExecutionFailed        int           `json:"execution_failed,omitempty"`
 	RecallAtK              float64       `json:"recall_at_k"`
 	PrecisionAtK           float64       `json:"precision_at_k"`
 	MRR                    float64       `json:"mrr"`
@@ -109,6 +113,9 @@ type CaseResult struct {
 	ID                       string   `json:"id"`
 	Category                 string   `json:"category"`
 	Passed                   bool     `json:"passed"`
+	AdapterContractCase      bool     `json:"adapter_contract_case,omitempty"`
+	AdapterContractPassed    bool     `json:"adapter_contract_passed,omitempty"`
+	AdapterContractErrors    []string `json:"adapter_contract_errors,omitempty"`
 	HitIDs                   []string `json:"hit_ids"`
 	Missing                  []string `json:"missing,omitempty"`
 	Forbidden                []string `json:"forbidden_hits,omitempty"`
@@ -130,6 +137,7 @@ type CaseResult struct {
 	RecallDurationUS         int64    `json:"recall_duration_us,omitempty"`
 	DurationMS               int64    `json:"duration_ms"`
 	Error                    string   `json:"error,omitempty"`
+	ExecutionError           string   `json:"execution_error,omitempty"`
 }
 
 type GroupResult struct {
@@ -342,12 +350,22 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		ID:                       scenario.ID,
 		Category:                 scenario.Category,
 		WriteCase:                scenario.Write != nil,
+		AdapterContractCase:      scenario.Write != nil,
 		WriteForbiddenCandidates: len(scenario.ForbiddenWrite),
 	}
-	defer func() { result.DurationMS = time.Since(started).Milliseconds() }()
+	defer func() {
+		if result.AdapterContractCase && !result.AdapterContractPassed && len(result.AdapterContractErrors) == 0 {
+			failure := result.Error
+			if failure == "" {
+				failure = "adapter write contract did not complete"
+			}
+			result.AdapterContractErrors = []string{failure}
+		}
+		result.DurationMS = time.Since(started).Milliseconds()
+	}()
 	caseDir := filepath.Join(root, scenario.ID)
 	if err := os.MkdirAll(caseDir, 0o755); err != nil {
-		result.Error = err.Error()
+		result.setExecutionError(err.Error())
 		return result
 	}
 	configPath := filepath.Join(caseDir, "config.yaml")
@@ -357,12 +375,12 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		cfg.Agents[name] = agent
 	}
 	if err := config.Save(configPath, cfg); err != nil {
-		result.Error = err.Error()
+		result.setExecutionError(err.Error())
 		return result
 	}
 	runtime, err := paxruntime.Load(configPath)
 	if err != nil {
-		result.Error = err.Error()
+		result.setExecutionError(err.Error())
 		return result
 	}
 	var writtenText string
@@ -388,11 +406,11 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 			Metadata:  scenario.Write.Metadata,
 		})
 		if writeErr != nil {
-			result.Error = writeErr.Error()
+			result.setExecutionError(writeErr.Error())
 			return result
 		}
 		if !ok {
-			result.Error = "conversation write was skipped"
+			result.setExecutionError("conversation write was skipped")
 			return result
 		}
 		writtenText, writtenMetadata = item.Text, item.Metadata
@@ -409,22 +427,24 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		}
 		result.WriteDurationUS = time.Since(writeStarted).Microseconds()
 		if writeErr != nil {
-			result.Error = writeErr.Error()
+			result.setExecutionError(writeErr.Error())
 			return result
 		}
 		result.Written = len(writeResult.Refs) > 0
+		result.AdapterContractErrors = evaluateWriteContract(scenario, result.Written, writtenText, writtenMetadata)
+		result.AdapterContractPassed = len(result.AdapterContractErrors) == 0
 	}
 	for _, item := range scenario.Memories {
 		_, err = runtime.Service.Ingest(ctx, facade.IngestInput{ID: item.ID, Text: item.Text, Profile: profileForTier(item.Tier), Tier: item.Tier, ExpiresAt: item.ExpiresAt, Metadata: item.Metadata, Source: "eval:" + scenario.ID})
 		if err != nil {
-			result.Error = err.Error()
+			result.setExecutionError(err.Error())
 			return result
 		}
 	}
 	if scenario.RestartBeforeRecall {
 		runtime, err = paxruntime.Load(configPath)
 		if err != nil {
-			result.Error = err.Error()
+			result.setExecutionError(err.Error())
 			return result
 		}
 	}
@@ -445,7 +465,7 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		}
 	}
 	if err != nil {
-		result.Error = err.Error()
+		result.setExecutionError(err.Error())
 		return result
 	}
 	result.RecallDurationUS = time.Since(recallStarted).Microseconds()
@@ -460,6 +480,35 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		result.score(scenario)
 	}
 	return result
+}
+
+func (r *CaseResult) setExecutionError(message string) {
+	r.Error = message
+	r.ExecutionError = message
+}
+
+func evaluateWriteContract(scenario Case, written bool, text string, metadata map[string]string) []string {
+	var failures []string
+	if !written {
+		failures = append(failures, "provider did not acknowledge the write")
+	}
+	for _, expected := range scenario.ExpectedWrite {
+		if !containsFold(text, expected) {
+			failures = append(failures, "missing write fragment: "+expected)
+		}
+	}
+	for _, forbidden := range scenario.ForbiddenWrite {
+		if containsFold(text, forbidden) {
+			failures = append(failures, "forbidden write fragment: "+forbidden)
+		}
+	}
+	for key, expected := range scenario.ExpectedMetadata {
+		if metadata[key] != expected {
+			failures = append(failures, fmt.Sprintf("write metadata %s=%q; want %q", key, metadata[key], expected))
+		}
+	}
+	sort.Strings(failures)
+	return failures
 }
 
 func (r *CaseResult) scoreConversationWrite(scenario Case, writtenText string, metadata map[string]string, hits []memory.MemoryHit) {
@@ -605,6 +654,17 @@ func (r *CaseResult) score(scenario Case) {
 func (r *Result) aggregate() {
 	groups := map[string][]CaseResult{}
 	for _, c := range r.Cases {
+		if c.ExecutionError != "" {
+			r.ExecutionFailed++
+		}
+		if c.AdapterContractCase {
+			r.AdapterContractCases++
+			if c.AdapterContractPassed {
+				r.AdapterContractPassed++
+			} else {
+				r.AdapterContractFailed++
+			}
+		}
 		r.RecallAtK += c.RecallAtK
 		r.PrecisionAtK += c.PrecisionAtK
 		r.MRR += c.ReciprocalRank

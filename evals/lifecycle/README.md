@@ -7,5 +7,8 @@ suppression after restart.
 
 ```sh
 go run ./evals/lifecycle/generate
-go run ./cmd/paxm eval run --suite evals/lifecycle --budget evals/lifecycle/budget.json
+go run ./cmd/paxm eval run --suite evals/lifecycle --gate adapter
+
+# Optional provider-quality benchmark (not a paxm CI gate)
+go run ./cmd/paxm eval run --suite evals/lifecycle --gate quality --budget evals/lifecycle/budget.json
 ```

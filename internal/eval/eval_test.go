@@ -246,6 +246,37 @@ func TestRunnerWritesConversationThroughHookBeforeRecall(t *testing.T) {
 	}
 }
 
+func TestAdapterContractCanPassWhenProviderRecallQualityFails(t *testing.T) {
+	suite := Suite{Version: SuiteVersion, Name: "adapter-boundary", Cases: []Case{{
+		ID: "write-faithful-recall-miss", Category: "adapter_contract",
+		Turns:         []Turn{{Role: "user", Text: "Record the cobalt timeout."}, {Role: "assistant", Text: "The cobalt timeout is 17 seconds."}},
+		Write:         &Write{Target: "codex", Event: "turn_end", Assistant: "The cobalt timeout is 17 seconds.", Workspace: "/eval/cobalt"},
+		Recall:        Recall{Mode: "active", Query: "completely unrelated banana query", Limit: 1},
+		ExpectedWrite: []string{"cobalt timeout", "17 seconds"},
+	}}}
+	result, err := (Runner{Root: t.TempDir()}).Run(context.Background(), suite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AdapterContractPassed != 1 || result.AdapterContractFailed != 0 {
+		t.Fatalf("adapter contract should pass: %#v", result)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("quality evaluation should still report the recall miss: %#v", result)
+	}
+}
+
+func TestAggregateSeparatesExecutionFailureFromQualityMiss(t *testing.T) {
+	result := Result{CaseCount: 2, Cases: []CaseResult{
+		{ID: "quality-miss", Error: "expected recall was missing"},
+		{ID: "runtime-error", Error: "provider unavailable", ExecutionError: "provider unavailable"},
+	}}
+	result.aggregate()
+	if result.ExecutionFailed != 1 {
+		t.Fatalf("execution failures = %d, want 1", result.ExecutionFailed)
+	}
+}
+
 func TestRunnerCanWriteFromNormalizedHistory(t *testing.T) {
 	suite := Suite{Version: SuiteVersion, Name: "history-write", Cases: []Case{{
 		ID: "pi-history", Category: "history",
