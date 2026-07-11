@@ -96,3 +96,10 @@ The real Codex task was repeated with the fixed binary. Codex reported the
 `UserPromptSubmit` hook as completed, displayed the recalled hook context, and
 the model returned `plugin recall path is healthy` without calling a tool or
 running a shell command. This closes the passive-injection blocker.
+
+After publication, a second clean temporary `CODEX_HOME` installed the public
+`paxm-memory-v0.1.1` tag, reported plugin version `0.1.1`, and used the bundled
+installer to download `paxm v0.1.13`. With a clean SQLite config, a stored LTM
+item passed through the installed plugin wrapper as `UserPromptSubmit`
+additional context. This verifies the final public pairing rather than only the
+local release candidate.

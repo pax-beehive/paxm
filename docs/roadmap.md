@@ -35,6 +35,9 @@ The next releases should answer three questions in order:
 
 ## Phase 1: Distribution and First Success
 
+Status: completed on 2026-07-10. The clean-install and real-task evidence is in
+[`docs/acceptance/phase-1-v0.1.md`](acceptance/phase-1-v0.1.md).
+
 Build the lightweight Codex plugin described in `docs/todo.md` as the first
 user-facing distribution path.
 
@@ -276,8 +279,7 @@ their own scenarios and measurable acceptance criteria.
 
 ## Current Priority Order
 
-1. Codex plugin distribution and first-success verification.
-2. Recall evaluation harness and baseline scenarios.
-3. Native macOS application using the paxm core.
-4. Agent and provider integrations selected from demonstrated demand.
-5. Additional facade behavior justified by evaluation evidence.
+1. Recall evaluation harness and baseline scenarios.
+2. Native macOS application using the paxm core.
+3. Agent and provider integrations selected from demonstrated demand.
+4. Additional facade behavior justified by evaluation evidence.
