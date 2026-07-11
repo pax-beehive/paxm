@@ -319,6 +319,45 @@ func DefaultConfig(configPath string) Config {
 			"ltm":     LTMWriteProfileFrom(defaultWriteRoutes),
 		},
 		Agents: map[string]AgentConfig{
+			"opencode": {
+				Enabled: false,
+				ActiveRecall: ActiveRecallConfig{
+					Enabled: true,
+					Profile: "default",
+					Output:  "markdown",
+				},
+				Hooks: map[string]AgentHookConfig{
+					"user_input": {
+						Recall: HookRecallConfig{
+							Enabled:       true,
+							Profile:       "passive",
+							QueryTemplate: "{{ .prompt }}",
+							MaxResults:    defaultHookRecallMaxResults,
+							Timeout:       defaultPassiveRecallTimeout,
+							Output:        "markdown",
+							Insertion: HookInsertionConfig{
+								MinScore:          defaultHookInsertionMinScore,
+								MaxItems:          defaultHookInsertionMaxItems,
+								RequireQueryTerms: true,
+							},
+							Initial: defaultInitialHookRecall(),
+						},
+					},
+					"turn_end": {
+						Write: HookWriteConfig{
+							Enabled:  true,
+							Profile:  "ltm",
+							Template: defaultHookWriteTemplate,
+							Mode:     "turn_end",
+							Buffer: HookBufferConfig{
+								Enabled:    true,
+								Flush:      true,
+								FlushCount: defaultHookBufferFlushCount,
+							},
+						},
+					},
+				},
+			},
 			"claude": {
 				Enabled: false,
 				ActiveRecall: ActiveRecallConfig{

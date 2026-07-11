@@ -151,6 +151,14 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	if !piTurnEnd.Enabled || piTurnEnd.Profile != "ltm" || piTurnEnd.Mode != "turn_end" || !piTurnEnd.Buffer.Flush {
 		t.Fatalf("pi turn_end should default to best-effort buffered write: %#v", piTurnEnd)
 	}
+	openCode := cfg.Agents["opencode"]
+	if openCode.Enabled || !openCode.Hooks["user_input"].Recall.Enabled {
+		t.Fatalf("OpenCode passive recall should be opt-in and available: %#v", openCode)
+	}
+	openCodeTurnEnd := openCode.Hooks["turn_end"].Write
+	if !openCodeTurnEnd.Enabled || openCodeTurnEnd.Profile != "ltm" || openCodeTurnEnd.Mode != "turn_end" || !openCodeTurnEnd.Buffer.Flush {
+		t.Fatalf("OpenCode turn_end should default to durable buffered write: %#v", openCodeTurnEnd)
+	}
 	if stm := cfg.WriteProfiles["stm"]; stm.Tier != "stm" || stm.ExpiresAfter != defaultSTMExpiresAfter {
 		t.Fatalf("stm write profile should be short-term: %#v", stm)
 	}

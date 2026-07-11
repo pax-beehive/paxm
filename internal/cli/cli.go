@@ -426,6 +426,12 @@ func (r runner) installSelectedHookIntegrations(path string, cfg config.Config, 
 			}
 			fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
 		}
+		if name == "opencode" {
+			if err := installOpenCodeGlobalHook(openCodePluginPath(), installedScripts); err != nil {
+				return err
+			}
+			fmt.Fprintf(r.stdout, "registered OpenCode global plugin: %s\n", openCodePluginPath())
+		}
 	}
 	return nil
 }
@@ -2506,6 +2512,8 @@ func agentOptionPriority(name string) int {
 		return 1
 	case "pi":
 		return 2
+	case "opencode":
+		return 3
 	default:
 		return 100
 	}
@@ -2519,6 +2527,8 @@ func agentDisplayName(name string) string {
 		return "Claude Code"
 	case "pi":
 		return "Pi"
+	case "opencode":
+		return "OpenCode"
 	default:
 		return name
 	}

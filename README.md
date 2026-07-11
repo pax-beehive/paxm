@@ -9,7 +9,8 @@
 [![Go](https://img.shields.io/github/go-mod/go-version/pax-beehive/paxm)](go.mod)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-6f42c1)](https://github.com/pax-beehive/paxm/releases/latest)
 
-Local-first memory infrastructure for Codex, Claude Code, Pi, and MCP clients.
+Local-first memory infrastructure for Codex, Claude Code, OpenCode, Pi, and MCP
+clients.
 Use SQLite out of the box, connect Zep or Mem0, or bring any provider behind a
 small JSON-RPC adapter.
 
@@ -95,7 +96,7 @@ The Claude plugin includes active-memory skills, the paxm MCP server, and five
 lifecycle hooks: `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
 `PostToolUseFailure`, and `Stop`.
 
-### CLI, MCP, or Pi
+### OpenCode, Pi, CLI, or MCP
 
 Install the latest release and run interactive setup. SQLite provides a full
 local flow without an account or API key.
@@ -114,8 +115,9 @@ paxm recall --query "local memory layer"
 paxm history --days 7
 ```
 
-Select Pi during setup to install its passive extension. Any MCP-compatible
-client can use `paxm mcp serve` without installing passive hooks.
+Select OpenCode during setup to install a global local plugin under
+`~/.config/opencode/plugins/`. Select Pi to install its passive extension. Any
+MCP-compatible client can use `paxm mcp serve` without passive hooks.
 
 ## How it works
 
@@ -209,6 +211,16 @@ hooks, and records `claude-plugin` ownership.
 Pi support is installed through `paxm setup`. The extension handles passive
 prompt recall and buffers visible user, assistant, and tool events into one
 turn-end memory while excluding thinking blocks.
+
+### OpenCode plugin
+
+OpenCode support is installed through `paxm setup` as a dependency-free global
+plugin. The plugin uses OpenCode's `chat.message` and model-message transform
+hooks for passive recall, then reads the completed session through the official
+client on `session.idle` for durable turn-end writes. Only visible user and
+assistant text is captured; reasoning and tool payloads are excluded. The
+generated plugin lives at `~/.config/opencode/plugins/paxm.ts`, or below
+`OPENCODE_CONFIG_DIR`/`XDG_CONFIG_HOME` when configured.
 
 See the complete [configuration guide](docs/config.md) for generated paths,
 event mappings, profile settings, and uninstall behavior.

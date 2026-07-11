@@ -691,9 +691,11 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	claudeSettingsPath := filepath.Join(t.TempDir(), "claude", "settings.json")
 	codexConfigPath := filepath.Join(t.TempDir(), "codex.toml")
 	piAgentDir := filepath.Join(t.TempDir(), "pi-agent")
+	openCodeConfigDir := filepath.Join(t.TempDir(), "opencode")
 	t.Setenv("PAXM_CLAUDE_SETTINGS", claudeSettingsPath)
 	t.Setenv("PAXM_CODEX_CONFIG", codexConfigPath)
 	t.Setenv("PAXM_PI_AGENT_DIR", piAgentDir)
+	t.Setenv("PAXM_OPENCODE_CONFIG_DIR", openCodeConfigDir)
 
 	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\nall\n")
 	var stdout bytes.Buffer
@@ -713,7 +715,7 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	if code := Main([]string{"--config", configPath, "uninstall", "--yes"}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("uninstall failed with code %d: %s", code, stderr.String())
 	}
-	for _, name := range []string{"Codex", "Claude Code", "Pi"} {
+	for _, name := range []string{"Codex", "Claude Code", "Pi", "OpenCode"} {
 		if !strings.Contains(stdout.String(), "uninstalled "+name+" passive integration") {
 			t.Fatalf("uninstall output missing %s: %s", name, stdout.String())
 		}
@@ -728,7 +730,7 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 			t.Fatalf("agent %s should be disabled: %#v", name, agent)
 		}
 	}
-	for _, target := range []string{"codex", "claude", "pi"} {
+	for _, target := range []string{"codex", "claude", "pi", "opencode"} {
 		for _, event := range installedHookEvents() {
 			path := filepath.Join(hooksDir, target+"-"+event.ConfigEvent)
 			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -747,6 +749,9 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(piAgentDir, "extensions", "paxm-hook")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Pi extension still exists, stat err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(openCodeConfigDir, "plugins", "paxm.ts")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenCode plugin still exists, stat err: %v", err)
 	}
 	if _, err := os.Stat(hooksDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("shared hook state directory still exists, stat err: %v", err)
@@ -1710,10 +1715,11 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 				"zed":    {Type: "zep"},
 			},
 			Agents: map[string]config.AgentConfig{
-				"other":  {Enabled: true},
-				"pi":     {Enabled: true},
-				"codex":  {Enabled: true},
-				"claude": {Enabled: true},
+				"other":    {Enabled: true},
+				"pi":       {Enabled: true},
+				"opencode": {Enabled: true},
+				"codex":    {Enabled: true},
+				"claude":   {Enabled: true},
 			},
 		}
 		if got, want := providerOptionIDs(cfg), []string{"sqlite", "zed", "mem", "rpc", "custom"}; !reflect.DeepEqual(got, want) {
@@ -1723,6 +1729,7 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 			{ID: "codex", Label: "Codex"},
 			{ID: "claude", Label: "Claude Code"},
 			{ID: "pi", Label: "Pi"},
+			{ID: "opencode", Label: "OpenCode"},
 			{ID: "other", Label: "other"},
 		}
 		if got := hookOptions(cfg); !reflect.DeepEqual(got, wantHooks) {

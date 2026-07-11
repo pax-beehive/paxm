@@ -492,6 +492,17 @@ It also tries one final flush on `session_shutdown`. Pi's lifecycle events use
 the runtime event bus, so treat them as best-effort rather than a hard delivery
 guarantee.
 
+`agents.opencode.hooks.user_input.recall` controls passive recall from
+OpenCode's `chat.message` plugin hook. The generated plugin runs the bounded
+paxm recall shim, then injects admitted hits only into the current model-message
+transform. It does not modify the user message stored by OpenCode.
+
+`agents.opencode.hooks.turn_end.write` controls durable passive writes from
+OpenCode's `session.idle` event. The plugin reads the completed turn through the
+official OpenCode client, keeps visible user and assistant text, and excludes
+reasoning and tool parts before sending the episode to paxm. Repeated idle
+events for the same final assistant message are deduplicated in the plugin.
+
 `agents.<name>.integration.owner` records which installation surface owns the
 agent lifecycle hooks. An empty value preserves the original paxm-managed
 behavior. For Codex plugin installations, run:
@@ -546,7 +557,8 @@ receives admitted recall hits as Markdown context from the synchronous
 `UserPromptSubmit` hook.
 
 For Pi, the paxm `turn_end` hook maps to Pi's runtime `agent_end` event and
-receives the complete buffered run from the generated extension.
+receives the complete buffered run from the generated extension. For OpenCode,
+it maps to `session.idle` and receives the last completed user/assistant turn.
 
 Hook write fields:
 
@@ -621,12 +633,14 @@ storage cleanup runs.
 ## Setup And Uninstall
 
 In a TTY, multi-select prompts use up/down, space, and enter. After selecting
-agents, setup configures each one in the fixed order Codex, Claude Code, and Pi.
+agents, setup configures each one in the fixed order Codex, Claude Code, Pi, and
+OpenCode.
 Per-agent setup controls only passive recall, passive write, profiles, and write
 events. Non-TTY input retains the numbered selector for scripts and tests.
 
 `paxm uninstall` removes every built-in passive integration. Pass
-`--agent codex`, `--agent claude`, or `--agent pi` to remove one. The command
+`--agent codex`, `--agent claude`, `--agent pi`, or `--agent opencode` to remove
+one. The command
 preserves hook details in paxm config while setting the selected agent's
 `enabled` field to false, so a later setup can reuse the previous choices.
 Provider config, memory data, telemetry, active skills, the binary, and `.paxm.bak`
