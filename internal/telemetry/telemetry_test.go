@@ -89,7 +89,7 @@ func TestRecorderTailEventsReadsAcrossRotatedLogs(t *testing.T) {
 		EventsFile:        "events.jsonl",
 		MetricsFile:       "metrics.json",
 		MaxEventFileBytes: 180,
-		MaxEventFiles:     3,
+		MaxEventFiles:     4,
 		RetentionDays:     7,
 	}, filepath.Join(dir, "config.yaml"))
 	for i := 1; i <= 6; i++ {
@@ -128,7 +128,7 @@ func TestRecorderFollowEventsStreamsAppendAndRotation(t *testing.T) {
 		EventsFile:        "events.jsonl",
 		MetricsFile:       "metrics.json",
 		MaxEventFileBytes: 220,
-		MaxEventFiles:     3,
+		MaxEventFiles:     4,
 		RetentionDays:     7,
 	}, filepath.Join(dir, "config.yaml"))
 	if err := recorder.Record(Event{Kind: "test", Command: "initial", Success: true}); err != nil {
@@ -140,7 +140,7 @@ func TestRecorderFollowEventsStreamsAppendAndRotation(t *testing.T) {
 	commands := make(chan string, 4)
 	done := make(chan error, 1)
 	go func() {
-		done <- recorder.FollowEvents(ctx, 1, 5*time.Millisecond, func(event Event) error {
+		done <- recorder.FollowEvents(ctx, 1, 100*time.Millisecond, func(event Event) error {
 			commands <- event.Command
 			return nil
 		})
@@ -161,10 +161,14 @@ func TestRecorderFollowEventsStreamsAppendAndRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitCommand("appended")
-	if err := recorder.Record(Event{Kind: "test", Command: "rotated", Success: false, Error: strings.Repeat("x", 180)}); err != nil {
+	if err := recorder.Record(Event{Kind: "test", Command: "rotation-one", Success: false, Error: strings.Repeat("x", 180)}); err != nil {
 		t.Fatal(err)
 	}
-	waitCommand("rotated")
+	if err := recorder.Record(Event{Kind: "test", Command: "rotation-two", Success: false, Error: strings.Repeat("y", 180)}); err != nil {
+		t.Fatal(err)
+	}
+	waitCommand("rotation-one")
+	waitCommand("rotation-two")
 	cancel()
 	select {
 	case err := <-done:

@@ -277,7 +277,7 @@ func (r *Recorder) TailEvents(limit int) ([]Event, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	events := make([]Event, 0, limit)
+	var events []Event
 	for _, path := range r.eventPathsOldestFirst() {
 		fileEvents, err := readEventFile(path)
 		if err != nil {
@@ -286,14 +286,10 @@ func (r *Recorder) TailEvents(limit int) ([]Event, error) {
 			}
 			return nil, err
 		}
-		for _, event := range fileEvents {
-			if len(events) == limit {
-				copy(events, events[1:])
-				events[len(events)-1] = event
-				continue
-			}
-			events = append(events, event)
-		}
+		events = append(events, fileEvents...)
+	}
+	if len(events) > limit {
+		events = events[len(events)-limit:]
 	}
 	return events, nil
 }
@@ -339,7 +335,7 @@ func (r *Recorder) FollowEvents(ctx context.Context, tail int, pollInterval time
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			events, err := cursor.poll(r.eventsPath())
+			events, err := cursor.poll(r.eventPathsOldestFirst())
 			if err != nil {
 				return err
 			}
@@ -426,12 +422,16 @@ func (c *eventCursor) close() {
 	}
 }
 
-func (c *eventCursor) poll(path string) ([]Event, error) {
-	events, err := c.readAvailable(path)
+func (c *eventCursor) poll(paths []string) ([]Event, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	activePath := paths[len(paths)-1]
+	events, err := c.readAvailable(activePath)
 	if err != nil {
 		return nil, err
 	}
-	pathInfo, err := os.Stat(path)
+	pathInfo, err := os.Stat(activePath)
 	if errors.Is(err, os.ErrNotExist) {
 		return events, nil
 	}
@@ -439,10 +439,10 @@ func (c *eventCursor) poll(path string) ([]Event, error) {
 		return nil, err
 	}
 	if c.file == nil {
-		if err := c.open(path, false); err != nil {
+		if err := c.open(activePath, false); err != nil {
 			return nil, err
 		}
-		newEvents, err := c.readAvailable(path)
+		newEvents, err := c.readAvailable(activePath)
 		return append(events, newEvents...), err
 	}
 	currentInfo, err := c.file.Stat()
@@ -461,16 +461,51 @@ func (c *eventCursor) poll(path string) ([]Event, error) {
 			return nil, err
 		}
 		c.pending = nil
-		newEvents, err := c.readAvailable(path)
+		newEvents, err := c.readAvailable(activePath)
 		return append(events, newEvents...), err
 	}
 
-	c.close()
-	if err := c.open(path, false); err != nil {
-		return nil, err
+	currentIndex := -1
+	for index, path := range paths {
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if os.SameFile(currentInfo, info) {
+			currentIndex = index
+			break
+		}
 	}
-	newEvents, err := c.readAvailable(path)
-	return append(events, newEvents...), err
+	c.close()
+	if currentIndex < 0 {
+		currentIndex = len(paths) - 2
+	}
+	for index := currentIndex + 1; index < len(paths); index++ {
+		path := paths[index]
+		if index == len(paths)-1 {
+			if err := c.open(path, false); err != nil {
+				return nil, err
+			}
+			newEvents, err := c.readAvailable(path)
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, newEvents...)
+			continue
+		}
+		fileEvents, err := readEventFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, fileEvents...)
+	}
+	return events, nil
 }
 
 func (c *eventCursor) readAvailable(path string) ([]Event, error) {
