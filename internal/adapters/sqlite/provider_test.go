@@ -101,6 +101,48 @@ func TestProviderSearchFiltersTierAndExpiry(t *testing.T) {
 	}
 }
 
+func TestProviderRejectsLifecycleFingerprintConflict(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                string
+		existingFingerprint string
+	}{
+		{name: "different fingerprint", existingFingerprint: "fingerprint-a"},
+		{name: "explicit ID without fingerprint"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			existing := memory.MemoryItem{ID: "ltm_fixed", Text: "first durable fact"}
+			if tt.existingFingerprint != "" {
+				existing.Metadata = map[string]string{
+					memory.MetadataFingerprint: tt.existingFingerprint,
+					memory.MetadataOccurrences: "1",
+				}
+			}
+			if _, err := provider.Put(context.Background(), existing); err != nil {
+				t.Fatal(err)
+			}
+			incoming := memory.MemoryItem{
+				ID:   "ltm_fixed",
+				Text: "different durable fact",
+				Metadata: map[string]string{
+					memory.MetadataFingerprint: "fingerprint-b",
+					memory.MetadataOccurrences: "1",
+				},
+			}
+			if _, err := provider.Put(context.Background(), incoming); err == nil || !strings.Contains(err.Error(), "fingerprint conflict") {
+				t.Fatalf("conflicting Put() error = %v, want fingerprint conflict", err)
+			}
+		})
+	}
+}
+
 func TestProviderCleanupExpiredDeletesRows(t *testing.T) {
 	t.Parallel()
 

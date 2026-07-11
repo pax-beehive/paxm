@@ -616,12 +616,39 @@ type hookBufferResponse struct {
 	Error          string                 `json:"error,omitempty"`
 }
 
-var scheduleHookCleanup = func(service *facade.Service) {
+type hookCleanupWorker struct {
+	requests chan struct{}
+	done     chan struct{}
+	cleanup  func(context.Context)
+}
+
+func newHookCleanupWorker(cleanup func(context.Context)) *hookCleanupWorker {
+	worker := &hookCleanupWorker{
+		requests: make(chan struct{}, 1),
+		done:     make(chan struct{}),
+		cleanup:  cleanup,
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = service.CleanupExpired(ctx, 500)
+		defer close(worker.done)
+		for range worker.requests {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			worker.cleanup(ctx)
+			cancel()
+		}
 	}()
+	return worker
+}
+
+func (w *hookCleanupWorker) Schedule() {
+	select {
+	case w.requests <- struct{}{}:
+	default:
+	}
+}
+
+func (w *hookCleanupWorker) Close() {
+	close(w.requests)
+	<-w.done
 }
 
 func (r runner) runInternalHook(args []string) error {
@@ -670,6 +697,10 @@ func (r runner) runHookDaemon(args []string) error {
 	if err != nil {
 		return err
 	}
+	cleanupWorker := newHookCleanupWorker(func(ctx context.Context) {
+		_, _ = service.CleanupExpired(ctx, 500)
+	})
+	defer cleanupWorker.Close()
 	if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
 		return err
 	}
@@ -700,7 +731,7 @@ func (r runner) runHookDaemon(args []string) error {
 		case <-deadline.C:
 			if len(buffer) > 0 {
 				if _, err := service.IngestBatch(context.Background(), facade.IngestBatchInput{Items: buffer}); err == nil {
-					scheduleHookCleanup(service)
+					cleanupWorker.Schedule()
 				}
 			}
 			return nil
@@ -708,7 +739,7 @@ func (r runner) runHookDaemon(args []string) error {
 			if result.err != nil {
 				return result.err
 			}
-			flushed, shutdown, err := handleHookBufferConn(context.Background(), service, result.conn, &buffer)
+			flushed, shutdown, err := handleHookBufferConn(context.Background(), service, result.conn, &buffer, cleanupWorker.Schedule)
 			if err != nil {
 				fmt.Fprintf(r.stderr, "paxm hook buffer error: %s\n", err)
 			}
@@ -727,7 +758,7 @@ func (r runner) runHookDaemon(args []string) error {
 	}
 }
 
-func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net.Conn, buffer *[]facade.IngestInput) (int, bool, error) {
+func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net.Conn, buffer *[]facade.IngestInput, scheduleCleanup func()) (int, bool, error) {
 	defer conn.Close()
 	var request hookBufferRequest
 	if err := json.NewDecoder(conn).Decode(&request); err != nil {
@@ -748,7 +779,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 				return 0, false, err
 			}
 			*buffer = nil
-			scheduleHookCleanup(service)
+			scheduleCleanup()
 			_ = writeJSON(conn, hookBufferResponse{
 				OK:             true,
 				Flushed:        flushed,
@@ -794,7 +825,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 			ProviderRefs:   telemetry.ProviderRefs(result.Refs),
 			ProviderErrors: result.ProviderErrors,
 		})
-		scheduleHookCleanup(service)
+		scheduleCleanup()
 		return 1, false, nil
 	}
 	*buffer = append(*buffer, item)
@@ -817,7 +848,7 @@ func handleHookBufferConn(ctx context.Context, service *facade.Service, conn net
 		return 0, false, err
 	}
 	*buffer = nil
-	scheduleHookCleanup(service)
+	scheduleCleanup()
 	_ = writeJSON(conn, hookBufferResponse{
 		OK:             true,
 		Buffered:       true,

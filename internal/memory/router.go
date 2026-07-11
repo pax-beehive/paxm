@@ -71,9 +71,11 @@ func (r *Router) SearchWithPolicy(ctx context.Context, query SearchQuery, policy
 	if len(readable) == 0 {
 		return SearchResult{}, errors.New("no readable memory providers are enabled")
 	}
+	resultLimit := query.Limit
 	if policy.Limit > 0 {
-		query.Limit = policy.Limit
+		resultLimit = policy.Limit
 	}
+	query.Limit = providerCandidateLimit(resultLimit)
 	if len(policy.Tiers) > 0 {
 		query.Tiers = NormalizeTiers(policy.Tiers)
 	}
@@ -83,10 +85,24 @@ func (r *Router) SearchWithPolicy(ctx context.Context, query SearchQuery, policy
 		return result, errors.Join(requiredErrs...)
 	}
 	sortSearchHits(result.Hits)
-	if query.Limit > 0 && len(result.Hits) > query.Limit {
-		result.Hits = result.Hits[:query.Limit]
+	if resultLimit > 0 && len(result.Hits) > resultLimit {
+		result.Hits = result.Hits[:resultLimit]
 	}
 	return result, nil
+}
+
+func providerCandidateLimit(resultLimit int) int {
+	if resultLimit <= 0 {
+		return 0
+	}
+	const maxProviderCandidates = 100
+	if resultLimit >= maxProviderCandidates {
+		return resultLimit
+	}
+	if resultLimit >= maxProviderCandidates/3 {
+		return maxProviderCandidates
+	}
+	return resultLimit * 3
 }
 
 func (r *Router) readableBindings(policy SearchPolicy) ([]ProviderBinding, error) {
@@ -126,17 +142,17 @@ func searchProviders(ctx context.Context, query SearchQuery, readable []Provider
 func collectSearchResponses(responses []searchResponse, policy SearchPolicy) (SearchResult, []error) {
 	var result SearchResult
 	var requiredErrs []error
-	seen := make(map[string]struct{})
 	for _, response := range responses {
-		providerErr := appendSearchResponse(&result, seen, response, policy)
+		providerErr := appendSearchResponse(&result, response, policy)
 		if providerErr != nil {
 			requiredErrs = append(requiredErrs, providerErr)
 		}
 	}
+	result.Hits = dedupeSearchHits(result.Hits)
 	return result, requiredErrs
 }
 
-func appendSearchResponse(result *SearchResult, seen map[string]struct{}, response searchResponse, policy SearchPolicy) error {
+func appendSearchResponse(result *SearchResult, response searchResponse, policy SearchPolicy) error {
 	name := response.binding.Provider.Name()
 	if response.err != nil {
 		result.ProviderErrors = append(result.ProviderErrors, ProviderError{
@@ -178,14 +194,38 @@ func appendSearchResponse(result *SearchResult, seen map[string]struct{}, respon
 		if hit.Score < minScore {
 			continue
 		}
-		key := dedupeKey(hit)
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
 		result.Hits = append(result.Hits, hit)
 	}
 	return nil
+}
+
+func dedupeSearchHits(hits []MemoryHit) []MemoryHit {
+	best := make(map[string]MemoryHit, len(hits))
+	for _, hit := range hits {
+		key := dedupeKey(hit)
+		current, exists := best[key]
+		if !exists || betterSearchHit(hit, current) {
+			best[key] = hit
+		}
+	}
+	deduped := make([]MemoryHit, 0, len(best))
+	for _, hit := range best {
+		deduped = append(deduped, hit)
+	}
+	return deduped
+}
+
+func betterSearchHit(candidate, current MemoryHit) bool {
+	if candidate.Score != current.Score {
+		return candidate.Score > current.Score
+	}
+	if !candidate.CreatedAt.Equal(current.CreatedAt) {
+		return candidate.CreatedAt.After(current.CreatedAt)
+	}
+	if candidate.Provider != current.Provider {
+		return candidate.Provider < current.Provider
+	}
+	return candidate.ID < current.ID
 }
 
 func sortSearchHits(hits []MemoryHit) {
@@ -227,6 +267,7 @@ func (r *Router) PutBatchWithPolicy(ctx context.Context, items []MemoryItem, pol
 		return PutResult{}, nil
 	}
 	items = applyPutPolicy(items, policy)
+	items = admitLongTermMemories(items)
 
 	type response struct {
 		binding ProviderBinding

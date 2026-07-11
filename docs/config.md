@@ -398,7 +398,7 @@ Provider route fields:
   non-zero `min_relevance` or `min_score` values override the profile-level
   defaults for this provider route only.
 - `tiers`: optional memory tiers to search. Supported values are `stm` and
-  `ltm`; omitted means no tier filter.
+  `ltm`; omitted means no tier filter. Unknown values are configuration errors.
 
 Threshold fields:
 
@@ -437,9 +437,23 @@ the memory tier assigned to each write, and an optional expiry. `ltm` is durable
 long-term memory. `stm` is short-term working memory and defaults to
 `expires_after: 24h`.
 
+Tier and expiry configuration is strict: every `stm` write profile must set a
+positive Go duration in `expires_after`, and an `ltm` profile must not set
+`expires_after`. Invalid configuration fails before an existing config file is
+overwritten.
+
 `paxm remember` uses the `default` write profile unless another profile is
 selected. Agent skills should use `--profile stm` for short-lived task state and
 `--profile ltm` for durable preferences, decisions, or recurring fixes.
+
+For LTM writes without an explicit ID, paxm derives a stable ID from normalized
+text and optional `workspace` metadata. SQLite consolidates exact repeats and
+stores lifecycle metadata under `paxm_fingerprint`, `paxm_occurrences`,
+`paxm_first_seen_at`, and `paxm_last_seen_at`. Different workspaces remain
+separate. STM and explicit-ID writes are not content-addressed. Near-duplicate or
+contradictory wording is not merged automatically. Passive `user_input` writes
+use the prompt as their stable identity basis while retaining the full rendered
+hook template as stored evidence.
 
 ## Agents
 
@@ -525,10 +539,12 @@ The hook buffer is process memory owned by a short-lived local daemon. It is not
 durable; if the daemon exits before a flush, buffered hook write items can be
 lost.
 
-After any successful daemon flush or immediate hook write, paxm starts a
-background expired-memory cleanup. This is best effort and only affects providers
-that implement cleanup. SQLite deletes a bounded batch of expired rows; recalls
-already filter expired items even before storage cleanup runs.
+After any successful daemon flush or immediate hook write, paxm schedules
+expired-memory cleanup on a single daemon worker. This is best effort and only
+affects providers that implement cleanup. Hook responses do not wait for cleanup,
+but daemon shutdown drains work that was already scheduled. SQLite deletes a
+bounded batch of expired rows; recalls already filter expired items even before
+storage cleanup runs.
 
 ## Setup And Uninstall
 

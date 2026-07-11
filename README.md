@@ -389,9 +389,16 @@ memory (`stm`) and long-term memory (`ltm`) and returns 3 memories; pass
 `--limit N` to `paxm recall` to request more for a specific query. Passive
 recall profiles read `ltm` only. Write profiles decide which provider instances
 are written and whether the item is stored as `stm` or `ltm`; the default `stm`
-profile expires after 24 hours.
+profile expires after 24 hours. Configuration rejects unknown tier names. Every
+`stm` write profile must set a positive `expires_after`, while `ltm` profiles
+must not set an expiry.
 Optional provider failures are returned as provider errors; required provider
 failures fail the command.
+
+The router requests a bounded candidate pool from each provider before applying
+thresholds, cross-provider deduplication, and the final result limit. Duplicate
+text keeps the highest-scoring hit, with deterministic tie-breaking, so provider
+response timing does not change recall output.
 
 Hook recall uses two passive profiles by default. The first `user_input` seen
 for a session can use the looser `passive_initial` profile as session warmup
@@ -402,10 +409,25 @@ Passive hook writes use the `ltm` write profile by default. Active agents should
 write short-lived task state to `stm` and reserve `ltm` for durable preferences,
 decisions, and recurring fixes.
 
+LTM writes without an explicit ID pass through deterministic admission before
+provider fan-out. Paxm normalizes text case and whitespace, scopes it by the
+`workspace` metadata value when present, and assigns a stable content-derived ID
+plus `paxm_fingerprint`, `paxm_occurrences`, `paxm_first_seen_at`, and
+`paxm_last_seen_at` metadata. SQLite uses that identity to consolidate exact
+repeats while preserving the first creation time and updating occurrence/seen
+metadata. STM writes and explicit IDs, including backfill IDs, are unchanged.
+This is exact consolidation, not semantic or LLM-based conflict resolution;
+remote providers receive the stable identity metadata but retain their own
+deduplication behavior. For passive `user_input` writes, the stable prompt is
+used as the identity basis while the stored text still retains the configured
+full hook evidence, so volatile session fields do not defeat consolidation.
+
 Expired memory cleanup is hook-triggered and best effort. After a successful
-hook-buffer flush or immediate hook write, paxm starts a background cleanup for
-providers that support it; SQLite deletes a bounded batch of expired rows.
-Recall still filters expired items even if cleanup has not run yet.
+hook-buffer flush or immediate hook write, the hook daemon schedules cleanup on
+a single background worker for providers that support it; SQLite deletes a
+bounded batch of expired rows. Hook responses do not wait for cleanup, but daemon
+shutdown drains already scheduled cleanup before exiting. Recall still filters
+expired items even if cleanup has not run yet.
 
 Remote provider configs may include a plain-text `api_key` field. Zep is
 supported with `type: zep` using `github.com/getzep/zep-go/v3`; configure

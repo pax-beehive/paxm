@@ -65,6 +65,10 @@ A recall profile is the policy boundary for reads. It chooses:
 `min_relevance` filters provider-normalized hits before cross-provider ranking.
 `min_score` filters the final merged score after route weight and ranking boosts.
 Provider-route thresholds override the profile default for that provider only.
+The router asks each provider for a bounded candidate pool larger than the final
+limit, then applies thresholds and cross-provider deduplication. Duplicate text
+keeps the highest-scoring hit with deterministic tie-breaking, so concurrent
+provider completion order cannot change the winner.
 
 Passive hook recall should not use one policy for every turn. The default
 `passive_initial` profile is used only for the first `user_input` observed for a
@@ -102,7 +106,32 @@ Enabled providers can be used by multiple read and write profiles.
 The built-in `stm` profile writes short-term working memory with a 24 hour
 expiry. The built-in `ltm` profile writes durable long-term memory. Passive hook
 writes default to `ltm`; active agents should use `stm` for task-local working
-state and `ltm` only for durable facts.
+state and `ltm` only for durable facts. Configuration rejects unknown tier names,
+requires every `stm` profile to have a positive expiry, and rejects expiry on
+`ltm` profiles.
+
+Before provider fan-out, LTM items without an explicit ID pass through a
+deterministic admission module. It canonicalizes text case and whitespace,
+includes `workspace` metadata in the identity scope when present, and assigns a
+SHA-256 content ID plus lifecycle metadata. SQLite consolidates repeated IDs in
+the same transaction, increments the occurrence count, keeps the earliest
+`first_seen_at`, and advances `last_seen_at`. This works for both sequential
+writes and duplicate items in one hook-buffer batch. STM items remain event-like
+records, and explicit IDs remain authoritative so historical backfill identity
+does not change.
+
+`user_input` hooks separate identity from storage evidence: the stable prompt is
+used as the admission text, while the rendered template including raw event data
+remains the stored text. This prevents changing session IDs and other volatile
+hook fields from producing a new LTM identity. Other hook events use their full
+rendered text because collapsing different assistant outcomes under one prompt
+would lose meaningful evidence.
+
+The admission module only consolidates exact canonical matches. It does not use
+an LLM, infer semantic equivalence, resolve conflicting facts, promote STM, or
+supersede another memory. Remote adapters receive the stable ID and lifecycle
+metadata, but the backing provider still decides whether repeated writes are
+physically deduplicated.
 
 ## Agent Entries
 
@@ -208,8 +237,9 @@ as write evidence without blocking Claude from stopping.
 
 Paxm does not run a shared memory-extraction or summarization step before
 writing. Hook writes render the configured `hooks.*.write.template` into a text
-payload, attach hook metadata, and route that `MemoryItem` to the configured
-write profile. The provider decides what to do with that text:
+payload, attach hook metadata, apply deterministic LTM admission when applicable,
+and route that `MemoryItem` to the configured write profile. The provider decides
+what to do with that text:
 
 - `sqlite` stores the rendered text directly.
 - `zep` writes the rendered text as a text episode and leaves graph extraction
@@ -227,11 +257,13 @@ Mem0, and JSON-RPC receive the same fields on `MemoryItem`; for remote results,
 the core router also understands `paxm_tier` and `paxm_expires_at` metadata.
 
 After a successful hook-buffer flush, paxm schedules a best-effort expired-memory
-cleanup in the background. Cleanup is provider opt-in: SQLite deletes a bounded
-batch of rows whose `expires_at` has passed, while providers without cleanup
-support are skipped. Recall correctness does not depend on cleanup because both
-SQLite and the core router filter expired hits before returning them. The cleanup
-path is storage hygiene only, and it does not block the hook response or run
+cleanup on a single daemon-owned worker. Cleanup is provider opt-in: SQLite
+deletes a bounded batch of rows whose `expires_at` has passed, while providers
+without cleanup support are skipped. Scheduling does not block the hook response,
+and duplicate pending schedules are coalesced. Idle and shutdown paths drain
+already scheduled cleanup before the daemon exits. Recall correctness does not
+depend on cleanup because both SQLite and the core router filter expired hits
+before returning them. The cleanup path is storage hygiene only and does not run
 `VACUUM`.
 
 Pi is integrated through Pi's extension system:

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -106,7 +107,11 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 
 	refs := make([]memory.MemoryRef, 0, len(items))
 	for _, item := range items {
-		metadata, err := encodeMetadata(item.Metadata)
+		itemMetadata, err := mergeLifecycleMetadata(ctx, tx, item)
+		if err != nil {
+			return refs, err
+		}
+		metadata, err := encodeMetadata(itemMetadata)
 		if err != nil {
 			return refs, err
 		}
@@ -136,6 +141,105 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 	}
 	committed = true
 	return refs, nil
+}
+
+func mergeLifecycleMetadata(ctx context.Context, tx *sql.Tx, item memory.MemoryItem) (map[string]string, error) {
+	incoming := copyMetadata(item.Metadata)
+	fingerprint := incoming[memory.MetadataFingerprint]
+	if strings.TrimSpace(fingerprint) == "" {
+		return incoming, nil
+	}
+
+	var existingJSON string
+	var existingCreatedAt string
+	err := tx.QueryRowContext(ctx, `
+	SELECT metadata_json, created_at
+	FROM memories
+	WHERE id = ?
+	`, item.ID).Scan(&existingJSON, &existingCreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return incoming, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	existing, err := decodeMetadata(existingJSON)
+	if err != nil {
+		return nil, err
+	}
+	if existingFingerprint := strings.TrimSpace(existing[memory.MetadataFingerprint]); existingFingerprint != fingerprint {
+		return nil, fmt.Errorf("sqlite memory %q fingerprint conflict", item.ID)
+	}
+
+	merged := copyMetadata(existing)
+	for key, value := range incoming {
+		merged[key] = value
+	}
+	merged[memory.MetadataFingerprint] = fingerprint
+	merged[memory.MetadataOccurrences] = strconv.Itoa(metadataOccurrences(existing) + metadataOccurrences(incoming))
+	merged[memory.MetadataFirstSeenAt] = earlierTimestamp(
+		firstNonEmpty(existing[memory.MetadataFirstSeenAt], existingCreatedAt),
+		incoming[memory.MetadataFirstSeenAt],
+	)
+	merged[memory.MetadataLastSeenAt] = laterTimestamp(
+		firstNonEmpty(existing[memory.MetadataLastSeenAt], existingCreatedAt),
+		firstNonEmpty(incoming[memory.MetadataLastSeenAt], item.CreatedAt.UTC().Format(time.RFC3339Nano)),
+	)
+	return merged, nil
+}
+
+func copyMetadata(metadata map[string]string) map[string]string {
+	copied := make(map[string]string, len(metadata)+4)
+	for key, value := range metadata {
+		copied[key] = value
+	}
+	return copied
+}
+
+func metadataOccurrences(metadata map[string]string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(metadata[memory.MetadataOccurrences]))
+	if err != nil || value < 1 {
+		return 1
+	}
+	return value
+}
+
+func earlierTimestamp(left, right string) string {
+	leftTime, leftOK := parseTimestamp(left)
+	rightTime, rightOK := parseTimestamp(right)
+	if !leftOK {
+		return right
+	}
+	if !rightOK || leftTime.Before(rightTime) {
+		return left
+	}
+	return right
+}
+
+func laterTimestamp(left, right string) string {
+	leftTime, leftOK := parseTimestamp(left)
+	rightTime, rightOK := parseTimestamp(right)
+	if !leftOK {
+		return right
+	}
+	if !rightOK || leftTime.After(rightTime) {
+		return left
+	}
+	return right
+}
+
+func parseTimestamp(value string) (time.Time, bool) {
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	return parsed, err == nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (p *Provider) Health(ctx context.Context) error {

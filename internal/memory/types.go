@@ -70,13 +70,14 @@ func EffectiveHitExpiresAt(hit MemoryHit) *time.Time {
 }
 
 type MemoryItem struct {
-	ID        string            `json:"id,omitempty"`
-	Text      string            `json:"text"`
-	Source    string            `json:"source,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	CreatedAt time.Time         `json:"created_at,omitempty"`
-	Tier      MemoryTier        `json:"tier,omitempty"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	ID            string            `json:"id,omitempty"`
+	Text          string            `json:"text"`
+	AdmissionText string            `json:"-"`
+	Source        string            `json:"source,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	CreatedAt     time.Time         `json:"created_at,omitempty"`
+	Tier          MemoryTier        `json:"tier,omitempty"`
+	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
 }
 
 type MemoryRef struct {

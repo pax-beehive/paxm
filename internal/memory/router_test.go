@@ -9,12 +9,13 @@ import (
 )
 
 type fakeProvider struct {
-	name      string
-	searchErr error
-	putErr    error
-	healthErr error
-	hits      []MemoryHit
-	refs      []MemoryRef
+	name        string
+	searchErr   error
+	putErr      error
+	healthErr   error
+	hits        []MemoryHit
+	refs        []MemoryRef
+	searchDelay time.Duration
 }
 
 func (p fakeProvider) Name() string {
@@ -22,6 +23,9 @@ func (p fakeProvider) Name() string {
 }
 
 func (p fakeProvider) Search(context.Context, SearchQuery) ([]MemoryHit, error) {
+	if p.searchDelay > 0 {
+		time.Sleep(p.searchDelay)
+	}
 	if p.searchErr != nil {
 		return nil, p.searchErr
 	}
@@ -45,6 +49,16 @@ func (p fakeProvider) Health(context.Context) error {
 type captureBatchProvider struct {
 	fakeProvider
 	items []MemoryItem
+}
+
+type captureSearchProvider struct {
+	fakeProvider
+	queries []SearchQuery
+}
+
+func (p *captureSearchProvider) Search(_ context.Context, query SearchQuery) ([]MemoryHit, error) {
+	p.queries = append(p.queries, query)
+	return p.hits, p.searchErr
 }
 
 func (p *captureBatchProvider) PutBatch(_ context.Context, items []MemoryItem) ([]MemoryRef, error) {
@@ -75,13 +89,12 @@ func TestRouterSearchFansOutAndDedupes(t *testing.T) {
 
 	router, err := NewRouter([]ProviderBinding{
 		{
-			Provider: fakeProvider{name: "a", hits: []MemoryHit{{ID: "1", Text: "same memory", Score: 0.5}}},
+			Provider: fakeProvider{name: "a", hits: []MemoryHit{{ID: "1", Text: "same memory", Relevance: 0.4}}},
 			Read:     true,
 			Write:    true,
-			Weight:   2,
 		},
 		{
-			Provider: fakeProvider{name: "b", hits: []MemoryHit{{ID: "2", Text: "same memory", Score: 0.9}}},
+			Provider: fakeProvider{name: "b", hits: []MemoryHit{{ID: "2", Text: "same memory", Relevance: 0.9}}, searchDelay: 20 * time.Millisecond},
 			Read:     true,
 			Write:    true,
 		},
@@ -97,8 +110,8 @@ func TestRouterSearchFansOutAndDedupes(t *testing.T) {
 	if len(result.Hits) != 1 {
 		t.Fatalf("expected deduped hit, got %d", len(result.Hits))
 	}
-	if result.Hits[0].Provider == "" {
-		t.Fatalf("provider was not assigned: %#v", result.Hits[0])
+	if result.Hits[0].Provider != "b" || result.Hits[0].ID != "2" {
+		t.Fatalf("dedupe did not keep the highest-scoring hit: %#v", result.Hits[0])
 	}
 }
 
@@ -163,6 +176,49 @@ func TestRouterSearchAppliesPolicyThresholds(t *testing.T) {
 	}
 	if result.Hits[0].Score != 0.4 {
 		t.Fatalf("expected weighted final score, got %f", result.Hits[0].Score)
+	}
+}
+
+func TestRouterSearchOversamplesProviderCandidatesBeforeFinalLimit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "triple small result limit", limit: 3, wantLimit: 9},
+		{name: "cap oversampling", limit: 40, wantLimit: 100},
+		{name: "never reduce requested limit", limit: 101, wantLimit: 101},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := &captureSearchProvider{fakeProvider: fakeProvider{name: "a", hits: []MemoryHit{
+				{ID: "1", Text: "one", Relevance: 1},
+				{ID: "2", Text: "two", Relevance: 0.9},
+				{ID: "3", Text: "three", Relevance: 0.8},
+				{ID: "4", Text: "four", Relevance: 0.7},
+			}}}
+			router, err := NewRouter([]ProviderBinding{{Provider: provider, Read: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{Limit: tt.limit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.queries) != 1 || provider.queries[0].Limit != tt.wantLimit {
+				t.Fatalf("provider candidate limit = %#v, want %d", provider.queries, tt.wantLimit)
+			}
+			if len(result.Hits) != 4 && tt.limit >= 4 {
+				t.Fatalf("final result count = %d, want 4", len(result.Hits))
+			}
+			if len(result.Hits) != 3 && tt.limit == 3 {
+				t.Fatalf("final result count = %d, want 3", len(result.Hits))
+			}
+		})
 	}
 }
 

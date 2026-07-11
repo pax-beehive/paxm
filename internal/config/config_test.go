@@ -26,6 +26,33 @@ func TestSaveWritesYAMLByDefault(t *testing.T) {
 	}
 }
 
+func TestSaveRejectsInvalidMemoryPolicyWithoutChangingExistingConfig(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := DefaultConfig(path)
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := cfg.WriteProfiles["stm"]
+	profile.Tier = "stn"
+	cfg.WriteProfiles["stm"] = profile
+	if err := Save(path, cfg); err == nil || !strings.Contains(err.Error(), `invalid tier "stn"`) {
+		t.Fatalf("Save() error = %v, want invalid tier", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, original) {
+		t.Fatal("invalid save changed the existing config file")
+	}
+}
+
 func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	t.Parallel()
 
@@ -303,6 +330,82 @@ func TestLoadMigratesLegacyJSON(t *testing.T) {
 	}
 	if cfg.Providers["sqlite"].Type != "sqlite" || cfg.Providers["sqlite"].Path != "/tmp/paxm-memory.sqlite" {
 		t.Fatalf("legacy local provider should normalize to sqlite: %#v", cfg.Providers["sqlite"])
+	}
+}
+
+func TestLoadRejectsInvalidMemoryTierAndTTLConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{
+			name: "unknown recall tier",
+			config: `recall_profiles:
+  default:
+    tiers: [stn]
+`,
+			wantErr: `recall profile "default" has invalid tier "stn"`,
+		},
+		{
+			name: "unknown write tier",
+			config: `write_profiles:
+  archive:
+    tier: permanent
+`,
+			wantErr: `write profile "archive" has invalid tier "permanent"`,
+		},
+		{
+			name: "stm missing ttl",
+			config: `write_profiles:
+  scratch:
+    tier: stm
+`,
+			wantErr: `write profile "scratch" with tier stm requires expires_after`,
+		},
+		{
+			name: "stm invalid ttl",
+			config: `write_profiles:
+  scratch:
+    tier: stm
+    expires_after: tomorrow
+`,
+			wantErr: `write profile "scratch" has invalid expires_after`,
+		},
+		{
+			name: "stm non-positive ttl",
+			config: `write_profiles:
+  scratch:
+    tier: stm
+    expires_after: 0s
+`,
+			wantErr: `write profile "scratch" expires_after must be positive`,
+		},
+		{
+			name: "ltm with ttl",
+			config: `write_profiles:
+  archive:
+    tier: ltm
+    expires_after: 24h
+`,
+			wantErr: `write profile "archive" with tier ltm must not set expires_after`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Load() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -465,6 +467,9 @@ func Load(path string) (Config, error) {
 					if decodeErr := decodeConfig(legacyFile, legacyPath, &cfg); decodeErr != nil {
 						return Config{}, decodeErr
 					}
+					if validateErr := Validate(cfg); validateErr != nil {
+						return Config{}, validateErr
+					}
 					return Normalize(cfg), nil
 				}
 			}
@@ -478,10 +483,16 @@ func Load(path string) (Config, error) {
 	if err := decodeConfig(file, path, &cfg); err != nil {
 		return Config{}, err
 	}
+	if err := Validate(cfg); err != nil {
+		return Config{}, err
+	}
 	return Normalize(cfg), nil
 }
 
 func Save(path string, cfg Config) error {
+	if err := Validate(cfg); err != nil {
+		return err
+	}
 	if path == "" {
 		path = DefaultConfigPath()
 	}
@@ -496,6 +507,73 @@ func Save(path string, cfg Config) error {
 	defer file.Close()
 
 	return encodeConfig(file, path, Normalize(cfg))
+}
+
+func Validate(cfg Config) error {
+	recallNames := sortedKeys(cfg.RecallProfiles)
+	for _, name := range recallNames {
+		for _, tier := range cfg.RecallProfiles[name].Tiers {
+			if _, ok := canonicalTier(tier); !ok {
+				return fmt.Errorf("recall profile %q has invalid tier %q; expected stm or ltm", name, tier)
+			}
+		}
+	}
+
+	writeNames := sortedKeys(cfg.WriteProfiles)
+	for _, name := range writeNames {
+		profile := cfg.WriteProfiles[name]
+		tier := strings.TrimSpace(profile.Tier)
+		if tier != "" {
+			var ok bool
+			tier, ok = canonicalTier(tier)
+			if !ok {
+				return fmt.Errorf("write profile %q has invalid tier %q; expected stm or ltm", name, profile.Tier)
+			}
+		} else if strings.EqualFold(strings.TrimSpace(name), "stm") {
+			tier = "stm"
+		} else {
+			tier = "ltm"
+		}
+
+		expiresAfter := strings.TrimSpace(profile.ExpiresAfter)
+		if tier == "ltm" {
+			if expiresAfter != "" {
+				return fmt.Errorf("write profile %q with tier ltm must not set expires_after", name)
+			}
+			continue
+		}
+		if expiresAfter == "" {
+			return fmt.Errorf("write profile %q with tier stm requires expires_after", name)
+		}
+		duration, err := time.ParseDuration(expiresAfter)
+		if err != nil {
+			return fmt.Errorf("write profile %q has invalid expires_after %q: %w", name, profile.ExpiresAfter, err)
+		}
+		if duration <= 0 {
+			return fmt.Errorf("write profile %q expires_after must be positive", name)
+		}
+	}
+	return nil
+}
+
+func sortedKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func canonicalTier(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "stm":
+		return "stm", true
+	case "ltm":
+		return "ltm", true
+	default:
+		return "", false
+	}
 }
 
 func Exists(path string) bool {

@@ -120,6 +120,11 @@ Use long-term memory only for durable, reusable facts:
 paxm remember --profile ltm --text "Decision: paxm setup owns provider and hook configuration; visible hook install/test commands are intentionally omitted."
 ```
 
+Paxm consolidates exact repeated LTM text when no explicit ID is supplied. This
+does not make semantic duplicates or conflicting statements safe: keep durable
+memories concise and consistently worded, and verify current source before
+relying on facts that may drift.
+
 Good `ltm` candidates:
 
 - user preferences that should affect future agent behavior;
@@ -150,4 +155,4 @@ Use this when the user asks whether passive recall fired, why a memory was not r
 - Do not run `paxm uninstall` silently. It removes passive agent integrations; use `--agent` to scope cleanup and `--yes` only with explicit user approval.
 - Do not edit paxm config files by hand unless the user explicitly asks; prefer `paxm setup` for configuration.
 - Do not treat passive hook behavior as guaranteed unless setup installed hooks and history shows events.
-- Do not look for or run a manual memory cleanup command. Expired STM cleanup is a best-effort hook-flush side effect, and recall filters expired rows even before storage cleanup runs.
+- Do not look for or run a manual memory cleanup command. Expired STM cleanup is a best-effort hook-flush side effect managed by the hook daemon, and recall filters expired rows even before storage cleanup runs.

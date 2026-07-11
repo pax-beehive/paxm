@@ -3,12 +3,14 @@ package facade
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	sqliteadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/sqlite"
 	"github.com/pax-beehive/memory-adaptor/internal/config"
 	"github.com/pax-beehive/memory-adaptor/internal/memory"
 )
@@ -66,6 +68,235 @@ func TestIngestBatchToProviderPreservesHistoricalIdentityAndTime(t *testing.T) {
 	if provider.items[0].Tier != memory.TierLTM {
 		t.Fatalf("historical direct provider write should default to LTM: %#v", provider.items[0])
 	}
+}
+
+func TestIngestConsolidatesEquivalentLongTermMemories(t *testing.T) {
+	t.Parallel()
+
+	service := newSQLiteService(t)
+	firstSeen := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	lastSeen := firstSeen.Add(2 * time.Hour)
+
+	first, err := service.Ingest(context.Background(), IngestInput{
+		Text:      "Decision: release workflow requires published binary verification.",
+		Profile:   "ltm",
+		Source:    "hook:codex",
+		Metadata:  map[string]string{"workspace": "/tmp/project"},
+		CreatedAt: firstSeen,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Ingest(context.Background(), IngestInput{
+		Text:      "  DECISION:  release workflow requires published binary verification. ",
+		Profile:   "ltm",
+		Source:    "mcp",
+		Metadata:  map[string]string{"workspace": "/tmp/project"},
+		CreatedAt: lastSeen,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Refs) != 1 || len(second.Refs) != 1 || first.Refs[0].ID == "" || first.Refs[0].ID != second.Refs[0].ID {
+		t.Fatalf("equivalent LTM refs were not consolidated: first=%#v second=%#v", first.Refs, second.Refs)
+	}
+
+	recalled, err := service.Recall(context.Background(), RecallInput{Query: "release workflow published binary", Profile: "default", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recalled.Hits) != 1 {
+		t.Fatalf("consolidated recall returned %d hits: %#v", len(recalled.Hits), recalled.Hits)
+	}
+	hit := recalled.Hits[0]
+	if hit.Metadata[memory.MetadataOccurrences] != "2" {
+		t.Fatalf("occurrences = %q, want 2: %#v", hit.Metadata[memory.MetadataOccurrences], hit.Metadata)
+	}
+	if hit.Metadata[memory.MetadataFirstSeenAt] != firstSeen.Format(time.RFC3339Nano) {
+		t.Fatalf("first_seen_at = %q, want %q", hit.Metadata[memory.MetadataFirstSeenAt], firstSeen.Format(time.RFC3339Nano))
+	}
+	if hit.Metadata[memory.MetadataLastSeenAt] != lastSeen.Format(time.RFC3339Nano) {
+		t.Fatalf("last_seen_at = %q, want %q", hit.Metadata[memory.MetadataLastSeenAt], lastSeen.Format(time.RFC3339Nano))
+	}
+	if hit.Metadata[memory.MetadataFingerprint] == "" {
+		t.Fatalf("consolidated memory has no fingerprint: %#v", hit.Metadata)
+	}
+}
+
+func TestIngestScopesLongTermConsolidationByWorkspace(t *testing.T) {
+	t.Parallel()
+
+	service := newSQLiteService(t)
+	first, err := service.Ingest(context.Background(), IngestInput{
+		Text:      "Decision: use the repository release workflow.",
+		Profile:   "ltm",
+		Metadata:  map[string]string{"workspace": "/tmp/project-a"},
+		CreatedAt: time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Ingest(context.Background(), IngestInput{
+		Text:      "Decision: use the repository release workflow.",
+		Profile:   "ltm",
+		Metadata:  map[string]string{"workspace": "/tmp/project-b"},
+		CreatedAt: time.Date(2026, 7, 10, 11, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Refs) != 1 || len(second.Refs) != 1 || first.Refs[0].ID == second.Refs[0].ID {
+		t.Fatalf("workspace-scoped LTM refs collided: first=%#v second=%#v", first.Refs, second.Refs)
+	}
+}
+
+func TestIngestConsolidationHandlesOutOfOrderEvidenceAndMergesMetadata(t *testing.T) {
+	t.Parallel()
+
+	service := newSQLiteService(t)
+	earlier := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	later := earlier.Add(24 * time.Hour)
+	for _, input := range []IngestInput{
+		{
+			Text:      "Decision: preserve lifecycle chronology.",
+			Profile:   "ltm",
+			Metadata:  map[string]string{"workspace": "/tmp/project", "later_evidence": "present"},
+			CreatedAt: later,
+		},
+		{
+			Text:      "Decision: preserve lifecycle chronology.",
+			Profile:   "ltm",
+			Metadata:  map[string]string{"workspace": "/tmp/project", "earlier_evidence": "present"},
+			CreatedAt: earlier,
+		},
+	} {
+		if _, err := service.Ingest(context.Background(), input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recalled, err := service.Recall(context.Background(), RecallInput{Query: "lifecycle chronology", Profile: "default", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recalled.Hits) != 1 {
+		t.Fatalf("consolidated recall returned %d hits: %#v", len(recalled.Hits), recalled.Hits)
+	}
+	metadata := recalled.Hits[0].Metadata
+	if metadata[memory.MetadataFirstSeenAt] != earlier.Format(time.RFC3339Nano) || metadata[memory.MetadataLastSeenAt] != later.Format(time.RFC3339Nano) {
+		t.Fatalf("out-of-order lifecycle timestamps were not consolidated: %#v", metadata)
+	}
+	if metadata["earlier_evidence"] != "present" || metadata["later_evidence"] != "present" {
+		t.Fatalf("source metadata was not merged: %#v", metadata)
+	}
+}
+
+func TestIngestDoesNotConsolidateShortTermMemories(t *testing.T) {
+	t.Parallel()
+
+	service := newSQLiteService(t)
+	input := IngestInput{
+		Text:     "Working note: release verification is in progress.",
+		Profile:  "stm",
+		Metadata: map[string]string{"workspace": "/tmp/project"},
+	}
+	first, err := service.Ingest(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Ingest(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Refs) != 1 || len(second.Refs) != 1 || first.Refs[0].ID == second.Refs[0].ID {
+		t.Fatalf("STM writes were unexpectedly consolidated: first=%#v second=%#v", first.Refs, second.Refs)
+	}
+}
+
+func TestIngestBatchConsolidatesEquivalentLongTermMemories(t *testing.T) {
+	t.Parallel()
+
+	service := newSQLiteService(t)
+	firstSeen := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	lastSeen := firstSeen.Add(time.Hour)
+	result, err := service.IngestBatch(context.Background(), IngestBatchInput{Items: []IngestInput{
+		{
+			Text:      "Decision: hooks write durable facts through the LTM profile.",
+			Profile:   "ltm",
+			Metadata:  map[string]string{"workspace": "/tmp/project"},
+			CreatedAt: firstSeen,
+		},
+		{
+			Text:      " decision: hooks write durable facts through the ltm profile. ",
+			Profile:   "ltm",
+			Metadata:  map[string]string{"workspace": "/tmp/project"},
+			CreatedAt: lastSeen,
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refs) != 2 || result.Refs[0].ID != result.Refs[1].ID {
+		t.Fatalf("batch LTM refs were not consolidated: %#v", result.Refs)
+	}
+	recalled, err := service.Recall(context.Background(), RecallInput{Query: "hooks durable facts LTM", Profile: "default", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recalled.Hits) != 1 || recalled.Hits[0].Metadata[memory.MetadataOccurrences] != "2" {
+		t.Fatalf("batch consolidation result is invalid: %#v", recalled.Hits)
+	}
+}
+
+func TestUserInputHookConsolidationIgnoresVolatileRawEventFields(t *testing.T) {
+	t.Parallel()
+
+	service := newSQLiteService(t)
+	firstItem, ok, err := service.HookWriteItem(HookEvent{
+		Target:    "codex",
+		Event:     "user_input",
+		Prompt:    "Remember that releases require binary verification.",
+		Workspace: "/tmp/project",
+		Raw:       json.RawMessage(`{"session_id":"session-a","prompt":"Remember that releases require binary verification."}`),
+	})
+	if err != nil || !ok {
+		t.Fatalf("first HookWriteItem() = %#v, %v, %v", firstItem, ok, err)
+	}
+	secondItem, ok, err := service.HookWriteItem(HookEvent{
+		Target:    "codex",
+		Event:     "user_input",
+		Prompt:    "Remember that releases require binary verification.",
+		Workspace: "/tmp/project",
+		Raw:       json.RawMessage(`{"session_id":"session-b","prompt":"Remember that releases require binary verification."}`),
+	})
+	if err != nil || !ok {
+		t.Fatalf("second HookWriteItem() = %#v, %v, %v", secondItem, ok, err)
+	}
+	first, err := service.Ingest(context.Background(), firstItem)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Ingest(context.Background(), secondItem)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Refs) != 1 || len(second.Refs) != 1 || first.Refs[0].ID != second.Refs[0].ID {
+		t.Fatalf("volatile raw fields prevented hook consolidation: first=%#v second=%#v", first.Refs, second.Refs)
+	}
+}
+
+func newSQLiteService(t *testing.T) *Service {
+	t.Helper()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	provider, err := sqliteadapter.New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Read: true, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(cfg, router)
 }
 
 func TestRunHookUsesExplicitQueryBeforeTemplate(t *testing.T) {
