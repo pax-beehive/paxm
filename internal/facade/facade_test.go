@@ -17,6 +17,8 @@ import (
 
 type captureProvider struct {
 	query string
+	limit int
+	meta  map[string]string
 	tiers []memory.MemoryTier
 	hits  []memory.MemoryHit
 	items []memory.MemoryItem
@@ -28,11 +30,46 @@ func (p *captureProvider) Name() string {
 
 func (p *captureProvider) Search(_ context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
 	p.query = query.Text
+	p.limit = query.Limit
+	p.meta = query.Metadata
 	p.tiers = append([]memory.MemoryTier(nil), query.Tiers...)
 	if p.hits != nil {
 		return p.hits, nil
 	}
 	return []memory.MemoryHit{{ID: "1", Text: "hit", Score: 1}}, nil
+}
+
+func TestRecallAdapterContractForwardsRequestAndPreservesProviderHit(t *testing.T) {
+	raw := 0.82
+	created := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	provider := &captureProvider{hits: []memory.MemoryHit{{
+		ID: "provider-id", Text: "provider text", Relevance: 0.9, Score: 0.9, RawScore: &raw, RawScoreKind: "native",
+		Source: "provider-source", Metadata: map[string]string{"workspace": "alpha"},
+		CreatedAt: created, Tier: memory.TierLTM,
+	}}}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Read: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(config.Config{Version: 1, RecallProfiles: map[string]config.RecallProfileConfig{
+		"contract": {Providers: []config.ProviderRouteConfig{{Name: "capture", Required: true, Weight: 1}}},
+	}}, router)
+	result, err := service.Recall(context.Background(), RecallInput{Query: "exact request", Profile: "contract", Limit: 7, Meta: map[string]string{"session": "consumer"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The router intentionally asks the provider for 3x candidates before applying
+	// the caller's final limit; that policy transform is part of the contract.
+	if provider.query != "exact request" || provider.limit != 21 || provider.meta["session"] != "consumer" {
+		t.Fatalf("recall request was not forwarded faithfully: %#v", provider)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %#v", result.Hits)
+	}
+	hit := result.Hits[0]
+	if hit.ID != "provider-id" || hit.Text != "provider text" || hit.RawScore == nil || *hit.RawScore != raw || hit.RawScoreKind != "native" || hit.Source != "provider-source" || hit.Metadata["workspace"] != "alpha" || hit.Tier != memory.TierLTM || !hit.CreatedAt.Equal(created) {
+		t.Fatalf("provider hit was not preserved: %#v", hit)
+	}
 }
 
 func (p *captureProvider) Put(_ context.Context, item memory.MemoryItem) (memory.MemoryRef, error) {

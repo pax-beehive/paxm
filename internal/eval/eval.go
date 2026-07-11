@@ -87,6 +87,9 @@ type Result struct {
 	CaseCount              int           `json:"case_count"`
 	Passed                 int           `json:"passed"`
 	Failed                 int           `json:"failed"`
+	AdapterContractCases   int           `json:"adapter_contract_cases,omitempty"`
+	AdapterContractPassed  int           `json:"adapter_contract_passed,omitempty"`
+	AdapterContractFailed  int           `json:"adapter_contract_failed,omitempty"`
 	RecallAtK              float64       `json:"recall_at_k"`
 	PrecisionAtK           float64       `json:"precision_at_k"`
 	MRR                    float64       `json:"mrr"`
@@ -109,6 +112,9 @@ type CaseResult struct {
 	ID                       string   `json:"id"`
 	Category                 string   `json:"category"`
 	Passed                   bool     `json:"passed"`
+	AdapterContractCase      bool     `json:"adapter_contract_case,omitempty"`
+	AdapterContractPassed    bool     `json:"adapter_contract_passed,omitempty"`
+	AdapterContractErrors    []string `json:"adapter_contract_errors,omitempty"`
 	HitIDs                   []string `json:"hit_ids"`
 	Missing                  []string `json:"missing,omitempty"`
 	Forbidden                []string `json:"forbidden_hits,omitempty"`
@@ -342,9 +348,19 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		ID:                       scenario.ID,
 		Category:                 scenario.Category,
 		WriteCase:                scenario.Write != nil,
+		AdapterContractCase:      scenario.Write != nil,
 		WriteForbiddenCandidates: len(scenario.ForbiddenWrite),
 	}
-	defer func() { result.DurationMS = time.Since(started).Milliseconds() }()
+	defer func() {
+		if result.AdapterContractCase && !result.AdapterContractPassed && len(result.AdapterContractErrors) == 0 {
+			failure := result.Error
+			if failure == "" {
+				failure = "adapter write contract did not complete"
+			}
+			result.AdapterContractErrors = []string{failure}
+		}
+		result.DurationMS = time.Since(started).Milliseconds()
+	}()
 	caseDir := filepath.Join(root, scenario.ID)
 	if err := os.MkdirAll(caseDir, 0o755); err != nil {
 		result.Error = err.Error()
@@ -413,6 +429,8 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 			return result
 		}
 		result.Written = len(writeResult.Refs) > 0
+		result.AdapterContractErrors = evaluateWriteContract(scenario, result.Written, writtenText, writtenMetadata)
+		result.AdapterContractPassed = len(result.AdapterContractErrors) == 0
 	}
 	for _, item := range scenario.Memories {
 		_, err = runtime.Service.Ingest(ctx, facade.IngestInput{ID: item.ID, Text: item.Text, Profile: profileForTier(item.Tier), Tier: item.Tier, ExpiresAt: item.ExpiresAt, Metadata: item.Metadata, Source: "eval:" + scenario.ID})
@@ -460,6 +478,30 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		result.score(scenario)
 	}
 	return result
+}
+
+func evaluateWriteContract(scenario Case, written bool, text string, metadata map[string]string) []string {
+	var failures []string
+	if !written {
+		failures = append(failures, "provider did not acknowledge the write")
+	}
+	for _, expected := range scenario.ExpectedWrite {
+		if !containsFold(text, expected) {
+			failures = append(failures, "missing write fragment: "+expected)
+		}
+	}
+	for _, forbidden := range scenario.ForbiddenWrite {
+		if containsFold(text, forbidden) {
+			failures = append(failures, "forbidden write fragment: "+forbidden)
+		}
+	}
+	for key, expected := range scenario.ExpectedMetadata {
+		if metadata[key] != expected {
+			failures = append(failures, fmt.Sprintf("write metadata %s=%q; want %q", key, metadata[key], expected))
+		}
+	}
+	sort.Strings(failures)
+	return failures
 }
 
 func (r *CaseResult) scoreConversationWrite(scenario Case, writtenText string, metadata map[string]string, hits []memory.MemoryHit) {
@@ -605,6 +647,14 @@ func (r *CaseResult) score(scenario Case) {
 func (r *Result) aggregate() {
 	groups := map[string][]CaseResult{}
 	for _, c := range r.Cases {
+		if c.AdapterContractCase {
+			r.AdapterContractCases++
+			if c.AdapterContractPassed {
+				r.AdapterContractPassed++
+			} else {
+				r.AdapterContractFailed++
+			}
+		}
 		r.RecallAtK += c.RecallAtK
 		r.PrecisionAtK += c.PrecisionAtK
 		r.MRR += c.ReciprocalRank

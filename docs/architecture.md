@@ -172,7 +172,7 @@ paxm [--config PATH] logs [--tail N] [--follow] [--json]
 paxm [--config PATH] backfill scan --agent AGENT [--before TIME]
 paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]
 paxm [--config PATH] backfill status --agent AGENT --provider NAME
-paxm eval run [--suite PATH] [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]
+paxm eval run [--suite PATH] [--gate quality|adapter|none] [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]
 paxm [--config PATH] mcp serve
 paxm [--config PATH] config doctor
 ```
