@@ -145,6 +145,12 @@ show that installation, hook trust, upgrade, disable, and rollback are reliable.
 
 ## Phase 2: Recall Evaluation Harness
 
+Status: first local retrieval baseline implemented. `evals/baseline/suite.json`
+contains 100 versioned SQLite cases and `paxm eval run` emits terminal or JSON
+results. CI runs the complete suite. Conversation-to-write evaluation,
+lifecycle/consolidation, comparison mode, deeper latency/context measurements,
+and opt-in remote-provider evaluation remain follow-up slices.
+
 Build the evaluation harness before starting the macOS application. Its results
 will determine which policy controls and explanations the UI actually needs.
 
@@ -163,9 +169,11 @@ Each scenario should contain:
 - known irrelevant or harmful memories that must not be inserted;
 - workspace, agent, session, and time metadata when they affect behavior.
 
-Start with a small set of sanitized scenarios derived from real paxm usage.
-Cover active recall, initial passive recall, later passive recall, duplicate
-writes, STM expiry, LTM consolidation, and multi-provider routing.
+Start with a 100-case deterministic SQLite baseline built from sanitized,
+versioned scenario families. Cover active recall, initial passive recall, later
+passive recall, distractor suppression, ranking, STM and LTM retrieval, result
+limits, and contextual metadata. Add lifecycle and multi-provider suites as
+separate slices once the local runner is stable.
 
 ### Measurements
 
@@ -186,6 +194,8 @@ profiles, providers, or code revisions.
 ### Initial Exit Criteria
 
 - The repository has a versioned baseline scenario suite.
+- The first baseline contains exactly 100 validated cases and CI executes all
+  of them through the production runtime and facade.
 - CI can run the deterministic local-provider portion without external API
   keys.
 - Remote-provider evaluations are opt-in and clearly separated from the local

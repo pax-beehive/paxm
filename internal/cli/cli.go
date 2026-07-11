@@ -21,6 +21,7 @@ import (
 
 	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
 	"github.com/pax-beehive/memory-adaptor/internal/config"
+	paxeval "github.com/pax-beehive/memory-adaptor/internal/eval"
 	"github.com/pax-beehive/memory-adaptor/internal/facade"
 	"github.com/pax-beehive/memory-adaptor/internal/mcp"
 	"github.com/pax-beehive/memory-adaptor/internal/memory"
@@ -136,6 +137,8 @@ func (r runner) run(args []string) error {
 		return r.runLogs(args[1:])
 	case "backfill":
 		return r.runBackfill(args[1:])
+	case "eval":
+		return r.runEval(args[1:])
 	case "mcp":
 		return r.runMCP(args[1:])
 	case "update":
@@ -551,6 +554,67 @@ func (r runner) runRecall(args []string) error {
 	}
 	writeRecallMarkdown(r.stdout, result)
 	return nil
+}
+
+func (r runner) runEval(args []string) error {
+	if len(args) == 0 || args[0] != "run" {
+		return errors.New("usage: paxm eval run --suite PATH [--json]")
+	}
+	fs := flag.NewFlagSet("eval run", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	suitePath := fs.String("suite", "evals/baseline", "suite file or directory")
+	jsonOut := fs.Bool("json", false, "write JSON")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	suite, err := paxeval.Load(*suitePath)
+	if err != nil {
+		return err
+	}
+	result, err := (paxeval.Runner{}).Run(context.Background(), suite)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		err = writeJSON(r.stdout, result)
+	} else {
+		writeEvalReport(r.stdout, result)
+	}
+	if err != nil {
+		return err
+	}
+	if result.Failed > 0 {
+		return fmt.Errorf("eval failed: %d of %d cases failed", result.Failed, result.CaseCount)
+	}
+	return nil
+}
+
+func writeEvalReport(w io.Writer, result paxeval.Result) {
+	fmt.Fprintf(w, "paxm eval: %s (v%d)\n", result.Suite, result.Version)
+	fmt.Fprintf(w, "cases: %d  passed: %d  failed: %d  duration: %dms\n", result.CaseCount, result.Passed, result.Failed, result.DurationMS)
+	fmt.Fprintf(w, "recall@k: %.3f  precision@k: %.3f  mrr: %.3f  false-positive rate: %.3f\n", result.RecallAtK, result.PrecisionAtK, result.MRR, result.FalsePositiveRate)
+	for _, group := range result.Categories {
+		fmt.Fprintf(w, "  %-20s %3d/%-3d  recall@k %.3f  precision@k %.3f  mrr %.3f\n", group.Name, group.Passed, group.CaseCount, group.RecallAtK, group.PrecisionAtK, group.MRR)
+	}
+	for _, item := range result.Cases {
+		if item.Passed {
+			continue
+		}
+		fmt.Fprintf(w, "FAIL %s", item.ID)
+		if item.Error != "" {
+			fmt.Fprintf(w, ": %s", item.Error)
+		}
+		if len(item.Missing) > 0 {
+			fmt.Fprintf(w, " missing=%s", strings.Join(item.Missing, ","))
+		}
+		if len(item.Forbidden) > 0 {
+			fmt.Fprintf(w, " forbidden=%s", strings.Join(item.Forbidden, ","))
+		}
+		if len(item.Unexpected) > 0 {
+			fmt.Fprintf(w, " unexpected=%s", strings.Join(item.Unexpected, ","))
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 func (r runner) runRemember(args []string) error {
@@ -1301,6 +1365,7 @@ func (r runner) printHelp() {
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill scan --agent AGENT [--before TIME]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill status --agent AGENT --provider NAME")
+	fmt.Fprintln(r.stdout, "  paxm eval run [--suite PATH] [--json]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] mcp serve")
 	fmt.Fprintln(r.stdout, "  paxm update [--check] [--version VERSION]")
 	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")

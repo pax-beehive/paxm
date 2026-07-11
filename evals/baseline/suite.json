@@ -1,0 +1,4646 @@
+{
+  "version": 1,
+  "name": "sqlite-baseline-100",
+  "cases": [
+    {
+      "id": "exact_phrase_ltm-01",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 3,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-01-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-01-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-02",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 3,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-02-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-02-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-03",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 3,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-03-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-03-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-04",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 3,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-04-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-04-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-05",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 3,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-05-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-05-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-06",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 3,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-06-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-06-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-07",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 3,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-07-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-07-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-08",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 3,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-08-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-08-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-09",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 3,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-09-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-09-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_ltm-10",
+      "category": "exact_phrase_ltm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_ltm-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "exact_phrase_ltm-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 3,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "exact_phrase_ltm-10-target"
+      ],
+      "forbidden": [
+        "exact_phrase_ltm-10-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-01",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 3,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-01-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-01-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-02",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 3,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-02-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-02-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-03",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 3,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-03-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-03-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-04",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 3,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-04-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-04-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-05",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 3,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-05-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-05-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-06",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 3,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-06-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-06-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-07",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 3,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-07-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-07-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-08",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 3,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-08-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-08-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-09",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 3,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-09-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-09-forbidden"
+      ]
+    },
+    {
+      "id": "exact_phrase_stm-10",
+      "category": "exact_phrase_stm",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "exact_phrase_stm-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "exact_phrase_stm-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 3,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "exact_phrase_stm-10-target"
+      ],
+      "forbidden": [
+        "exact_phrase_stm-10-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-01",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "partial_terms-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 durable",
+        "limit": 3,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "partial_terms-01-target"
+      ],
+      "forbidden": [
+        "partial_terms-01-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-02",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "partial_terms-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 durable",
+        "limit": 3,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "partial_terms-02-target"
+      ],
+      "forbidden": [
+        "partial_terms-02-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-03",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "partial_terms-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 durable",
+        "limit": 3,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "partial_terms-03-target"
+      ],
+      "forbidden": [
+        "partial_terms-03-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-04",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "partial_terms-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 durable",
+        "limit": 3,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "partial_terms-04-target"
+      ],
+      "forbidden": [
+        "partial_terms-04-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-05",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "partial_terms-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 durable",
+        "limit": 3,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "partial_terms-05-target"
+      ],
+      "forbidden": [
+        "partial_terms-05-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-06",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "partial_terms-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 durable",
+        "limit": 3,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "partial_terms-06-target"
+      ],
+      "forbidden": [
+        "partial_terms-06-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-07",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "partial_terms-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 durable",
+        "limit": 3,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "partial_terms-07-target"
+      ],
+      "forbidden": [
+        "partial_terms-07-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-08",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "partial_terms-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 durable",
+        "limit": 3,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "partial_terms-08-target"
+      ],
+      "forbidden": [
+        "partial_terms-08-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-09",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "partial_terms-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 durable",
+        "limit": 3,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "partial_terms-09-target"
+      ],
+      "forbidden": [
+        "partial_terms-09-forbidden"
+      ]
+    },
+    {
+      "id": "partial_terms-10",
+      "category": "partial_terms",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 durable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "partial_terms-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "partial_terms-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 durable",
+        "limit": 3,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "partial_terms-10-target"
+      ],
+      "forbidden": [
+        "partial_terms-10-forbidden"
+      ]
+    },
+    {
+      "id": "active_limit-01",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "active_limit-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-01-also-relevant",
+          "text": "A weaker note mentions amber-orchid-17.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 1,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "active_limit-01-target"
+      ],
+      "forbidden": [
+        "active_limit-01-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-02",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "active_limit-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-02-also-relevant",
+          "text": "A weaker note mentions blue-harbor-23.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 1,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "active_limit-02-target"
+      ],
+      "forbidden": [
+        "active_limit-02-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-03",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "active_limit-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-03-also-relevant",
+          "text": "A weaker note mentions cedar-raven-31.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 1,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "active_limit-03-target"
+      ],
+      "forbidden": [
+        "active_limit-03-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-04",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "active_limit-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-04-also-relevant",
+          "text": "A weaker note mentions delta-maple-42.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 1,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "active_limit-04-target"
+      ],
+      "forbidden": [
+        "active_limit-04-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-05",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "active_limit-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-05-also-relevant",
+          "text": "A weaker note mentions ember-sparrow-56.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 1,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "active_limit-05-target"
+      ],
+      "forbidden": [
+        "active_limit-05-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-06",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "active_limit-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-06-also-relevant",
+          "text": "A weaker note mentions frost-willow-64.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 1,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "active_limit-06-target"
+      ],
+      "forbidden": [
+        "active_limit-06-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-07",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "active_limit-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-07-also-relevant",
+          "text": "A weaker note mentions golden-otter-72.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 1,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "active_limit-07-target"
+      ],
+      "forbidden": [
+        "active_limit-07-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-08",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "active_limit-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-08-also-relevant",
+          "text": "A weaker note mentions hazel-comet-81.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 1,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "active_limit-08-target"
+      ],
+      "forbidden": [
+        "active_limit-08-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-09",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "active_limit-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-09-also-relevant",
+          "text": "A weaker note mentions indigo-fox-93.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 1,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "active_limit-09-target"
+      ],
+      "forbidden": [
+        "active_limit-09-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "active_limit-10",
+      "category": "active_limit",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "active_limit-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "active_limit-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "active_limit-10-also-relevant",
+          "text": "A weaker note mentions juniper-moon-08.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 1,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "active_limit-10-target"
+      ],
+      "forbidden": [
+        "active_limit-10-forbidden"
+      ],
+      "max_hits": 1
+    },
+    {
+      "id": "passive-01",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "passive-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 2,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "passive-01-target"
+      ],
+      "forbidden": [
+        "passive-01-forbidden"
+      ]
+    },
+    {
+      "id": "passive-02",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "passive-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 2,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "passive-02-target"
+      ],
+      "forbidden": [
+        "passive-02-forbidden"
+      ]
+    },
+    {
+      "id": "passive-03",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "passive-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 2,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "passive-03-target"
+      ],
+      "forbidden": [
+        "passive-03-forbidden"
+      ]
+    },
+    {
+      "id": "passive-04",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "passive-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 2,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "passive-04-target"
+      ],
+      "forbidden": [
+        "passive-04-forbidden"
+      ]
+    },
+    {
+      "id": "passive-05",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "passive-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 2,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "passive-05-target"
+      ],
+      "forbidden": [
+        "passive-05-forbidden"
+      ]
+    },
+    {
+      "id": "passive-06",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "passive-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 2,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "passive-06-target"
+      ],
+      "forbidden": [
+        "passive-06-forbidden"
+      ]
+    },
+    {
+      "id": "passive-07",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "passive-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 2,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "passive-07-target"
+      ],
+      "forbidden": [
+        "passive-07-forbidden"
+      ]
+    },
+    {
+      "id": "passive-08",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "passive-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 2,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "passive-08-target"
+      ],
+      "forbidden": [
+        "passive-08-forbidden"
+      ]
+    },
+    {
+      "id": "passive-09",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "passive-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 2,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "passive-09-target"
+      ],
+      "forbidden": [
+        "passive-09-forbidden"
+      ]
+    },
+    {
+      "id": "passive-10",
+      "category": "passive",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "passive-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 2,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "passive-10-target"
+      ],
+      "forbidden": [
+        "passive-10-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-01",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "passive_initial-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 5,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "passive_initial-01-target"
+      ],
+      "forbidden": [
+        "passive_initial-01-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-02",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "passive_initial-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 5,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "passive_initial-02-target"
+      ],
+      "forbidden": [
+        "passive_initial-02-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-03",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "passive_initial-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 5,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "passive_initial-03-target"
+      ],
+      "forbidden": [
+        "passive_initial-03-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-04",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "passive_initial-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 5,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "passive_initial-04-target"
+      ],
+      "forbidden": [
+        "passive_initial-04-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-05",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "passive_initial-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 5,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "passive_initial-05-target"
+      ],
+      "forbidden": [
+        "passive_initial-05-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-06",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "passive_initial-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 5,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "passive_initial-06-target"
+      ],
+      "forbidden": [
+        "passive_initial-06-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-07",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "passive_initial-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 5,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "passive_initial-07-target"
+      ],
+      "forbidden": [
+        "passive_initial-07-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-08",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "passive_initial-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 5,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "passive_initial-08-target"
+      ],
+      "forbidden": [
+        "passive_initial-08-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-09",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "passive_initial-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 5,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "passive_initial-09-target"
+      ],
+      "forbidden": [
+        "passive_initial-09-forbidden"
+      ]
+    },
+    {
+      "id": "passive_initial-10",
+      "category": "passive_initial",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "passive_initial-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "passive_initial-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "passive_initial",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 5,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "passive_initial-10-target"
+      ],
+      "forbidden": [
+        "passive_initial-10-forbidden"
+      ]
+    },
+    {
+      "id": "expired_suppression-01",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "expired_suppression-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-01-expired",
+          "text": "amber-orchid-17 the release channel is stable",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 3,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "expired_suppression-01-target"
+      ],
+      "forbidden": [
+        "expired_suppression-01-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-02",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "expired_suppression-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-02-expired",
+          "text": "blue-harbor-23 the API uses cursor pagination",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 3,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "expired_suppression-02-target"
+      ],
+      "forbidden": [
+        "expired_suppression-02-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-03",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "expired_suppression-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-03-expired",
+          "text": "cedar-raven-31 the workspace prefers table driven tests",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 3,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "expired_suppression-03-target"
+      ],
+      "forbidden": [
+        "expired_suppression-03-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-04",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "expired_suppression-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-04-expired",
+          "text": "delta-maple-42 the deployment region is us west one",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 3,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "expired_suppression-04-target"
+      ],
+      "forbidden": [
+        "expired_suppression-04-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-05",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "expired_suppression-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-05-expired",
+          "text": "ember-sparrow-56 the default provider is sqlite",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 3,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "expired_suppression-05-target"
+      ],
+      "forbidden": [
+        "expired_suppression-05-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-06",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "expired_suppression-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-06-expired",
+          "text": "frost-willow-64 the hook must fail open",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 3,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "expired_suppression-06-target"
+      ],
+      "forbidden": [
+        "expired_suppression-06-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-07",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "expired_suppression-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-07-expired",
+          "text": "golden-otter-72 the config format is yaml",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 3,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "expired_suppression-07-target"
+      ],
+      "forbidden": [
+        "expired_suppression-07-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-08",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "expired_suppression-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-08-expired",
+          "text": "hazel-comet-81 the binary name is paxm",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 3,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "expired_suppression-08-target"
+      ],
+      "forbidden": [
+        "expired_suppression-08-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-09",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "expired_suppression-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-09-expired",
+          "text": "indigo-fox-93 the recall path reuses the facade",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 3,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "expired_suppression-09-target"
+      ],
+      "forbidden": [
+        "expired_suppression-09-expired"
+      ]
+    },
+    {
+      "id": "expired_suppression-10",
+      "category": "expired_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "expired_suppression-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "expired_suppression-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "expired_suppression-10-expired",
+          "text": "juniper-moon-08 the desktop client will be native macos",
+          "tier": "stm",
+          "expires_at": "2020-01-01T00:00:00Z"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 3,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "expired_suppression-10-target"
+      ],
+      "forbidden": [
+        "expired_suppression-10-expired"
+      ]
+    },
+    {
+      "id": "ranking-01",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "ranking-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-01-partial",
+          "text": "A partial project note mentions amber-orchid-17 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 3,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "ranking-01-target"
+      ],
+      "forbidden": [
+        "ranking-01-forbidden"
+      ],
+      "expected_first": "ranking-01-target"
+    },
+    {
+      "id": "ranking-02",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "ranking-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-02-partial",
+          "text": "A partial project note mentions blue-harbor-23 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 3,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "ranking-02-target"
+      ],
+      "forbidden": [
+        "ranking-02-forbidden"
+      ],
+      "expected_first": "ranking-02-target"
+    },
+    {
+      "id": "ranking-03",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "ranking-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-03-partial",
+          "text": "A partial project note mentions cedar-raven-31 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 3,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "ranking-03-target"
+      ],
+      "forbidden": [
+        "ranking-03-forbidden"
+      ],
+      "expected_first": "ranking-03-target"
+    },
+    {
+      "id": "ranking-04",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "ranking-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-04-partial",
+          "text": "A partial project note mentions delta-maple-42 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 3,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "ranking-04-target"
+      ],
+      "forbidden": [
+        "ranking-04-forbidden"
+      ],
+      "expected_first": "ranking-04-target"
+    },
+    {
+      "id": "ranking-05",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "ranking-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-05-partial",
+          "text": "A partial project note mentions ember-sparrow-56 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 3,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "ranking-05-target"
+      ],
+      "forbidden": [
+        "ranking-05-forbidden"
+      ],
+      "expected_first": "ranking-05-target"
+    },
+    {
+      "id": "ranking-06",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "ranking-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-06-partial",
+          "text": "A partial project note mentions frost-willow-64 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 3,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "ranking-06-target"
+      ],
+      "forbidden": [
+        "ranking-06-forbidden"
+      ],
+      "expected_first": "ranking-06-target"
+    },
+    {
+      "id": "ranking-07",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "ranking-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-07-partial",
+          "text": "A partial project note mentions golden-otter-72 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 3,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "ranking-07-target"
+      ],
+      "forbidden": [
+        "ranking-07-forbidden"
+      ],
+      "expected_first": "ranking-07-target"
+    },
+    {
+      "id": "ranking-08",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "ranking-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-08-partial",
+          "text": "A partial project note mentions hazel-comet-81 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 3,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "ranking-08-target"
+      ],
+      "forbidden": [
+        "ranking-08-forbidden"
+      ],
+      "expected_first": "ranking-08-target"
+    },
+    {
+      "id": "ranking-09",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "ranking-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-09-partial",
+          "text": "A partial project note mentions indigo-fox-93 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 3,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "ranking-09-target"
+      ],
+      "forbidden": [
+        "ranking-09-forbidden"
+      ],
+      "expected_first": "ranking-09-target"
+    },
+    {
+      "id": "ranking-10",
+      "category": "ranking",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "ranking-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "ranking-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "ranking-10-partial",
+          "text": "A partial project note mentions juniper-moon-08 without the durable decision.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 3,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "ranking-10-target"
+      ],
+      "forbidden": [
+        "ranking-10-forbidden"
+      ],
+      "expected_first": "ranking-10-target"
+    },
+    {
+      "id": "mixed_tiers-01",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "mixed_tiers-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-01-ltm",
+          "text": "Archived decision: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 3,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "mixed_tiers-01-target",
+        "mixed_tiers-01-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-01-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-02",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "mixed_tiers-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-02-ltm",
+          "text": "Archived decision: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 3,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "mixed_tiers-02-target",
+        "mixed_tiers-02-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-02-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-03",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "mixed_tiers-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-03-ltm",
+          "text": "Archived decision: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 3,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "mixed_tiers-03-target",
+        "mixed_tiers-03-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-03-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-04",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "mixed_tiers-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-04-ltm",
+          "text": "Archived decision: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 3,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "mixed_tiers-04-target",
+        "mixed_tiers-04-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-04-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-05",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "mixed_tiers-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-05-ltm",
+          "text": "Archived decision: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 3,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "mixed_tiers-05-target",
+        "mixed_tiers-05-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-05-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-06",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "mixed_tiers-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-06-ltm",
+          "text": "Archived decision: frost-willow-64 the hook must fail open.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 3,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "mixed_tiers-06-target",
+        "mixed_tiers-06-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-06-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-07",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "mixed_tiers-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-07-ltm",
+          "text": "Archived decision: golden-otter-72 the config format is yaml.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 3,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "mixed_tiers-07-target",
+        "mixed_tiers-07-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-07-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-08",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "mixed_tiers-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-08-ltm",
+          "text": "Archived decision: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 3,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "mixed_tiers-08-target",
+        "mixed_tiers-08-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-08-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-09",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "mixed_tiers-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-09-ltm",
+          "text": "Archived decision: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 3,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "mixed_tiers-09-target",
+        "mixed_tiers-09-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-09-forbidden"
+      ]
+    },
+    {
+      "id": "mixed_tiers-10",
+      "category": "mixed_tiers",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "mixed_tiers-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "stm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "mixed_tiers-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        },
+        {
+          "id": "mixed_tiers-10-ltm",
+          "text": "Archived decision: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 3,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "mixed_tiers-10-target",
+        "mixed_tiers-10-ltm"
+      ],
+      "forbidden": [
+        "mixed_tiers-10-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-01",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember amber-orchid-17 the release channel is stable"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-01-target",
+          "text": "Project memory: amber-orchid-17 the release channel is stable.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-amber-orchid-17"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-01-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "amber-orchid-17 the release channel is stable",
+        "limit": 3,
+        "workspace": "/eval/project-amber-orchid-17",
+        "metadata": {
+          "workspace": "/eval/project-amber-orchid-17"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-01-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-01-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-02",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember blue-harbor-23 the API uses cursor pagination"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-02-target",
+          "text": "Project memory: blue-harbor-23 the API uses cursor pagination.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-blue-harbor-23"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-02-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "blue-harbor-23 the API uses cursor pagination",
+        "limit": 3,
+        "workspace": "/eval/project-blue-harbor-23",
+        "metadata": {
+          "workspace": "/eval/project-blue-harbor-23"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-02-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-02-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-03",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember cedar-raven-31 the workspace prefers table driven tests"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-03-target",
+          "text": "Project memory: cedar-raven-31 the workspace prefers table driven tests.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-cedar-raven-31"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-03-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "cedar-raven-31 the workspace prefers table driven tests",
+        "limit": 3,
+        "workspace": "/eval/project-cedar-raven-31",
+        "metadata": {
+          "workspace": "/eval/project-cedar-raven-31"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-03-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-03-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-04",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember delta-maple-42 the deployment region is us west one"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-04-target",
+          "text": "Project memory: delta-maple-42 the deployment region is us west one.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-delta-maple-42"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-04-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "delta-maple-42 the deployment region is us west one",
+        "limit": 3,
+        "workspace": "/eval/project-delta-maple-42",
+        "metadata": {
+          "workspace": "/eval/project-delta-maple-42"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-04-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-04-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-05",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember ember-sparrow-56 the default provider is sqlite"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-05-target",
+          "text": "Project memory: ember-sparrow-56 the default provider is sqlite.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-ember-sparrow-56"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-05-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "ember-sparrow-56 the default provider is sqlite",
+        "limit": 3,
+        "workspace": "/eval/project-ember-sparrow-56",
+        "metadata": {
+          "workspace": "/eval/project-ember-sparrow-56"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-05-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-05-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-06",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember frost-willow-64 the hook must fail open"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-06-target",
+          "text": "Project memory: frost-willow-64 the hook must fail open.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-frost-willow-64"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-06-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "frost-willow-64 the hook must fail open",
+        "limit": 3,
+        "workspace": "/eval/project-frost-willow-64",
+        "metadata": {
+          "workspace": "/eval/project-frost-willow-64"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-06-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-06-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-07",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember golden-otter-72 the config format is yaml"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-07-target",
+          "text": "Project memory: golden-otter-72 the config format is yaml.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-golden-otter-72"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-07-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "golden-otter-72 the config format is yaml",
+        "limit": 3,
+        "workspace": "/eval/project-golden-otter-72",
+        "metadata": {
+          "workspace": "/eval/project-golden-otter-72"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-07-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-07-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-08",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember hazel-comet-81 the binary name is paxm"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-08-target",
+          "text": "Project memory: hazel-comet-81 the binary name is paxm.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-hazel-comet-81"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-08-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "hazel-comet-81 the binary name is paxm",
+        "limit": 3,
+        "workspace": "/eval/project-hazel-comet-81",
+        "metadata": {
+          "workspace": "/eval/project-hazel-comet-81"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-08-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-08-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-09",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember indigo-fox-93 the recall path reuses the facade"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-09-target",
+          "text": "Project memory: indigo-fox-93 the recall path reuses the facade.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-indigo-fox-93"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-09-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "indigo-fox-93 the recall path reuses the facade",
+        "limit": 3,
+        "workspace": "/eval/project-indigo-fox-93",
+        "metadata": {
+          "workspace": "/eval/project-indigo-fox-93"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-09-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-09-forbidden"
+      ]
+    },
+    {
+      "id": "irrelevant_suppression-10",
+      "category": "irrelevant_suppression",
+      "turns": [
+        {
+          "role": "user",
+          "text": "Please remember juniper-moon-08 the desktop client will be native macos"
+        },
+        {
+          "role": "assistant",
+          "text": "I will use that project decision later."
+        }
+      ],
+      "memories": [
+        {
+          "id": "irrelevant_suppression-10-target",
+          "text": "Project memory: juniper-moon-08 the desktop client will be native macos.",
+          "tier": "ltm",
+          "metadata": {
+            "workspace": "/eval/project-juniper-moon-08"
+          }
+        },
+        {
+          "id": "irrelevant_suppression-10-forbidden",
+          "text": "Unrelated cooking note about sourdough hydration and oven temperature.",
+          "tier": "ltm"
+        }
+      ],
+      "recall": {
+        "mode": "active",
+        "query": "juniper-moon-08 the desktop client will be native macos",
+        "limit": 3,
+        "workspace": "/eval/project-juniper-moon-08",
+        "metadata": {
+          "workspace": "/eval/project-juniper-moon-08"
+        }
+      },
+      "expected": [
+        "irrelevant_suppression-10-target"
+      ],
+      "forbidden": [
+        "irrelevant_suppression-10-forbidden"
+      ]
+    }
+  ]
+}

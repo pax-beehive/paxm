@@ -10,6 +10,7 @@ cmd/paxm
   internal/cli          command parsing and interactive setup
   internal/mcp          stdio MCP server and memory tools
   internal/runtime      shared config, router, and facade loading
+  internal/eval         versioned suites, isolated runtime runs, and metrics
   internal/facade       active recall, hook recall, and writes
   internal/memory       provider interface, routing, ranking, thresholds
   internal/adapters     provider registry
@@ -17,9 +18,10 @@ cmd/paxm
   internal/telemetry    bounded local logs, metrics, and history summaries
 ```
 
-The CLI and MCP server never talk to concrete providers directly. They load
-config, build the provider registry/router, and call the facade through the
-shared runtime seam.
+The CLI, MCP server, and evaluation runner never talk to concrete providers
+directly. They load config, build the provider registry/router, and call the
+facade through the shared runtime seam. Evaluation cases use an isolated
+temporary config and provider store rather than the user's normal config.
 
 ## Provider Boundary
 
@@ -167,6 +169,7 @@ paxm [--config PATH] logs [--tail N] [--follow] [--json]
 paxm [--config PATH] backfill scan --agent AGENT [--before TIME]
 paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]
 paxm [--config PATH] backfill status --agent AGENT --provider NAME
+paxm eval run [--suite PATH] [--json]
 paxm [--config PATH] mcp serve
 paxm [--config PATH] config doctor
 ```

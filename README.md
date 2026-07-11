@@ -598,6 +598,19 @@ not delete provider configuration, SQLite or remote memory data, telemetry,
 the paxm binary, settings backups, or active recall skills installed by the
 user. Repeating the command is safe.
 
+## Recall Evaluation
+
+Run the deterministic 100-case recall-quality baseline:
+
+```bash
+go run ./cmd/paxm eval run --suite evals/baseline
+go run ./cmd/paxm eval run --suite evals/baseline --json
+```
+
+The runner uses an isolated SQLite database per case and reports recall@K,
+precision@K, mean reciprocal rank, forbidden-memory insertion rate, latency,
+and category-level results.
+
 ## Releases
 
 Release binaries are built by GitHub Actions when a `v*` tag is pushed. The
