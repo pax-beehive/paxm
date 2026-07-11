@@ -149,12 +149,15 @@ write profiles.
 
 ## Hook Behavior
 
-V1 installs agent hook integrations through `paxm setup`. Codex and Claude Code
-use three native lifecycle hooks:
+V1 installs agent hook integrations through `paxm setup`. Both integrations use
+`SessionStart`, `UserPromptSubmit`, and `Stop`. Claude Code additionally uses
+`PostToolUse` and `PostToolUseFailure` for incremental tool capture:
 
 ```text
 SessionStart      -> session_start
 UserPromptSubmit  -> user_input
+PostToolUse       -> tool_use (Claude Code)
+PostToolUseFailure -> tool_failure (Claude Code)
 Stop              -> turn_end
 ```
 
@@ -182,6 +185,14 @@ configured `recall.initial` override, which typically points at the looser
 result to the hook buffer. Before recall results are returned to the agent
 context, the hook applies a second insertion policy such as minimum score,
 maximum inserted items, and optional query-term overlap.
+
+For Claude Code, `tool_use` and `tool_failure` record normalized tool name,
+input, result, or error from `PostToolUse` and `PostToolUseFailure`, then append
+them to the same buffer. For Codex, `turn_end` reads the
+current local transcript and extracts function/custom tool calls and results,
+including tools that do not emit `PostToolUse`. Both paths remove
+thinking/reasoning recursively; transcript parsing is fail-open because Codex
+documents that format as convenient but unstable.
 
 The first-input decision is tracked in a bounded local state file under the paxm
 hooks directory. The state stores only recent session keys and timestamps; it
@@ -245,9 +256,11 @@ writing. Hook writes render the configured `hooks.*.write.template` into a text
 payload, attach hook metadata, apply deterministic LTM admission when applicable,
 and route that `MemoryItem` to the configured write profile. Built-in templates
 use filtered `safe_text` rather than raw hook JSON, so long-term memory stores
-user input, visible assistant output, or buffered Pi turn messages instead of
-tool traffic, hidden reasoning, or runtime event structures. The provider
-decides what to do with that text:
+user input, visible assistant output, and tool calls/results supplied in the
+agent's normalized hook messages. Hidden thinking/reasoning and unrelated
+runtime event structures remain excluded. Paxm does not reconstruct tool
+traffic that an agent's hook payload does not expose. The provider decides what
+to do with that text:
 
 - `sqlite` stores the rendered text directly.
 - `zep` writes the rendered text as a text episode and leaves graph extraction
@@ -278,8 +291,10 @@ Pi is integrated through Pi's extension system:
 
 ```text
 before_agent_start -> user_input
-message_end         -> extension-local turn buffer
-turn_end            -> turn_end
+message_end         -> visible user/assistant turn buffer
+tool_execution_start -> tool args keyed by toolCallId
+tool_execution_end   -> normalized tool call/result buffer
+agent_end            -> turn_end
 session_shutdown    -> best-effort final turn_end flush
 ```
 
@@ -287,11 +302,12 @@ Setup writes `~/.pi/agent/extensions/paxm-hook/index.ts`. The extension calls
 the generated paxm `pi-user_input` shim and returns a `paxm-memory-recall`
 message when the passive recall policy admits results. It also installs a
 generated `pi-turn_end` shim. The extension keeps a small in-memory buffer of
-the current prompt plus Pi `message_end` events, then sends that evidence to the
-`turn_end` hook and flushes paxm's hook buffer. `session_shutdown` makes one
-final best-effort flush for any messages that did not observe a `turn_end`.
+visible messages and correlates Pi tool start/end events by `toolCallId`. It
+sends the complete run to the `turn_end` hook at `agent_end` and flushes paxm's
+hook buffer. `session_shutdown` makes one final best-effort flush for any
+messages that did not observe an `agent_end`.
 
-Pi `turn_end` and `message_end` are runtime event-bus events rather than the
+Pi lifecycle and `message_end` events use the runtime event bus rather than the
 typed `before_agent_start` API surface, so this capture path is intentionally
 best-effort. Hook write failures are recorded by paxm telemetry when possible
 but do not block the Pi session.

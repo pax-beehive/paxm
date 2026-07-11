@@ -1,0 +1,7 @@
+{"type":"response_item","timestamp":"2026-07-11T00:00:00Z","payload":{"type":"function_call","name":"old_tool","arguments":"{\"path\":\"old.txt\"}","call_id":"old"}}
+{"type":"event_msg","timestamp":"2026-07-11T00:01:00Z","payload":{"type":"task_started"}}
+{"type":"response_item","timestamp":"2026-07-11T00:01:01Z","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"must not be stored"}]}}
+{"type":"response_item","timestamp":"2026-07-11T00:01:02Z","payload":{"type":"custom_tool_call","name":"view_file","input":"{\"path\":\"README.md\",\"reasoning_content\":\"private\"}","call_id":"call-1"}}
+{"type":"response_item","timestamp":"2026-07-11T00:01:03Z","payload":{"type":"custom_tool_call_output","output":"{\"content\":\"Pax Agent neXus\",\"thinking_content\":\"private\"}","call_id":"call-1"}}
+{"type":"response_item","timestamp":"2026-07-11T00:01:04Z","payload":{"type":"function_call","name":"apply_patch","arguments":"{\"patch\":\"update docs\"}","call_id":"call-2"}}
+{"type":"response_item","timestamp":"2026-07-11T00:01:05Z","payload":{"type":"function_call_output","output":"done","call_id":"call-2"}}

@@ -18,7 +18,7 @@ Useful overrides:
 
 ```bash
 # Install a specific version.
-curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_VERSION=v0.1.2 bash
+curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_VERSION=v0.1.14 bash
 
 # Install somewhere other than the default writable bin directory.
 curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_INSTALL_DIR="$HOME/go/bin" bash
@@ -59,7 +59,7 @@ paxm setup --integration codex-plugin
 Install the pinned plugin release from the public GitHub marketplace:
 
 ```bash
-codex plugin marketplace add pax-beehive/memory-adaptor --ref paxm-memory-v0.1.1
+codex plugin marketplace add pax-beehive/memory-adaptor --ref paxm-memory-v0.1.2
 codex plugin add paxm-memory@pax-agent-nexus
 codex plugin list
 ```
@@ -75,7 +75,7 @@ paxm remember --text "Codex plugin smoke test"
 paxm recall --query "Codex plugin smoke test" --limit 3
 ```
 
-The plugin installs the pinned `paxm` binary (`v0.1.13` by default) through the
+The plugin installs the pinned `paxm` binary (`v0.1.14` by default) through the
 official release installer. It does not install provider credentials or bypass
 Codex hook trust. To pin a different CLI release, set `PAXM_VERSION` before
 running the plugin's setup skill.
@@ -142,7 +142,7 @@ cmd/paxm
 Manual install from a GitHub release:
 
 ```bash
-VERSION=v0.1.2
+VERSION=v0.1.14
 curl -L "https://github.com/pax-beehive/memory-adaptor/releases/download/${VERSION}/paxm_${VERSION}_darwin_arm64.tar.gz" -o /tmp/paxm.tar.gz
 tar -xzf /tmp/paxm.tar.gz -C /tmp
 install /tmp/paxm_${VERSION}_darwin_arm64/paxm ~/go/bin/paxm
@@ -403,9 +403,10 @@ telemetry:
   query_preview_chars: 80
 ```
 
-The generated config also includes an opt-in `agents.claude` entry with the
-same `session_start`, `user_input`, and `turn_end` lifecycle as Codex. Run
-`paxm setup` and select `claude` to install it.
+The generated config also includes an opt-in `agents.claude` entry. It uses the
+same main lifecycle as Codex plus `tool_use` for Claude Code `PostToolUse`
+and `tool_failure` for `PostToolUseFailure`. Run `paxm setup` and select
+`claude` to install it.
 
 Multiple enabled provider instances are supported by configuration. The key
 under `providers` is an instance name, not the adapter type, so configs can have
@@ -538,24 +539,29 @@ It also updates:
 The shims expect hook event JSON on stdin and call a hidden `paxm __hook`
 entrypoint. `user_input` returns recall JSON to Codex and also appends a write
 item to the in-memory hook buffer. `session_start` appends a write item.
-`turn_end` appends a write item and flushes the buffer to the configured write
+`turn_end` reads the current Codex transcript, includes tool calls/results that
+the agent actually saw, removes thinking/reasoning records, appends the final
+assistant response, and flushes the buffer to the configured write
 profile. The buffer lives in a short-lived local daemon and is intentionally not
 durable. Codex may still require you to review and trust the new non-managed
 hooks with `/hooks` before they run.
 
-For Claude Code, setup writes three shims and updates the user-level settings:
+For Claude Code, setup writes five shims and updates the user-level settings:
 
 ```text
 ~/.config/paxm/hooks/claude-session_start
 ~/.config/paxm/hooks/claude-user_input
+~/.config/paxm/hooks/claude-tool_use
+~/.config/paxm/hooks/claude-tool_failure
 ~/.config/paxm/hooks/claude-turn_end
 ~/.claude/settings.json
 ```
 
 The settings update preserves existing hooks, avoids duplicate paxm entries,
 and creates `~/.claude/settings.json.paxm.bak` before the first modification.
-Claude Code `SessionStart`, `UserPromptSubmit`, and `Stop` map to paxm
-`session_start`, `user_input`, and `turn_end`. Recall is returned as plain
+Claude Code `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
+`PostToolUseFailure`, and `Stop` map to paxm `session_start`, `user_input`,
+`tool_use`, `tool_failure`, and `turn_end`. Recall is returned as plain
 Markdown from `UserPromptSubmit`, which Claude Code adds to the prompt context.
 The `Stop` payload includes Claude Code's `last_assistant_message`; paxm writes
 that visible assistant text and flushes the buffered session/user/turn evidence
@@ -570,12 +576,14 @@ For Pi, setup writes paxm hook shims and registers a Pi extension:
 ```
 
 The Pi extension listens for Pi's `before_agent_start` extension event and calls
-the paxm `user_input` hook shim. It also buffers the current prompt and Pi
-`message_end` events in memory, then calls `pi-turn_end` on Pi's runtime
-`turn_end` event. A `session_shutdown` handler makes one final best-effort
-flush. Because Pi `message_end` and `turn_end` are runtime event-bus events
-rather than the typed `before_agent_start` surface, Pi passive writes are
-best-effort and should be verified with `paxm history`.
+the paxm `user_input` hook shim. It buffers visible user/assistant
+`message_end` events, correlates tool args from `tool_execution_start` with
+results from `tool_execution_end`, and excludes thinking/reasoning blocks. It
+calls `pi-turn_end` once on Pi's runtime `agent_end` event so tool subturns and
+the final assistant response become one memory. A `session_shutdown` handler
+makes one final best-effort flush. Because these Pi lifecycle events use the
+runtime event bus rather than the typed `before_agent_start` surface, Pi passive
+writes are best-effort and should be verified with `paxm history`.
 
 ## Uninstall Passive Integrations
 

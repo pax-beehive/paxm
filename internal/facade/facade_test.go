@@ -324,18 +324,55 @@ func TestDefaultPiTurnEndWriteUsesFilteredMessages(t *testing.T) {
 		Messages: []HookMessage{
 			{Role: "user", Text: "Remember the setup boundary."},
 			{Role: "assistant", Text: "Setup owns hook installation."},
-			{Role: "tool", Text: "large tool output"},
+			{Role: "toolCall", Text: `Read {"path":"docs/config.md"}`},
+			{Role: "toolResult", Text: "configuration documentation"},
+			{Role: "thinking", Text: "private chain of thought"},
 		},
 		Raw: json.RawMessage(`{"messages":[{"role":"user","text":"Remember the setup boundary."},{"role":"assistant","text":"Setup owns hook installation."},{"role":"tool","text":"large tool output"}],"raw_event":{"debug":true}}`),
 	})
 	if err != nil || !ok {
 		t.Fatalf("HookWriteItem() = %#v, %v, %v", item, ok, err)
 	}
+	for _, expected := range []string{"User: Remember the setup boundary.", "Assistant: Setup owns hook installation.", `Tool call: Read {"path":"docs/config.md"}`, "Tool result: configuration documentation"} {
+		if !strings.Contains(item.Text, expected) {
+			t.Fatalf("safe hook text lost %q: %q", expected, item.Text)
+		}
+	}
+	if strings.Contains(item.Text, "private chain of thought") || strings.Contains(item.Text, "raw_event") {
+		t.Fatalf("safe hook text leaked thinking or raw payload: %q", item.Text)
+	}
 	if !strings.Contains(item.Text, "User: Remember the setup boundary.") || !strings.Contains(item.Text, "Assistant: Setup owns hook installation.") {
 		t.Fatalf("safe hook text lost visible messages: %q", item.Text)
 	}
-	if strings.Contains(item.Text, "large tool output") || strings.Contains(item.Text, "raw_event") {
-		t.Fatalf("safe hook text leaked non-message payload: %q", item.Text)
+}
+
+func TestTurnEndCombinesAssistantAndToolMessagesWithoutDuplication(t *testing.T) {
+	t.Parallel()
+	service := newSQLiteServiceForAgent(t, "claude")
+	item, ok, err := service.HookWriteItem(HookEvent{Target: "claude", Event: "turn_end", Assistant: "Done.", Messages: []HookMessage{{Role: "assistant", Text: "Done."}, {Role: "tool_use", Text: "Read README.md"}, {Role: "tool_result", Text: "README contents"}, {Role: "reasoning", Text: "secret"}}})
+	if err != nil || !ok {
+		t.Fatalf("HookWriteItem() = %#v, %v, %v", item, ok, err)
+	}
+	if strings.Count(item.Text, "Done.") != 1 || !strings.Contains(item.Text, "Tool call: Read README.md") || !strings.Contains(item.Text, "Tool result: README contents") {
+		t.Fatalf("unexpected write text: %q", item.Text)
+	}
+	if strings.Contains(item.Text, "secret") {
+		t.Fatalf("reasoning leaked: %q", item.Text)
+	}
+}
+
+func TestToolUseHookWritesNormalizedToolActivity(t *testing.T) {
+	t.Parallel()
+	service := newSQLiteServiceForAgent(t, "claude")
+	item, ok, err := service.HookWriteItem(HookEvent{Target: "claude", Event: "tool_use", Messages: []HookMessage{{Role: "tool_call", Text: `Bash {"command":"go test ./..."}`}, {Role: "tool_result", Text: `{"exit_code":0}`}, {Role: "analysis", Text: "hidden"}}})
+	if err != nil || !ok {
+		t.Fatalf("HookWriteItem() = %#v, %v, %v", item, ok, err)
+	}
+	if !strings.Contains(item.Text, "Claude Code tool activity:") || !strings.Contains(item.Text, "Tool call: Bash") || !strings.Contains(item.Text, "Tool result:") {
+		t.Fatalf("tool content missing: %q", item.Text)
+	}
+	if strings.Contains(item.Text, "hidden") {
+		t.Fatalf("analysis leaked: %q", item.Text)
 	}
 }
 

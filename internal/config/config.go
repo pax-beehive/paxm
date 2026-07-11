@@ -311,6 +311,8 @@ func DefaultConfig(configPath string) Config {
 					Output:  "markdown",
 				},
 				Hooks: map[string]AgentHookConfig{
+					"tool_use":     defaultToolWriteHook("tool_use"),
+					"tool_failure": defaultToolWriteHook("tool_failure"),
 					"session_start": {
 						Write: HookWriteConfig{
 							Enabled:  true,
@@ -464,6 +466,13 @@ func DefaultConfig(configPath string) Config {
 		},
 		Telemetry: defaultTelemetryConfig(configPath),
 	}
+}
+
+func defaultToolWriteHook(mode string) AgentHookConfig {
+	return AgentHookConfig{Write: HookWriteConfig{
+		Enabled: true, Profile: "ltm", Template: defaultHookWriteTemplate, Mode: mode,
+		Buffer: HookBufferConfig{Enabled: true, FlushCount: defaultHookBufferFlushCount},
+	}}
 }
 
 func Load(path string) (Config, error) {

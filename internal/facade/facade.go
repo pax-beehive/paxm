@@ -460,11 +460,19 @@ func safeHookText(event HookEvent) string {
 		}
 		return label + " user input:\n" + strings.TrimSpace(event.Prompt)
 	case "turn_end":
-		if assistant := strings.TrimSpace(event.Assistant); assistant != "" {
-			return label + " assistant response:\n" + assistant
+		assistant := strings.TrimSpace(event.Assistant)
+		messages := formatHookMessages(event.Messages, assistant)
+		var sections []string
+		if assistant != "" {
+			sections = append(sections, label+" assistant response:\n"+assistant)
 		}
-		if messages := formatHookMessages(event.Messages); messages != "" {
-			return label + " turn messages:\n" + messages
+		if messages != "" {
+			sections = append(sections, label+" turn messages:\n"+messages)
+		}
+		return strings.Join(sections, "\n\n")
+	case "tool_use", "tool_failure":
+		if messages := formatHookMessages(event.Messages, ""); messages != "" {
+			return label + " tool activity:\n" + messages
 		}
 		return ""
 	default:
@@ -492,15 +500,18 @@ func hookTargetLabel(target string) string {
 	}
 }
 
-func formatHookMessages(messages []HookMessage) string {
+func formatHookMessages(messages []HookMessage, duplicateAssistant string) string {
 	var lines []string
 	for _, message := range messages {
-		role := strings.ToLower(strings.TrimSpace(message.Role))
-		if role != "user" && role != "assistant" {
+		role := normalizeHookMessageRole(message.Role)
+		if role == "" {
 			continue
 		}
 		text := strings.TrimSpace(firstNonEmpty(message.Text, message.Content))
 		if text == "" {
+			continue
+		}
+		if role == "assistant" && duplicateAssistant != "" && text == duplicateAssistant {
 			continue
 		}
 		lines = append(lines, hookMessageRoleLabel(role)+": "+text)
@@ -508,10 +519,27 @@ func formatHookMessages(messages []HookMessage) string {
 	return strings.Join(lines, "\n")
 }
 
+func normalizeHookMessageRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user", "assistant":
+		return strings.ToLower(strings.TrimSpace(role))
+	case "toolcall", "tool_call", "tool_use", "function_call":
+		return "tool_call"
+	case "tool", "toolresult", "tool_result", "tool_response", "function_call_output", "function_result":
+		return "tool_result"
+	default:
+		return ""
+	}
+}
+
 func hookMessageRoleLabel(role string) string {
 	switch role {
 	case "assistant":
 		return "Assistant"
+	case "tool_call":
+		return "Tool call"
+	case "tool_result":
+		return "Tool result"
 	default:
 		return "User"
 	}

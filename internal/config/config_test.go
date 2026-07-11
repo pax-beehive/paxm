@@ -112,6 +112,17 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	if !claudeTurnEnd.Enabled || claudeTurnEnd.Mode != "turn_end" || !claudeTurnEnd.Buffer.Flush {
 		t.Fatalf("unexpected Claude Code turn-end defaults: %#v", claudeTurnEnd)
 	}
+	toolWrite := cfg.Agents["claude"].Hooks["tool_use"].Write
+	if !toolWrite.Enabled || toolWrite.Profile != "ltm" || toolWrite.Mode != "tool_use" || !toolWrite.Buffer.Enabled || toolWrite.Buffer.Flush {
+		t.Fatalf("unexpected Claude tool-use defaults: %#v", toolWrite)
+	}
+	toolFailureWrite := cfg.Agents["claude"].Hooks["tool_failure"].Write
+	if !toolFailureWrite.Enabled || toolFailureWrite.Profile != "ltm" || toolFailureWrite.Mode != "tool_failure" || !toolFailureWrite.Buffer.Enabled || toolFailureWrite.Buffer.Flush {
+		t.Fatalf("unexpected Claude tool-failure defaults: %#v", toolFailureWrite)
+	}
+	if _, ok := cfg.Agents["codex"].Hooks["tool_use"]; ok {
+		t.Fatal("Codex should capture tools from the turn transcript, not partial PostToolUse hooks")
+	}
 	for agentName, agent := range cfg.Agents {
 		for eventName, hook := range agent.Hooks {
 			if strings.Contains(hook.Write.Template, "raw_json") {

@@ -296,6 +296,10 @@ func hookEventLabel(eventName string) string {
 		return "Session start"
 	case "user_input":
 		return "User input"
+	case "tool_use":
+		return "Tool calls and results"
+	case "tool_failure":
+		return "Failed tool calls"
 	case "turn_end":
 		return "Turn end"
 	default:

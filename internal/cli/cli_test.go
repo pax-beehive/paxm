@@ -310,7 +310,9 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 	for _, expected := range []string{
 		`pi.on("before_agent_start"`,
 		`onRuntimeEvent("message_end"`,
-		`onRuntimeEvent("turn_end"`,
+		`onRuntimeEvent("tool_execution_start"`,
+		`onRuntimeEvent("tool_execution_end"`,
+		`onRuntimeEvent("agent_end"`,
 		`onRuntimeEvent("session_shutdown"`,
 		`schema_version: "paxm.pi.user_input.v1"`,
 		`schema_version: "paxm.pi.turn_end.v1"`,
@@ -318,6 +320,14 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 		`event: "user_input"`,
 		`event: "turn_end"`,
 		`customType: "paxm-memory-recall"`,
+		`appendBufferedMessage("tool_call"`,
+		`appendBufferedMessage("tool_result"`,
+		`event?.toolName`,
+		`pendingToolArgs.set`,
+		`pendingToolArgs.get`,
+		`pendingToolArgs.delete`,
+		`event?.result`,
+		`"thinking", "reasoning", "analysis", "redacted_thinking"`,
 		`pi-user_input`,
 		`pi-turn_end`,
 	} {
@@ -327,6 +337,9 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 	}
 	if strings.Contains(extensionText, "raw_event") {
 		t.Fatalf("pi extension should not forward raw runtime events into paxm payloads: %s", extensionText)
+	}
+	if strings.Contains(extensionText, `onRuntimeEvent("turn_end"`) {
+		t.Fatalf("pi extension should flush once at agent_end, not after each model turn: %s", extensionText)
 	}
 
 	cfg, err := config.Load(configPath)
@@ -363,8 +376,8 @@ func TestCLISetupInstallsClaudeCodeHooks(t *testing.T) {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
 	output := stdout.String()
-	if strings.Count(output, "installed hook shim") != 3 {
-		t.Fatalf("Claude Code setup should install three hook shims: %s", output)
+	if strings.Count(output, "installed hook shim") != 5 {
+		t.Fatalf("Claude Code setup should install five hook shims: %s", output)
 	}
 	if !strings.Contains(output, "registered Claude Code global hook") {
 		t.Fatalf("setup did not report Claude Code registration: %s", output)
@@ -384,9 +397,13 @@ func TestCLISetupInstallsClaudeCodeHooks(t *testing.T) {
 	for _, expected := range []string{
 		`"SessionStart"`,
 		`"UserPromptSubmit"`,
+		`"PostToolUse"`,
+		`"PostToolUseFailure"`,
 		`"Stop"`,
 		`claude-session_start`,
 		`claude-user_input`,
+		`claude-tool_use`,
+		`claude-tool_failure`,
 		`claude-turn_end`,
 		`"timeout": 60`,
 	} {
@@ -394,7 +411,7 @@ func TestCLISetupInstallsClaudeCodeHooks(t *testing.T) {
 			t.Fatalf("Claude Code settings missing %q: %s", expected, settings)
 		}
 	}
-	for _, event := range []string{"session_start", "user_input", "turn_end"} {
+	for _, event := range []string{"session_start", "user_input", "tool_use", "tool_failure", "turn_end"} {
 		shimPath := filepath.Join(filepath.Dir(configPath), "hooks", "claude-"+event)
 		shimBytes, err := os.ReadFile(shimPath)
 		if err != nil {
@@ -558,9 +575,11 @@ func TestCLIUninstallRemovesOnlySelectedAgentAndIsIdempotent(t *testing.T) {
 		if _, err := os.Stat(shimPath); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("Claude shim still exists: %s (stat err: %v)", shimPath, err)
 		}
-		codexShimPath := filepath.Join(filepath.Dir(configPath), "hooks", "codex-"+event.ConfigEvent)
-		if _, err := os.Stat(codexShimPath); err != nil {
-			t.Fatalf("Codex shim should remain: %s: %v", codexShimPath, err)
+		if _, configured := cfg.Agents["codex"].Hooks[event.ConfigEvent]; configured {
+			codexShimPath := filepath.Join(filepath.Dir(configPath), "hooks", "codex-"+event.ConfigEvent)
+			if _, err := os.Stat(codexShimPath); err != nil {
+				t.Fatalf("Codex shim should remain: %s: %v", codexShimPath, err)
+			}
 		}
 	}
 
@@ -797,8 +816,12 @@ func TestDecodeHookEventExtractsSafeWriteFields(t *testing.T) {
 		"last_assistant_message": "Final answer only.",
 		"messages": [
 			{"role": "user", "text": "visible prompt"},
-			{"role": "assistant", "text": "visible answer"},
-			{"role": "tool", "text": "tool output"}
+			{"role": "assistant", "content": [
+				{"type": "thinking", "thinking": "private chain"},
+				{"type": "text", "text": "visible answer"},
+				{"type": "tool_use", "name": "Read", "input": {"file_path": "README.md"}}
+			]},
+			{"role": "user", "content": [{"type": "tool_result", "content": "README contents"}]}
 		],
 		"tool_use": {"name": "Read"},
 		"thinking": "private"
@@ -809,14 +832,102 @@ func TestDecodeHookEventExtractsSafeWriteFields(t *testing.T) {
 	if event.Assistant != "Final answer only." {
 		t.Fatalf("assistant = %q", event.Assistant)
 	}
-	if len(event.Messages) != 3 || event.Messages[0].Text != "visible prompt" || event.Messages[2].Role != "tool" {
+	if len(event.Messages) != 4 || event.Messages[0].Text != "visible prompt" || event.Messages[1].Text != "visible answer" || event.Messages[2].Role != "tool_call" || !strings.Contains(event.Messages[2].Text, "README.md") || event.Messages[3].Role != "tool_result" {
 		t.Fatalf("messages not decoded: %#v", event.Messages)
+	}
+	for _, message := range event.Messages {
+		if strings.Contains(message.Text, "private chain") {
+			t.Fatalf("thinking leaked into messages: %#v", event.Messages)
+		}
 	}
 	if event.Metadata["session_id"] != "volatile-session" {
 		t.Fatalf("metadata not preserved: %#v", event.Metadata)
 	}
 	if strings.TrimSpace(string(event.Raw)) == "" {
 		t.Fatal("raw event should remain available for explicit custom templates")
+	}
+}
+
+func TestDecodeCodexPostToolUseCapturesToolContentAndDropsNestedReasoning(t *testing.T) {
+	event, err := decodeHookEvent([]byte(`{
+		"turn_id":"turn-1",
+		"tool_name":"Bash",
+		"tool_use_id":"call-1",
+		"tool_input":{"command":"go test ./...","reasoning":"do not store this","thinking_content":"also private"},
+		"tool_response":{"exit_code":0,"content":[{"type":"text","text":"all tests passed"},{"type":"reasoning","text":"hidden chain"}]}
+	}`), "codex", "tool_use")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(event.Messages) != 2 {
+		t.Fatalf("messages = %#v", event.Messages)
+	}
+	if event.Messages[0].Role != "tool_call" || !strings.Contains(event.Messages[0].Text, "go test ./...") {
+		t.Fatalf("tool call = %#v", event.Messages[0])
+	}
+	if event.Messages[1].Role != "tool_result" || !strings.Contains(event.Messages[1].Text, "all tests passed") {
+		t.Fatalf("tool result = %#v", event.Messages[1])
+	}
+	for _, message := range event.Messages {
+		if strings.Contains(message.Text, "do not store") || strings.Contains(message.Text, "also private") || strings.Contains(message.Text, "hidden chain") {
+			t.Fatalf("reasoning leaked: %#v", event.Messages)
+		}
+	}
+}
+
+func TestDecodeClaudePostToolUseFailureCapturesInputAndError(t *testing.T) {
+	event, err := decodeHookEvent([]byte(`{
+		"tool_name":"Read",
+		"tool_use_id":"toolu_1",
+		"tool_input":{"file_path":"README.md"},
+		"error":"permission denied",
+		"duration_ms":12
+	}`), "claude", "tool_failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(event.Messages) != 2 || event.Messages[0].Role != "tool_call" || !strings.Contains(event.Messages[0].Text, "README.md") || event.Messages[1].Role != "tool_result" || event.Messages[1].Text != "Error: permission denied" {
+		t.Fatalf("messages = %#v", event.Messages)
+	}
+}
+
+func TestDedupeHookMessagesRemovesWrappedToolDuplicates(t *testing.T) {
+	messages := dedupeHookMessages([]facade.HookMessage{{Role: "tool_call", Text: "Read README.md"}, {Role: "tool_call", Text: "Read README.md"}, {Role: "tool_result", Text: "contents"}})
+	if len(messages) != 2 {
+		t.Fatalf("messages = %#v", messages)
+	}
+}
+
+func TestDecodeHookMessagesSupportsCodexItemsAndClaudeEnvelope(t *testing.T) {
+	object := []any{
+		map[string]any{"type": "function_call", "name": "lookup", "arguments": `{"query":"paxm"}`},
+		map[string]any{"type": "function_call_output", "output": "found"},
+		map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "thinking", "thinking": "secret"}, map[string]any{"type": "text", "text": "visible"}}}},
+	}
+	messages := hookMessagesFromRaw(object)
+	if len(messages) != 3 || messages[0].Role != "tool_call" || messages[1].Role != "tool_result" || messages[2].Text != "visible" {
+		t.Fatalf("messages = %#v", messages)
+	}
+}
+
+func TestCodexTranscriptToolMessagesReadsCurrentTurnAndExcludesReasoning(t *testing.T) {
+	messages := codexTranscriptToolMessages(filepath.Join("testdata", "codex-turn-tools.jsonl"))
+	if len(messages) != 4 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	joined := ""
+	for _, message := range messages {
+		joined += "\n" + message.Text
+	}
+	for _, expected := range []string{"view_file", "README.md", "Pax Agent neXus", "apply_patch", "update docs", "done"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("missing %q in %q", expected, joined)
+		}
+	}
+	for _, forbidden := range []string{"old_tool", "old.txt", "must not be stored", "reasoning_content", "thinking_content", "private"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("leaked %q in %q", forbidden, joined)
+		}
 	}
 }
 
@@ -880,6 +991,89 @@ func TestHookBufferShutdownFlushesPendingItems(t *testing.T) {
 	if len(recalled.Hits) == 0 || !strings.Contains(recalled.Hits[0].Text, "shutdown flush sentinel") {
 		t.Fatalf("flushed item was not persisted: %#v", recalled.Hits)
 	}
+}
+
+func TestPostToolUseBuffersAndPersistsOnTurnFlush(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	claude := cfg.Agents["claude"]
+	claude.Enabled = true
+	cfg.Agents["claude"] = claude
+	provider := cfg.Providers["sqlite"]
+	provider.Path = filepath.Join(t.TempDir(), "memory.sqlite")
+	cfg.Providers["sqlite"] = provider
+	router, err := adapters.DefaultRegistry().BuildRouter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := facade.New(cfg, router)
+	var buffer []facade.IngestInput
+	toolRaw := json.RawMessage(`{"tool_name":"Bash","tool_input":{"command":"go test ./..."},"tool_response":{"output":"PASS"}}`)
+	response := runHookBufferRequestForTest(t, service, &buffer, hookBufferRequest{Target: "claude", Event: "tool_use", Raw: toolRaw})
+	if !response.OK || !response.Buffered || len(buffer) != 1 || !strings.Contains(buffer[0].Text, "go test ./...") || !strings.Contains(buffer[0].Text, "PASS") {
+		t.Fatalf("tool buffer response=%#v buffer=%#v", response, buffer)
+	}
+	response = runHookBufferRequestForTest(t, service, &buffer, hookBufferRequest{Action: "flush"})
+	if !response.OK || response.Flushed != 1 || len(buffer) != 0 {
+		t.Fatalf("flush response=%#v buffer=%#v", response, buffer)
+	}
+	recalled, err := service.Recall(context.Background(), facade.RecallInput{Query: "go test PASS", Profile: "default", Limit: 3})
+	if err != nil || len(recalled.Hits) != 1 {
+		t.Fatalf("recall=%#v err=%v", recalled, err)
+	}
+}
+
+func TestCodexTurnEndPersistsTranscriptToolContent(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	provider := cfg.Providers["sqlite"]
+	provider.Path = filepath.Join(t.TempDir(), "memory.sqlite")
+	cfg.Providers["sqlite"] = provider
+	router, err := adapters.DefaultRegistry().BuildRouter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := facade.New(cfg, router)
+	transcriptPath, err := filepath.Abs(filepath.Join("testdata", "codex-turn-tools.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]any{"transcript_path": transcriptPath, "last_assistant_message": "Tool inspection complete."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buffer []facade.IngestInput
+	response := runHookBufferRequestForTest(t, service, &buffer, hookBufferRequest{Target: "codex", Event: "turn_end", Raw: raw})
+	if !response.OK || response.Flushed != 1 || len(buffer) != 0 {
+		t.Fatalf("response=%#v buffer=%#v", response, buffer)
+	}
+	recalled, err := service.Recall(context.Background(), facade.RecallInput{Query: "README Pax Agent neXus", Profile: "default", Limit: 3})
+	if err != nil || len(recalled.Hits) != 1 || strings.Contains(recalled.Hits[0].Text, "private") {
+		t.Fatalf("recall=%#v err=%v", recalled, err)
+	}
+}
+
+func runHookBufferRequestForTest(t *testing.T, service *facade.Service, buffer *[]facade.IngestInput, request hookBufferRequest) hookBufferResponse {
+	t.Helper()
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := handleHookBufferConn(context.Background(), service, serverConn, buffer, func() {})
+		done <- err
+	}()
+	if err := writeJSON(clientConn, request); err != nil {
+		t.Fatal(err)
+	}
+	var response hookBufferResponse
+	if err := json.NewDecoder(clientConn).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	return response
 }
 
 func TestHookCleanupWorkerSchedulesWithoutBlockingAndDrainsOnClose(t *testing.T) {
@@ -1294,6 +1488,12 @@ func TestCLISetupReusesDisabledAgentPassiveChoices(t *testing.T) {
 	turnEnd := claude.Hooks["turn_end"]
 	turnEnd.Write.Enabled = true
 	claude.Hooks["turn_end"] = turnEnd
+	toolUse := claude.Hooks["tool_use"]
+	toolUse.Write.Enabled = false
+	claude.Hooks["tool_use"] = toolUse
+	toolFailure := claude.Hooks["tool_failure"]
+	toolFailure.Write.Enabled = false
+	claude.Hooks["tool_failure"] = toolFailure
 	cfg.Agents["claude"] = claude
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatal(err)

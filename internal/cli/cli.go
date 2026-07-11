@@ -1087,7 +1087,15 @@ func decodeHookEvent(raw []byte, target, eventName string) (facade.HookEvent, er
 		raw = []byte(`{}`)
 	}
 	var event facade.HookEvent
-	if err := json.Unmarshal(raw, &event); err != nil {
+	typedRaw := raw
+	var rawObject map[string]any
+	if json.Unmarshal(raw, &rawObject) == nil {
+		delete(rawObject, "messages")
+		if encoded, err := json.Marshal(rawObject); err == nil {
+			typedRaw = encoded
+		}
+	}
+	if err := json.Unmarshal(typedRaw, &event); err != nil {
 		return facade.HookEvent{}, fmt.Errorf("decode hook event JSON: %w", err)
 	}
 	if event.Target == "" {
@@ -1156,6 +1164,89 @@ func enrichHookEventFromRaw(event *facade.HookEvent, raw []byte) {
 	if len(event.Messages) == 0 {
 		event.Messages = hookMessagesFromRaw(object["messages"])
 	}
+	if event.Event == "tool_use" || event.Event == "tool_failure" {
+		event.Messages = append(event.Messages, hookMessagesFromToolEvent(object)...)
+	}
+	if event.Target == "codex" && event.Event == "turn_end" {
+		if path := strings.TrimSpace(stringField(object, "transcript_path")); path != "" {
+			event.Messages = append(event.Messages, codexTranscriptToolMessages(path)...)
+		}
+	}
+	event.Messages = dedupeHookMessages(event.Messages)
+}
+
+func codexTranscriptToolMessages(path string) []facade.HookMessage {
+	file, err := os.Open(config.ExpandPath(path))
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	var messages []facade.HookMessage
+	for scanner.Scan() {
+		var record struct {
+			Type    string         `json:"type"`
+			Payload map[string]any `json:"payload"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &record) != nil {
+			continue
+		}
+		kind := strings.ToLower(stringField(record.Payload, "type"))
+		if record.Type == "event_msg" && kind == "task_started" {
+			messages = nil
+			continue
+		}
+		if record.Type != "response_item" {
+			continue
+		}
+		switch kind {
+		case "function_call", "custom_tool_call":
+			name := firstNonEmpty(stringField(record.Payload, "name"), stringField(record.Payload, "namespace"))
+			input := hookValueText(firstNonNil(record.Payload["arguments"], record.Payload["input"]))
+			if text := strings.TrimSpace(strings.Join(nonEmptyStrings(name, input), " ")); text != "" {
+				messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: "codex_transcript"})
+			}
+		case "function_call_output", "custom_tool_call_output":
+			if text := hookValueText(record.Payload["output"]); text != "" {
+				messages = append(messages, facade.HookMessage{Role: "tool_result", Text: text, Source: "codex_transcript"})
+			}
+		}
+	}
+	return dedupeHookMessages(messages)
+}
+
+func dedupeHookMessages(messages []facade.HookMessage) []facade.HookMessage {
+	seen := make(map[string]struct{}, len(messages))
+	result := make([]facade.HookMessage, 0, len(messages))
+	for _, message := range messages {
+		key := strings.ToLower(strings.TrimSpace(message.Role)) + "\x00" + strings.TrimSpace(firstNonEmpty(message.Text, message.Content))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, message)
+	}
+	return result
+}
+
+func hookMessagesFromToolEvent(object map[string]any) []facade.HookMessage {
+	name := strings.TrimSpace(stringField(object, "tool_name"))
+	input := hookValueText(object["tool_input"])
+	response := hookValueText(firstNonNil(object["tool_response"], object["tool_result"], object["output"]))
+	if response == "" {
+		if failure := strings.TrimSpace(stringField(object, "error")); failure != "" {
+			response = "Error: " + failure
+		}
+	}
+	var messages []facade.HookMessage
+	if call := strings.TrimSpace(strings.Join(nonEmptyStrings(name, input), " ")); call != "" {
+		messages = append(messages, facade.HookMessage{Role: "tool_call", Text: call})
+	}
+	if response != "" {
+		messages = append(messages, facade.HookMessage{Role: "tool_result", Text: response})
+	}
+	return messages
 }
 
 func hookMessagesFromRaw(value any) []facade.HookMessage {
@@ -1169,18 +1260,173 @@ func hookMessagesFromRaw(value any) []facade.HookMessage {
 		if !ok {
 			continue
 		}
-		message := facade.HookMessage{
-			Role:    stringField(object, "role"),
-			Text:    stringField(object, "text"),
-			Content: stringField(object, "content"),
-			Source:  stringField(object, "source"),
-		}
-		if strings.TrimSpace(message.Role) == "" || strings.TrimSpace(firstNonEmpty(message.Text, message.Content)) == "" {
+		if nested, ok := object["message"].(map[string]any); ok {
+			messages = append(messages, hookMessagesFromRaw([]any{nested})...)
 			continue
 		}
-		messages = append(messages, message)
+		role := stringField(object, "role")
+		source := stringField(object, "source")
+		kind := strings.ToLower(stringField(object, "type"))
+		if role == "" {
+			switch kind {
+			case "tool_use", "tool_call", "function_call":
+				if text := formatHookToolCall(object); text != "" {
+					messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: source})
+				}
+				continue
+			case "tool_result", "tool_response", "function_call_output", "function_result":
+				if text := hookValueText(firstNonNil(object["content"], object["output"], object["result"])); text != "" {
+					messages = append(messages, facade.HookMessage{Role: "tool_result", Text: text, Source: source})
+				}
+				continue
+			case "thinking", "reasoning", "analysis", "redacted_thinking":
+				continue
+			}
+		}
+		if text := strings.TrimSpace(firstNonEmpty(stringField(object, "text"), stringField(object, "content"))); role != "" && text != "" {
+			messages = append(messages, facade.HookMessage{Role: role, Text: text, Source: source})
+		}
+		messages = append(messages, hookContentMessages(role, source, object["content"])...)
+		messages = append(messages, hookToolCallMessages(source, object["tool_calls"])...)
 	}
 	return messages
+}
+
+func hookContentMessages(defaultRole, source string, value any) []facade.HookMessage {
+	blocks, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	var messages []facade.HookMessage
+	for _, value := range blocks {
+		block, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind := strings.ToLower(firstNonEmpty(stringField(block, "type"), defaultRole))
+		switch kind {
+		case "thinking", "reasoning", "analysis", "redacted_thinking":
+			continue
+		case "tool_use", "tool_call", "function_call":
+			if text := formatHookToolCall(block); text != "" {
+				messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: source})
+			}
+		case "tool_result", "tool_response", "function_call_output", "function_result":
+			if text := hookValueText(firstNonNil(block["content"], block["output"], block["result"])); text != "" {
+				messages = append(messages, facade.HookMessage{Role: "tool_result", Text: text, Source: source})
+			}
+		default:
+			if text := strings.TrimSpace(firstNonEmpty(stringField(block, "text"), stringField(block, "content"))); text != "" {
+				messages = append(messages, facade.HookMessage{Role: defaultRole, Text: text, Source: source})
+			}
+		}
+	}
+	return messages
+}
+
+func hookToolCallMessages(source string, value any) []facade.HookMessage {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	var messages []facade.HookMessage
+	for _, value := range values {
+		call, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if function, ok := call["function"].(map[string]any); ok {
+			call = function
+		}
+		if text := formatHookToolCall(call); text != "" {
+			messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: source})
+		}
+	}
+	return messages
+}
+
+func formatHookToolCall(call map[string]any) string {
+	name := strings.TrimSpace(firstNonEmpty(stringField(call, "name"), stringField(call, "tool")))
+	input := hookValueText(firstNonNil(call["input"], call["arguments"], call["args"]))
+	return strings.TrimSpace(strings.Join(nonEmptyStrings(name, input), " "))
+}
+
+func hookValueText(value any) string {
+	value = sanitizeHookValue(value)
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		text = strings.TrimSpace(text)
+		var structured any
+		if (strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[")) && json.Unmarshal([]byte(text), &structured) == nil {
+			value = sanitizeHookValue(structured)
+		} else {
+			return text
+		}
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(encoded))
+}
+
+func sanitizeHookValue(value any) any {
+	switch typed := value.(type) {
+	case []any:
+		result := make([]any, 0, len(typed))
+		for _, item := range typed {
+			if clean := sanitizeHookValue(item); clean != nil {
+				result = append(result, clean)
+			}
+		}
+		return result
+	case map[string]any:
+		kind := strings.ToLower(stringField(typed, "type"))
+		if kind == "thinking" || kind == "reasoning" || kind == "analysis" || kind == "redacted_thinking" {
+			return nil
+		}
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if isReasoningField(key) {
+				continue
+			}
+			if clean := sanitizeHookValue(item); clean != nil {
+				result[key] = clean
+			}
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+func isReasoningField(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "thinking", "thinking_content", "reasoning", "reasoning_content", "analysis", "chain_of_thought", "thought", "thoughts", "redacted_thinking":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+func nonEmptyStrings(values ...string) []string {
+	var result []string
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			result = append(result, strings.TrimSpace(value))
+		}
+	}
+	return result
 }
 
 func stringField(object map[string]any, key string) string {
@@ -2317,6 +2563,16 @@ func installedHookEvents() []hookInstallEvent {
 			Status:      "Recalling paxm memory",
 		},
 		{
+			ConfigEvent: "tool_use",
+			NativeEvent: "PostToolUse",
+			Status:      "Buffering paxm tool memory",
+		},
+		{
+			ConfigEvent: "tool_failure",
+			NativeEvent: "PostToolUseFailure",
+			Status:      "Buffering failed paxm tool memory",
+		},
+		{
 			ConfigEvent: "turn_end",
 			NativeEvent: "Stop",
 			Status:      "Buffering paxm turn memory",
@@ -2454,6 +2710,7 @@ type BufferedMessage = {
 let activeContext: any;
 let lastPrompt = "";
 let turnMessages: BufferedMessage[] = [];
+const pendingToolArgs = new Map<string, any>();
 
 function currentSessionId(ctx: any): string {
   const sessionFile = ctx.sessionManager?.getSessionFile?.();
@@ -2474,18 +2731,46 @@ function activeCtx(ctx: any): any {
   return ctx ?? activeContext ?? {};
 }
 
-function textFromContent(content: any): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      if (typeof part === "string") return part;
-      if (typeof part?.text === "string") return part.text;
-      if (typeof part?.content === "string") return part.content;
-      return "";
-    })
-    .filter((text) => text.trim() !== "")
-    .join("\n");
+function sanitizeValue(value: any): any {
+  if (Array.isArray(value)) return value.map(sanitizeValue).filter((item) => item !== undefined);
+  if (value && typeof value === "object") {
+    const kind = String(value.type ?? "").toLowerCase();
+    if (["thinking", "reasoning", "analysis", "redacted_thinking"].includes(kind)) return undefined;
+    const result: Record<string, any> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (["thinking", "thinking_content", "reasoning", "reasoning_content", "analysis", "chain_of_thought", "thought", "thoughts", "redacted_thinking"].includes(key.toLowerCase())) continue;
+      const clean = sanitizeValue(item);
+      if (clean !== undefined) result[key] = clean;
+    }
+    return result;
+  }
+  return value;
+}
+
+function valueText(value: any): string {
+  value = sanitizeValue(value);
+  if (typeof value === "string") return value.trim();
+  if (value === undefined || value === null) return "";
+  try { return JSON.stringify(value); } catch { return ""; }
+}
+
+function contentMessages(role: string, content: any, source: string): BufferedMessage[] {
+  if (role.toLowerCase() === "toolresult") return [];
+  if (typeof content === "string") return [{ role, text: content, source }];
+  if (!Array.isArray(content)) return [];
+  const messages: BufferedMessage[] = [];
+  for (const part of content) {
+    if (typeof part === "string") {
+      messages.push({ role, text: part, source });
+      continue;
+    }
+    const kind = String(part?.type ?? "").toLowerCase();
+    if (["thinking", "reasoning", "analysis", "redacted_thinking"].includes(kind)) continue;
+    if (["toolcall", "tool_use", "tool_call", "function_call", "toolresult", "tool_result", "tool_response", "function_call_output", "function_result"].includes(kind)) continue;
+    const text = valueText(part?.text ?? part?.content);
+    if (text !== "") messages.push({ role, text, source });
+  }
+  return messages;
 }
 
 function appendBufferedMessage(role: string, text: string, source: string): void {
@@ -2501,8 +2786,13 @@ function appendBufferedMessage(role: string, text: string, source: string): void
 
 function appendPiMessage(message: any, source: string): void {
   const role = typeof message?.role === "string" ? message.role : "unknown";
-  const text = textFromContent(message?.content) || (typeof message?.text === "string" ? message.text : "");
-  appendBufferedMessage(role, text, source);
+  if (role.toLowerCase() === "toolresult") return;
+  const messages = contentMessages(role, message?.content, source);
+  if (messages.length === 0 && typeof message?.text === "string") {
+    appendBufferedMessage(role, message.text, source);
+    return;
+  }
+  for (const item of messages) appendBufferedMessage(item.role, item.text, item.source);
 }
 
 function runPaxmHook(command: string, payload: unknown, ctx: any, notifyOnFailure: boolean): { ok: boolean; stdout: string } {
@@ -2582,6 +2872,7 @@ export default function (pi: ExtensionAPI) {
     activeContext = ctx;
     lastPrompt = "";
     turnMessages = [];
+    pendingToolArgs.clear();
   });
 
   onRuntimeEvent("message_end", (event, ctx) => {
@@ -2590,9 +2881,29 @@ export default function (pi: ExtensionAPI) {
     appendPiMessage(event?.message, "message_end");
   });
 
-  onRuntimeEvent("turn_end", (event, ctx) => {
+  onRuntimeEvent("tool_execution_start", (event, ctx) => {
     if (paxmTurnEndHookCommand === "") return;
-    flushTurn("turn_end", event, ctx);
+    activeCtx(ctx);
+    const toolCallId = valueText(event?.toolCallId);
+    if (toolCallId !== "") pendingToolArgs.set(toolCallId, event?.args);
+  });
+
+  onRuntimeEvent("tool_execution_end", (event, ctx) => {
+    if (paxmTurnEndHookCommand === "") return;
+    activeCtx(ctx);
+    const name = valueText(event?.toolName);
+    const toolCallId = valueText(event?.toolCallId);
+    const args = valueText(pendingToolArgs.get(toolCallId));
+    if (toolCallId !== "") pendingToolArgs.delete(toolCallId);
+    appendBufferedMessage("tool_call", [name, args].filter(Boolean).join(" "), "tool_execution_end");
+    const result = valueText(event?.result);
+    if (result !== "") appendBufferedMessage("tool_result", event?.isError ? "Error: " + result : result, "tool_execution_end");
+  });
+
+  onRuntimeEvent("agent_end", (event, ctx) => {
+    if (paxmTurnEndHookCommand === "") return;
+    flushTurn("agent_end", event, ctx);
+    pendingToolArgs.clear();
   });
 
   onRuntimeEvent("session_shutdown", (event, ctx) => {
@@ -2600,6 +2911,7 @@ export default function (pi: ExtensionAPI) {
     flushTurn("session_shutdown", event, ctx);
     lastPrompt = "";
     turnMessages = [];
+    pendingToolArgs.clear();
   });
 
   pi.on("before_agent_start", async (event, ctx) => {

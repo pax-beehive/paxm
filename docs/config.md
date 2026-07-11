@@ -150,6 +150,28 @@ agents:
             enabled: true
             flush_count: 10
 
+      tool_use:
+        write:
+          enabled: true
+          profile: ltm
+          template: |
+            {{ .safe_text }}
+          mode: tool_use
+          buffer:
+            enabled: true
+            flush_count: 10
+
+      tool_failure:
+        write:
+          enabled: true
+          profile: ltm
+          template: |
+            {{ .safe_text }}
+          mode: tool_failure
+          buffer:
+            enabled: true
+            flush_count: 10
+
       turn_end:
         write:
           enabled: true
@@ -452,10 +474,11 @@ backup before changing an existing file.
 
 `agents.pi.hooks.turn_end.write` controls best-effort passive writes from Pi.
 The generated Pi extension buffers the current prompt and `message_end` events
-in memory, then sends them to paxm on Pi's `turn_end` runtime event. It also
-tries one final flush on `session_shutdown`. Pi's `turn_end` event is used
-through the runtime event bus, so treat it as best-effort rather than a hard
-delivery guarantee.
+in memory, correlates `tool_execution_start` args with `tool_execution_end`
+results, then sends the complete run to paxm on Pi's `agent_end` runtime event.
+It also tries one final flush on `session_shutdown`. Pi's lifecycle events use
+the runtime event bus, so treat them as best-effort rather than a hard delivery
+guarantee.
 
 `agents.<name>.integration.owner` records which installation surface owns the
 agent lifecycle hooks. An empty value preserves the original paxm-managed
@@ -488,13 +511,21 @@ Hook recall fields:
   per target/session before falling back to the normal strict hook config.
 
 `agents.<name>.hooks.*.write` controls passive hook writes. Codex and Claude
-Code use the same internal event names:
+Code share the main lifecycle events:
 
 - `session_start`: native `SessionStart`; writes a session-start event into the
   buffer.
 - `user_input`: native `UserPromptSubmit`; returns recall output and writes the
   user input event into the buffer.
+- `tool_use` (Claude Code): native `PostToolUse`; writes normalized tool name,
+  input, and result while recursively excluding thinking/reasoning fields.
+- `tool_failure` (Claude Code): native `PostToolUseFailure`; writes the tool
+  name, input, and error for failed or interrupted calls.
 - `turn_end`: native `Stop`; writes a turn-end event and flushes the buffer.
+
+Codex `turn_end` also reads the current local transcript and extracts tool
+calls/results before flushing, which covers file-reading tools that do not emit
+Codex `PostToolUse`. Transcript parsing is best-effort and fail-open.
 
 Claude Code supplies `last_assistant_message` in the raw `Stop` payload, so the
 default `turn_end` template sends the final assistant response to the configured
@@ -502,8 +533,8 @@ write providers without storing the rest of the raw runtime event. Claude Code
 receives admitted recall hits as Markdown context from the synchronous
 `UserPromptSubmit` hook.
 
-For Pi, `turn_end` maps to Pi's runtime `turn_end` event and receives buffered
-Pi messages from the generated extension.
+For Pi, the paxm `turn_end` hook maps to Pi's runtime `agent_end` event and
+receives the complete buffered run from the generated extension.
 
 Hook write fields:
 
@@ -511,8 +542,10 @@ Hook write fields:
 - `profile`: write profile used when the item is flushed. Built-in passive
   hooks default to `ltm`.
 - `template`: Go template rendered from hook data. Built-in defaults use
-  `.safe_text`, a filtered view of user input, visible assistant output, Pi
-  turn messages, and workspace context. Available keys also include `.target`,
+  `.safe_text`, a filtered view of user input, visible assistant output,
+  normalized tool calls/results, Pi turn messages, and workspace context.
+  Thinking, reasoning, analysis, and unrelated runtime payloads are excluded.
+  Available keys also include `.target`,
   `.event`, `.prompt`, `.assistant`, `.messages`, `.query`, `.workspace`,
   `.metadata`, and `.raw_json`. Use `.raw_json` only for explicit custom debug
   capture; it is not part of the default long-term memory templates.
