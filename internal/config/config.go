@@ -19,6 +19,8 @@ const (
 	defaultConfigVersion       = 1
 	defaultMem0BaseURL         = "http://localhost:8888"
 	defaultMem0CloudBaseURL    = "https://api.mem0.ai"
+	defaultMemOSBaseURL        = "http://localhost:8000"
+	defaultMemOSCloudBaseURL   = "https://memos.memtensor.cn/api/openmem/v1"
 	defaultJSONRPCTransport    = "stdio"
 	defaultJSONRPCTimeout      = "30s"
 	defaultProviderRouteWeight = 1
@@ -90,6 +92,8 @@ type ProviderConfig struct {
 	AgentID           string            `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	RunID             string            `json:"run_id,omitempty" yaml:"run_id,omitempty"`
 	GraphID           string            `json:"graph_id,omitempty" yaml:"graph_id,omitempty"`
+	MemCubeID         string            `json:"mem_cube_id,omitempty" yaml:"mem_cube_id,omitempty"`
+	SearchMode        string            `json:"search_mode,omitempty" yaml:"search_mode,omitempty"`
 	SearchScope       string            `json:"search_scope,omitempty" yaml:"search_scope,omitempty"`
 	MaxCharacters     int               `json:"max_characters,omitempty" yaml:"max_characters,omitempty"`
 	SourceDescription string            `json:"source_description,omitempty" yaml:"source_description,omitempty"`
@@ -316,6 +320,17 @@ func DefaultConfig(configPath string) Config {
 				Enabled: false,
 				BaseURL: defaultMem0CloudBaseURL,
 				Infer:   &inferFalse,
+			},
+			"memos": {
+				Type:       "memos",
+				Enabled:    false,
+				BaseURL:    defaultMemOSBaseURL,
+				SearchMode: "fast",
+			},
+			"memos_cloud": {
+				Type:    "memos-cloud",
+				Enabled: false,
+				BaseURL: defaultMemOSCloudBaseURL,
 			},
 			"jsonrpc": {
 				Type:      "jsonrpc",
@@ -831,14 +846,18 @@ func normalizePassiveProviderRoutes(routes []ProviderRouteConfig, providers map[
 	for i := range routes {
 		route := &routes[i]
 		providerType := providers[route.Name].Type
-		if route.Timeout == "" || (providerType == "mem0-cloud" && route.Timeout == defaultProviderRecallTimeout) {
+		if route.Timeout == "" || (isManagedCloudProvider(providerType) && route.Timeout == defaultProviderRecallTimeout) {
 			route.Timeout = DefaultProviderRecallTimeout(providerType)
 		}
-		if providerType == "mem0-cloud" && route.Thresholds == nil {
+		if isManagedCloudProvider(providerType) && route.Thresholds == nil {
 			route.Thresholds = defaultCloudThresholds()
 		}
 	}
 	return routes
+}
+
+func isManagedCloudProvider(providerType string) bool {
+	return providerType == "mem0-cloud" || providerType == "memos-cloud"
 }
 
 func normalizeAgents(cfg *Config) {
@@ -924,6 +943,15 @@ func normalizeProviderConfig(provider ProviderConfig) ProviderConfig {
 	}
 	if provider.BaseURL == "" && provider.Type == "mem0-cloud" {
 		provider.BaseURL = defaultMem0CloudBaseURL
+	}
+	if provider.BaseURL == "" && provider.Type == "memos" {
+		provider.BaseURL = defaultMemOSBaseURL
+	}
+	if provider.SearchMode == "" && provider.Type == "memos" {
+		provider.SearchMode = "fast"
+	}
+	if provider.BaseURL == "" && provider.Type == "memos-cloud" {
+		provider.BaseURL = defaultMemOSCloudBaseURL
 	}
 	if provider.Type == "mem0-cloud" && provider.Infer == nil {
 		infer := false
@@ -1068,8 +1096,12 @@ func DefaultMem0CloudBaseURL() string {
 	return defaultMem0CloudBaseURL
 }
 
+func DefaultMemOSBaseURL() string { return defaultMemOSBaseURL }
+
+func DefaultMemOSCloudBaseURL() string { return defaultMemOSCloudBaseURL }
+
 func DefaultProviderRecallTimeout(providerType string) string {
-	if providerType == "mem0-cloud" {
+	if isManagedCloudProvider(providerType) {
 		return defaultCloudRecallTimeout
 	}
 	return defaultProviderRecallTimeout

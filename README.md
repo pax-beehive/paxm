@@ -11,7 +11,7 @@
 
 Local-first memory infrastructure for Codex, Claude Code, OpenCode, Pi, and MCP
 clients.
-Use SQLite out of the box, connect Zep or Mem0, or bring any provider behind a
+Use SQLite out of the box, connect Zep, Mem0, or MemOS, or bring any provider behind a
 small JSON-RPC adapter.
 
 [Install](#quick-start) · [How it works](#how-it-works) · [Providers](#agents-and-providers) · [Documentation](#documentation)
@@ -61,7 +61,7 @@ and runtime layer: agent entry points, lifecycle hooks, provider routing,
 failure isolation, durable delivery, and telemetry.
 
 The built-in SQLite provider is a practical local baseline, not a claim to
-state-of-the-art memory quality. Use Zep, Mem0, or a custom adapter when you need
+state-of-the-art memory quality. Use Zep, Mem0, MemOS, or a custom adapter when you need
 more advanced retrieval and memory behavior without rebuilding every agent
 integration.
 
@@ -113,7 +113,7 @@ paxm config doctor
 integrations. In a terminal, use up/down to move, space to toggle, and enter to
 confirm. Selected agents are configured one at a time for passive recall and
 passive writes. Active recall skills are installed separately by the user. The
-SQLite provider works without an API key; remote providers such as Zep or Mem0
+SQLite provider works without an API key; remote providers such as Zep, Mem0, or MemOS
 require the user to provide their connection details during setup.
 
 SQLite health checks must be allowed to create WAL/SHM files beside the
@@ -178,6 +178,8 @@ Read the detailed [architecture](docs/architecture.md) and
 | Zep | Built in | User or graph scoped |
 | Mem0 | Built in | Self-hosted REST API |
 | Mem0 Cloud | Built in | Managed Platform API with async v3 writes/search |
+| MemOS | Built in | Self-hosted product API, scoped by memory cube |
+| MemOS Cloud | Built in | Managed OpenMem API with Token authentication |
 | Custom JSON-RPC | Adapter | Bring an existing or private memory system |
 
 Multiple provider instances can be enabled at once. Recall and write profiles

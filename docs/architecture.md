@@ -67,6 +67,11 @@ Current provider adapters:
   `POST /memories` and maps `POST /search` results into memory hits.
 - `mem0-cloud`: managed Mem0 Platform storage; encapsulates Token auth,
   asynchronous v3 writes, event polling, v3 search, and eval-scope cleanup.
+- `memos`: self-hosted MemOS product API storage, scoped by user and memory
+  cube. Its adapter owns `/product/add`, `/product/search`, and deletion shapes.
+- `memos-cloud`: managed MemOS OpenMem API storage. Its separate dialect owns
+  Token auth and `/add/message` plus `/search/memory`; provider details do not
+  escape into the router, facade, CLI, MCP, or agent integrations.
 - `jsonrpc`: custom stdio plugin storage. The plugin implements the provider
   contract with JSON-RPC 2.0 methods while paxm keeps routing, thresholds, and
   ranking in core.

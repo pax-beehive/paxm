@@ -175,6 +175,9 @@ func TestDefaultProviderRecallTimeoutUsesCloudBudget(t *testing.T) {
 	if got := DefaultProviderRecallTimeout("mem0-cloud"); got != "800ms" {
 		t.Fatalf("cloud timeout = %q", got)
 	}
+	if got := DefaultProviderRecallTimeout("memos-cloud"); got != "800ms" {
+		t.Fatalf("memos cloud timeout = %q", got)
+	}
 	if got := DefaultProviderRecallTimeout("sqlite"); got != "250ms" {
 		t.Fatalf("sqlite timeout = %q", got)
 	}

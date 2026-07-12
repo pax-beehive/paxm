@@ -42,6 +42,22 @@ providers:
     user_id: todd
     infer: false
 
+  memos:
+    type: memos
+    enabled: false
+    base_url: http://localhost:8000
+    user_id: todd
+    mem_cube_id: personal
+    search_mode: fast
+
+  memos_cloud:
+    type: memos-cloud
+    enabled: false
+    base_url: https://memos.memtensor.cn/api/openmem/v1
+    api_key: "plain-text-memos-cloud-api-key"
+    user_id: todd
+    agent_id: opencode
+
   jsonrpc:
     type: jsonrpc
     enabled: false
@@ -335,7 +351,7 @@ providers:
 
 Fields:
 
-- `type`: adapter type, such as `sqlite`, `zep`, `mem0`, `mem0-cloud`, or `jsonrpc`.
+- `type`: adapter type, such as `sqlite`, `zep`, `mem0`, `mem0-cloud`, `memos`, `memos-cloud`, or `jsonrpc`.
 - `enabled`: whether this provider can be used by profiles.
 - `path`: local SQLite provider database path.
 - `api_key`: optional plain-text API key for remote providers.
@@ -349,13 +365,15 @@ Fields:
 - `agent_id`: Mem0 agent scope.
 - `run_id`: Mem0 run scope.
 - `graph_id`: Zep named graph target.
+- `mem_cube_id`: required memory cube for self-hosted MemOS.
+- `search_mode`: self-hosted MemOS retrieval mode: `fast`, `fine`, or `mixture`.
 - `search_scope`: Zep graph search scope. Supported values are `episodes`,
   `edges`, `nodes`, `observations`, `thread_summaries`, and `auto`.
 - `max_characters`: optional Zep auto-scope context character limit.
 - `source_description`: optional Zep source description for writes.
 - `infer`: optional Mem0 write flag. Omit it to use the server default.
 
-V1 ships with `sqlite`, `zep`, `mem0`, `mem0-cloud`, and `jsonrpc` provider adapters. Zep
+V1 ships with `sqlite`, `zep`, `mem0`, `mem0-cloud`, `memos`, `memos-cloud`, and `jsonrpc` provider adapters. Zep
 requires `api_key` and exactly one of `user_id` or `graph_id`. If setup is
 configured for a Zep user graph, it idempotently creates the configured
 `user_id` when the user does not already exist.
@@ -376,6 +394,18 @@ and may require a write-route timeout above the default `30s`. After a successfu
 asynchronous event, paxm retries the metadata lookup briefly to tolerate delayed
 read visibility. Eval runs force `infer: false` and add an isolated `run_id` so
 their writes can be removed.
+
+MemOS self-hosted uses the product REST server (normally
+`http://localhost:8000`) and requires both `user_id` and `mem_cube_id`. The
+optional key is sent as a Bearer token. `search_mode` defaults to `fast`; use
+`fine` or `mixture` only when the deployment supports their extra work.
+
+MemOS Cloud is deliberately a separate `memos-cloud` dialect. It defaults to
+the OpenMem endpoint `https://memos.memtensor.cn/api/openmem/v1`, requires an
+API key sent as `Authorization: Token`, and scopes data by required `user_id`
+plus optional `agent_id`. The OpenMem write response does not guarantee a
+deletable memory ID, so destructive eval cleanup is unavailable; paid evals
+must opt into `--keep-memory` explicitly.
 
 JSON-RPC providers are custom plugin commands. Paxm invokes the command over
 stdio with one JSON-RPC 2.0 request per provider operation. The command should

@@ -2,15 +2,19 @@
 
 Every paxm provider adapter must satisfy the same boundary contract. The shared
 test harness lives in `internal/adapters/contracttest`; SQLite, Mem0, Mem0
-Cloud, Zep, and JSON-RPC each run it with a provider-specific fixture.
+Cloud, MemOS, MemOS Cloud, Zep, and JSON-RPC each run it with a provider-specific fixture.
 
-| Shared contract | SQLite | Mem0 | Mem0 Cloud | Zep | JSON-RPC |
-| --- | --- | --- | --- | --- | --- |
-| Stable provider name | yes | yes | yes | yes | yes |
-| Health semantics | yes | yes | yes | yes | yes |
-| Write acknowledgement maps to provider/ref ID | yes | yes | yes | yes | yes |
-| Search returns provider/ID/text faithfully | yes | yes | yes | yes | yes |
-| Context cancellation propagates | yes | yes | yes | yes | yes |
+| Shared contract | SQLite | Mem0 | Mem0 Cloud | MemOS | MemOS Cloud | Zep | JSON-RPC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Stable provider name | yes | yes | yes | yes | yes | yes | yes |
+| Health semantics | yes | yes | yes | yes | yes | yes | yes |
+| Write acknowledgement maps to provider/ref ID | yes | yes | yes | yes | receipt | yes | yes |
+| Search returns provider/ID/text faithfully | yes | yes | yes | yes | yes | yes | yes |
+| Context cancellation propagates | yes | yes | yes | yes | yes | yes | yes |
+
+MemOS Cloud's OpenMem add API acknowledges ingestion without guaranteeing a
+concrete memory ID. Paxm therefore returns a unique write receipt and does not
+claim reliable per-memory cleanup for that API.
 
 The contract deliberately does not require equal ranking, semantic recall,
 consolidation, latency, or result counts. Those are provider capabilities, not

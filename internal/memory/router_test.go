@@ -342,6 +342,8 @@ func TestRouterCalibratesAllProviderScoreDistributions(t *testing.T) {
 		{name: "zep", rawScoreKind: "zep_relevance", scores: []float64{1, 0.99993503}},
 		{name: "mem0", rawScoreKind: "mem0_score", scores: []float64{0.91, 0.82}},
 		{name: "mem0_cloud", rawScoreKind: "mem0_cloud_score", scores: []float64{0.2793, 0.21}},
+		{name: "memos", rawScoreKind: "memos_relativity", scores: []float64{0.88, 0.67}},
+		{name: "memos_cloud", rawScoreKind: "memos_relativity", scores: []float64{0.42, 0.31}},
 		{name: "jsonrpc", rawScoreKind: "jsonrpc_relevance", scores: []float64{0.9, 0.6}},
 	}
 	bindings := make([]ProviderBinding, 0, len(providers))

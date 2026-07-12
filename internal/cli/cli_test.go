@@ -1281,7 +1281,7 @@ func TestCLISetupInteractiveJSONRPCProvider(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("5\n1\n/opt/paxm/plugins/corp-memory\n--config /etc/corp-memory.yaml\n15s\n1\n2\nnone\n")
+	setupInput := strings.NewReader("7\n1\n/opt/paxm/plugins/corp-memory\n--config /etc/corp-memory.yaml\n15s\n1\n2\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -1813,6 +1813,8 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 				"custom": {Type: "custom"},
 				"mem":    {Type: "mem0"},
 				"cloud":  {Type: "mem0-cloud"},
+				"mos":    {Type: "memos"},
+				"mosc":   {Type: "memos-cloud"},
 				"rpc":    {Type: "jsonrpc"},
 				"sqlite": {Type: "sqlite"},
 				"zed":    {Type: "zep"},
@@ -1824,7 +1826,7 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 				"claude": {Enabled: true},
 			},
 		}
-		if got, want := providerOptionIDs(cfg), []string{"sqlite", "zed", "mem", "cloud", "rpc", "custom"}; !reflect.DeepEqual(got, want) {
+		if got, want := providerOptionIDs(cfg), []string{"sqlite", "zed", "mem", "cloud", "mos", "mosc", "rpc", "custom"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("providerOptionIDs() = %#v, want %#v", got, want)
 		}
 		wantHooks := []setupOption{
@@ -1850,7 +1852,9 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 			{name: "named zep", providerName: "team", provider: config.ProviderConfig{Type: "zep"}, wantLabel: "team (Zep)", wantPriority: 1},
 			{name: "named mem0", providerName: "company", provider: config.ProviderConfig{Type: "mem0"}, wantLabel: "company (Mem0)", wantPriority: 2},
 			{name: "mem0 cloud default", providerName: "mem0_cloud", provider: config.ProviderConfig{Type: "mem0-cloud"}, wantLabel: "Mem0 Cloud", wantPriority: 3},
-			{name: "jsonrpc default", providerName: "jsonrpc", provider: config.ProviderConfig{Type: "jsonrpc"}, wantLabel: "JSON-RPC", wantPriority: 4},
+			{name: "memos default", providerName: "memos", provider: config.ProviderConfig{Type: "memos"}, wantLabel: "MemOS", wantPriority: 4},
+			{name: "memos cloud default", providerName: "memos_cloud", provider: config.ProviderConfig{Type: "memos-cloud"}, wantLabel: "MemOS Cloud", wantPriority: 5},
+			{name: "jsonrpc default", providerName: "jsonrpc", provider: config.ProviderConfig{Type: "jsonrpc"}, wantLabel: "JSON-RPC", wantPriority: 6},
 			{name: "unknown", providerName: "other", provider: config.ProviderConfig{Type: "other"}, wantLabel: "other", wantPriority: 100},
 		}
 		for _, tt := range tests {
