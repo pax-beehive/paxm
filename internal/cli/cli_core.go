@@ -55,7 +55,7 @@ func MainWithDependencies(args []string, stdin io.Reader, stdout, stderr io.Writ
 	}
 	args, configPath, err := extractConfigFlag(args)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 2
 	}
 	deps = deps.withDefaults()
@@ -78,11 +78,11 @@ func MainWithDependencies(args []string, stdin io.Reader, stdout, stderr io.Writ
 		return 0
 	}
 	if args[0] == "--version" || args[0] == "-v" {
-		fmt.Fprintln(stdout, r.versionString())
+		_, _ = fmt.Fprintln(stdout, r.versionString())
 		return 0
 	}
 	if err := r.run(args); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	return 0
@@ -147,24 +147,24 @@ func (r runner) configFile() string {
 }
 
 func (r runner) printHelp() {
-	fmt.Fprintln(r.stdout, "paxm - memory adapter CLI")
-	fmt.Fprintln(r.stdout)
-	fmt.Fprintln(r.stdout, "Usage:")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup [--integration paxm|codex-plugin|claude-plugin]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] uninstall [--agent AGENT] [--yes]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--limit N] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --profile stm|ltm --text TEXT")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] logs [--tail N] [--follow] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill scan --agent AGENT [--before TIME]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill status --agent AGENT --provider NAME")
-	fmt.Fprintln(r.stdout, "  paxm eval run [--suite PATH] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm eval run locomo --dataset PATH --agent NAME --provider NAME (--max-questions N | --all)")
-	fmt.Fprintln(r.stdout, "  paxm eval retrieval locomo --dataset PATH --provider NAME [--json]")
-	fmt.Fprintln(r.stdout, "  paxm eval cleanup (--run RUN_ID | --stale)")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] mcp serve")
-	fmt.Fprintln(r.stdout, "  paxm update [--check] [--version VERSION]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
-	fmt.Fprintln(r.stdout, "  paxm version")
+	_, _ = fmt.Fprintln(r.stdout, "paxm - memory adapter CLI")
+	_, _ = fmt.Fprintln(r.stdout)
+	_, _ = fmt.Fprintln(r.stdout, "Usage:")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup [--integration paxm|codex-plugin|claude-plugin]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] uninstall [--agent AGENT] [--yes]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--limit N] [--json]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --profile stm|ltm --text TEXT")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] logs [--tail N] [--follow] [--json]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill scan --agent AGENT [--before TIME]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill status --agent AGENT --provider NAME")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm eval run [--suite PATH] [--json]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm eval run locomo --dataset PATH --agent NAME --provider NAME (--max-questions N | --all)")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm eval retrieval locomo --dataset PATH --provider NAME [--json]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm eval cleanup (--run RUN_ID | --stale)")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] mcp serve")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm update [--check] [--version VERSION]")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
+	_, _ = fmt.Fprintln(r.stdout, "  paxm version")
 }

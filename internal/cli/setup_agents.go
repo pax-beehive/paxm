@@ -23,7 +23,7 @@ func configureSelectedAgents(prompter *setupPrompter, cfg *config.Config, select
 		}
 	}
 	for index, option := range selectedOptions {
-		fmt.Fprintf(prompter.output, "\nConfigure %s (%d/%d)\n", option.Label, index+1, len(selectedOptions))
+		_, _ = fmt.Fprintf(prompter.output, "\nConfigure %s (%d/%d)\n", option.Label, index+1, len(selectedOptions))
 		agent := cfg.Agents[option.ID]
 		behaviors, err := promptRequiredMultiSelect(
 			prompter,
@@ -54,14 +54,14 @@ func configureSelectedAgents(prompter *setupPrompter, cfg *config.Config, select
 }
 
 func writeSetupSummary(writer io.Writer, cfg config.Config, providers, agents map[string]bool) {
-	fmt.Fprintln(writer, "\nSetup summary")
-	fmt.Fprintf(writer, "  Providers: %s\n", strings.Join(selectedOptionLabels(providerOptions(cfg), providers), ", "))
+	_, _ = fmt.Fprintln(writer, "\nSetup summary")
+	_, _ = fmt.Fprintf(writer, "  Providers: %s\n", strings.Join(selectedOptionLabels(providerOptions(cfg), providers), ", "))
 	selectedAgents := selectedOptionLabels(hookOptions(cfg), agents)
 	if len(selectedAgents) == 0 {
-		fmt.Fprintln(writer, "  Agents: none")
+		_, _ = fmt.Fprintln(writer, "  Agents: none")
 		return
 	}
-	fmt.Fprintln(writer, "  Agents:")
+	_, _ = fmt.Fprintln(writer, "  Agents:")
 	for _, option := range hookOptions(cfg) {
 		if !agents[option.ID] {
 			continue
@@ -81,7 +81,7 @@ func writeSetupSummary(writer io.Writer, cfg config.Config, providers, agents ma
 		if len(writeEvents) > 0 {
 			writeSummary = strings.Join(writeEvents, ",") + " profile=" + firstNonEmpty(agentWriteProfile(agent), "ltm")
 		}
-		fmt.Fprintf(writer, "    %s: recall=%s write=%s\n", option.Label, recall, writeSummary)
+		_, _ = fmt.Fprintf(writer, "    %s: recall=%s write=%s\n", option.Label, recall, writeSummary)
 	}
 }
 
@@ -215,7 +215,7 @@ func promptRequiredMultiSelect(prompter *setupPrompter, question string, options
 		if anySelected(selected) {
 			return selected, nil
 		}
-		fmt.Fprintln(prompter.output, message)
+		_, _ = fmt.Fprintln(prompter.output, message)
 	}
 }
 

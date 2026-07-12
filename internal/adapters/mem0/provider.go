@@ -161,7 +161,7 @@ func (p *Provider) Health(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return p.statusError(response)
 	}
@@ -245,7 +245,7 @@ func (p *Provider) doJSON(ctx context.Context, method, path string, payload any,
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return p.statusError(response)
 	}

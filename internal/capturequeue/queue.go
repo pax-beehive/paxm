@@ -235,17 +235,27 @@ func Open(path string, opts Options) (*Queue, error) {
 	db.SetMaxOpenConns(1)
 	q := &Queue{db: db, opts: opts, providerSemaphores: make(map[string]chan struct{})}
 	if err := q.migrate(context.Background()); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	if _, err := db.Exec(`UPDATE capture_deliveries SET state = 'retry', lease_until = '', next_attempt_at = '' WHERE state = 'delivering'`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return q, nil
 }
 
 func (q *Queue) Close() error { return q.db.Close() }
+
+// RecoverDelivering makes claims retryable after an interrupted delivery
+// cycle. Queue.Open performs the same recovery for process restarts; workers
+// use this path when a database error aborts a cycle without restarting.
+func (q *Queue) RecoverDelivering(ctx context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	_, err := q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'retry', lease_until = '', next_attempt_at = '' WHERE state = 'delivering'`)
+	return err
+}
 
 func (q *Queue) Append(ctx context.Context, event Event) (Receipt, error) {
 	q.mu.Lock()
@@ -269,7 +279,7 @@ func (q *Queue) Append(ctx context.Context, event Event) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var existingSequence int64
 	var existingSession, existingHash string
 	var existingSource, existingFinal sql.NullInt64
@@ -340,7 +350,7 @@ WHERE session_key = ? AND episode_id = '' ORDER BY sequence
 	if err != nil {
 		return episodeDraft{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	draft := episodeDraft{
 		sourceSequences: make(map[int64]int),
 		finalSequences:  make(map[int64]bool),
@@ -548,7 +558,7 @@ ORDER BY e.created_at LIMIT 100
 		var value deliveryClaim
 		var profilesJSON, payload, payloadHash string
 		if err := rows.Scan(&value.episodeID, &value.provider, &profilesJSON, &payload, &payloadHash, &value.attempts); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		if checksum([]byte(payload)) != payloadHash {
@@ -776,7 +786,7 @@ func (q *Queue) sealMatching(ctx context.Context, query string, args ...any) (in
 	for rows.Next() {
 		var sessionKey string
 		if err := rows.Scan(&sessionKey); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		sessionKeys = append(sessionKeys, sessionKey)
@@ -791,7 +801,7 @@ func (q *Queue) sealMatching(ctx context.Context, query string, args ...any) (in
 			return sealed, err
 		}
 		if err := q.sealSession(ctx, tx, sessionKey, false); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return sealed, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -889,7 +899,7 @@ func (q *Queue) migrate(ctx context.Context) error {
 	for rows.Next() {
 		var value unhashed
 		if err := rows.Scan(&value.id, &value.payload); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		values = append(values, value)
@@ -910,7 +920,7 @@ func (q *Queue) migrate(ctx context.Context) error {
 	for rows.Next() {
 		var value unhashed
 		if err := rows.Scan(&value.id, &value.payload); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		values = append(values, value)
@@ -931,7 +941,7 @@ func ensureQueueColumn(ctx context.Context, db *sql.DB, table, name, definition 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var cid, notNull, primaryKey int
 		var columnName, columnType string
@@ -999,11 +1009,11 @@ func (q *Queue) verifyEpisode(ctx context.Context, episode Episode) error {
 	for rows.Next() {
 		var payload, hash string
 		if err := rows.Scan(&payload, &hash); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		if checksum([]byte(payload)) != hash {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("capture episode %s event %d checksum mismatch", episode.ID, len(hashes)+1)
 		}
 		hashes = append(hashes, hash)
@@ -1025,7 +1035,7 @@ func (q *Queue) episodeCaptureTimes(ctx context.Context, episodeID string) ([]ti
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var captureTimes []time.Time
 	for rows.Next() {
 		var value string

@@ -57,15 +57,15 @@ func (r runner) runSetup(args []string) error {
 		return err
 	}
 	if err := flushExistingHookBuffer(path, true); err != nil {
-		fmt.Fprintf(r.stderr, "warning: config saved but existing hook daemon could not be stopped: %v\n", err)
+		_, _ = fmt.Fprintf(r.stderr, "warning: config saved but existing hook daemon could not be stopped: %v\n", err)
 	}
-	fmt.Fprintf(r.stdout, "saved config: %s\n", path)
+	_, _ = fmt.Fprintf(r.stdout, "saved config: %s\n", path)
 	if zepUserResult != nil {
 		status := "exists"
 		if zepUserResult.Created {
 			status = "created"
 		}
-		fmt.Fprintf(r.stdout, "ensured Zep user: %s (%s)\n", zepUserResult.UserID, status)
+		_, _ = fmt.Fprintf(r.stdout, "ensured Zep user: %s (%s)\n", zepUserResult.UserID, status)
 	}
 	return r.installSelectedHookIntegrations(path, cfg, selectedHooks)
 }
@@ -174,7 +174,7 @@ func (r runner) confirmSetupOverwrite(path string, prompter *setupPrompter, forc
 		return configExists, false, r.finishSetupPrompt(err)
 	}
 	if !overwrite {
-		fmt.Fprintln(r.stdout, "setup cancelled")
+		_, _ = fmt.Fprintln(r.stdout, "setup cancelled")
 		return configExists, false, nil
 	}
 	return configExists, true, nil
@@ -240,7 +240,7 @@ func (r runner) confirmSetupSummary(prompter *setupPrompter, cfg config.Config, 
 		return false, r.finishSetupPrompt(err)
 	}
 	if !apply {
-		fmt.Fprintln(r.stdout, "setup cancelled")
+		_, _ = fmt.Fprintln(r.stdout, "setup cancelled")
 		return false, nil
 	}
 	return true, nil
@@ -278,7 +278,7 @@ func (r runner) reconcilePluginOwnership(path string, cfg config.Config, name st
 		if err := removeAgentHookShims(path, name); err != nil {
 			return true, err
 		}
-		fmt.Fprintln(r.stdout, "Codex hooks are owned by the paxm-memory plugin")
+		_, _ = fmt.Fprintln(r.stdout, "Codex hooks are owned by the paxm-memory plugin")
 		return true, nil
 	case name == "claude" && owner == config.IntegrationOwnerClaudePlugin:
 		marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "claude-")
@@ -288,7 +288,7 @@ func (r runner) reconcilePluginOwnership(path string, cfg config.Config, name st
 		if err := removeAgentHookShims(path, name); err != nil {
 			return true, err
 		}
-		fmt.Fprintln(r.stdout, "Claude hooks are owned by the paxm-claude plugin")
+		_, _ = fmt.Fprintln(r.stdout, "Claude hooks are owned by the paxm-claude plugin")
 		return true, nil
 	default:
 		return false, nil
@@ -309,7 +309,7 @@ func (r runner) installAgentHookIntegration(path string, agent config.AgentConfi
 			return err
 		}
 		installedScripts[event.ConfigEvent] = scriptPath
-		fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+		_, _ = fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
 	}
 	return r.registerAgentIntegration(name, installedScripts)
 }
@@ -317,29 +317,29 @@ func (r runner) installAgentHookIntegration(path string, agent config.AgentConfi
 func (r runner) registerAgentIntegration(name string, installedScripts map[string]string) error {
 	switch name {
 	case "codex":
-		fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
+		_, _ = fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
 	case "claude":
 		if err := installClaudeGlobalHooks(claudeSettingsPath(), installedScripts); err != nil {
 			return err
 		}
-		fmt.Fprintf(r.stdout, "registered Claude Code global hook: %s\n", claudeSettingsPath())
+		_, _ = fmt.Fprintf(r.stdout, "registered Claude Code global hook: %s\n", claudeSettingsPath())
 	case "pi":
 		if err := installPiGlobalHook(piExtensionPath(), installedScripts); err != nil {
 			return err
 		}
-		fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
+		_, _ = fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
 	case "opencode":
 		if err := installOpenCodeGlobalHook(openCodePluginPath(), installedScripts); err != nil {
 			return err
 		}
-		fmt.Fprintf(r.stdout, "registered OpenCode global plugin: %s\n", openCodePluginPath())
+		_, _ = fmt.Fprintf(r.stdout, "registered OpenCode global plugin: %s\n", openCodePluginPath())
 	}
 	return nil
 }
 
 func (r runner) finishSetupPrompt(err error) error {
 	if errors.Is(err, errPromptCancelled) {
-		fmt.Fprintln(r.stdout, "setup cancelled")
+		_, _ = fmt.Fprintln(r.stdout, "setup cancelled")
 		return nil
 	}
 	return err
@@ -589,7 +589,7 @@ func (r runner) runEval(args []string) error {
 			writeEvalComparison(r.stdout, *comparison)
 		}
 		for _, failure := range budgetFailures {
-			fmt.Fprintf(r.stdout, "BUDGET FAIL: %s\n", failure)
+			_, _ = fmt.Fprintf(r.stdout, "BUDGET FAIL: %s\n", failure)
 		}
 	}
 	if err != nil {
@@ -651,7 +651,7 @@ func (r runner) runJSONRPCConformance(args []string) error {
 			return err
 		}
 	} else {
-		fmt.Fprintf(r.stdout, "paxm JSON-RPC provider conformance: passed=%t protocol=%s\n", result.Passed, result.Protocol)
+		_, _ = fmt.Fprintf(r.stdout, "paxm JSON-RPC provider conformance: passed=%t protocol=%s\n", result.Passed, result.Protocol)
 		for _, check := range result.Checks {
 			status := "PASS"
 			if check.Skipped {
@@ -659,11 +659,11 @@ func (r runner) runJSONRPCConformance(args []string) error {
 			} else if !check.Passed {
 				status = "FAIL"
 			}
-			fmt.Fprintf(r.stdout, "  %-5s %s", status, check.Name)
+			_, _ = fmt.Fprintf(r.stdout, "  %-5s %s", status, check.Name)
 			if check.Error != "" {
-				fmt.Fprintf(r.stdout, ": %s", check.Error)
+				_, _ = fmt.Fprintf(r.stdout, ": %s", check.Error)
 			}
-			fmt.Fprintln(r.stdout)
+			_, _ = fmt.Fprintln(r.stdout)
 		}
 	}
 	if !result.Passed {
@@ -724,7 +724,7 @@ func (r runner) runEvalCleanup(args []string) error {
 			continue
 		}
 		cleaned++
-		fmt.Fprintf(r.stdout, "cleaned eval run: %s\n", entry.Name())
+		_, _ = fmt.Fprintf(r.stdout, "cleaned eval run: %s\n", entry.Name())
 	}
 	if cleanupErr != nil {
 		return cleanupErr
@@ -869,15 +869,15 @@ func findOpenCodeBinary(explicit string) (string, error) {
 }
 
 func writeLoCoMoAgentReport(w io.Writer, result paxeval.LoCoMoAgentResult) {
-	fmt.Fprintf(w, "paxm eval: %s  agent=%s  provider=%s  model=%s\n", result.Benchmark, result.Agent, result.Provider, result.Model)
-	fmt.Fprintf(w, "  agent write canary: %t\n", result.WriteCanary)
-	fmt.Fprintf(w, "  questions: %d  trials: %d  duration: %s\n", result.QuestionCount, result.TrialCount, time.Duration(result.DurationMS)*time.Millisecond)
+	_, _ = fmt.Fprintf(w, "paxm eval: %s  agent=%s  provider=%s  model=%s\n", result.Benchmark, result.Agent, result.Provider, result.Model)
+	_, _ = fmt.Fprintf(w, "  agent write canary: %t\n", result.WriteCanary)
+	_, _ = fmt.Fprintf(w, "  questions: %d  trials: %d  duration: %s\n", result.QuestionCount, result.TrialCount, time.Duration(result.DurationMS)*time.Millisecond)
 	for _, summary := range result.Summaries {
-		fmt.Fprintf(w, "  %-7s accuracy %.1f%%  mean-f1 %.3f  exact %.1f%%  recall-used %d/%d  useful %.1f%%  errors %d  tokens %d/%d  cost $%.4f\n",
+		_, _ = fmt.Fprintf(w, "  %-7s accuracy %.1f%%  mean-f1 %.3f  exact %.1f%%  recall-used %d/%d  useful %.1f%%  errors %d  tokens %d/%d  cost $%.4f\n",
 			summary.Arm, summary.Accuracy*100, summary.MeanF1, summary.ExactMatch*100, summary.RecallUsed, summary.Trials, summary.UsefulRecallRate*100,
 			summary.Errors, summary.InputTokens, summary.OutputTokens, summary.Cost)
 	}
-	fmt.Fprintf(w, "  memory lift: passive %+.1fpp  active %+.1fpp\n", result.PassiveLift*100, result.ActiveLift*100)
+	_, _ = fmt.Fprintf(w, "  memory lift: passive %+.1fpp  active %+.1fpp\n", result.PassiveLift*100, result.ActiveLift*100)
 }
 
 func (r runner) runLoCoMoEval(args []string) error {
@@ -943,72 +943,72 @@ func (r runner) runLoCoMoEval(args []string) error {
 }
 
 func writeLoCoMoReport(w io.Writer, result paxeval.LoCoMoResult) {
-	fmt.Fprintf(w, "paxm eval: %s (%s)\n", result.Benchmark, result.Provider)
-	fmt.Fprintf(w, "  conversations: %d  questions: %d  passed: %d  failed: %d\n", result.ConversationCount, result.QuestionCount, result.Passed, result.Failed)
-	fmt.Fprintf(w, "  recall@k: %.3f  precision@k: %.3f  mrr: %.3f  duration: %dms\n", result.RecallAtK, result.PrecisionAtK, result.MRR, result.DurationMS)
+	_, _ = fmt.Fprintf(w, "paxm eval: %s (%s)\n", result.Benchmark, result.Provider)
+	_, _ = fmt.Fprintf(w, "  conversations: %d  questions: %d  passed: %d  failed: %d\n", result.ConversationCount, result.QuestionCount, result.Passed, result.Failed)
+	_, _ = fmt.Fprintf(w, "  recall@k: %.3f  precision@k: %.3f  mrr: %.3f  duration: %dms\n", result.RecallAtK, result.PrecisionAtK, result.MRR, result.DurationMS)
 	for _, category := range result.Categories {
-		fmt.Fprintf(w, "  category %d: %d/%d  recall@k %.3f  precision@k %.3f  mrr %.3f\n", category.Category, category.Passed, category.Questions, category.RecallAtK, category.PrecisionAtK, category.MRR)
+		_, _ = fmt.Fprintf(w, "  category %d: %d/%d  recall@k %.3f  precision@k %.3f  mrr %.3f\n", category.Category, category.Passed, category.Questions, category.RecallAtK, category.PrecisionAtK, category.MRR)
 	}
 }
 
 func writeEvalComparison(w io.Writer, comparison paxeval.Comparison) {
-	fmt.Fprintf(w, "comparison: %s -> %s\n", comparison.BaselineSuite, comparison.CurrentSuite)
-	fmt.Fprintf(w, "  passed %+d  recall@k %+.3f  precision@k %+.3f  mrr %+.3f  false-positive rate %+.3f  duration %+dms\n", comparison.PassedDelta, comparison.RecallAtKDelta, comparison.PrecisionAtKDelta, comparison.MRRDelta, comparison.FalsePositiveRateDelta, comparison.DurationMSDelta)
+	_, _ = fmt.Fprintf(w, "comparison: %s -> %s\n", comparison.BaselineSuite, comparison.CurrentSuite)
+	_, _ = fmt.Fprintf(w, "  passed %+d  recall@k %+.3f  precision@k %+.3f  mrr %+.3f  false-positive rate %+.3f  duration %+dms\n", comparison.PassedDelta, comparison.RecallAtKDelta, comparison.PrecisionAtKDelta, comparison.MRRDelta, comparison.FalsePositiveRateDelta, comparison.DurationMSDelta)
 	if comparison.WriteRecallDelta != 0 || comparison.WritePrecisionDelta != 0 || comparison.WriteFalsePositiveRateDelta != 0 {
-		fmt.Fprintf(w, "  write recall %+.3f  write precision %+.3f  write false-positive rate %+.3f\n", comparison.WriteRecallDelta, comparison.WritePrecisionDelta, comparison.WriteFalsePositiveRateDelta)
+		_, _ = fmt.Fprintf(w, "  write recall %+.3f  write precision %+.3f  write false-positive rate %+.3f\n", comparison.WriteRecallDelta, comparison.WritePrecisionDelta, comparison.WriteFalsePositiveRateDelta)
 	}
 }
 
 func writeEvalReport(w io.Writer, result paxeval.Result) {
-	fmt.Fprintf(w, "paxm eval: %s (v%d)\n", result.Suite, result.Version)
-	fmt.Fprintf(w, "cases: %d  passed: %d  failed: %d  duration: %dms\n", result.CaseCount, result.Passed, result.Failed, result.DurationMS)
+	_, _ = fmt.Fprintf(w, "paxm eval: %s (v%d)\n", result.Suite, result.Version)
+	_, _ = fmt.Fprintf(w, "cases: %d  passed: %d  failed: %d  duration: %dms\n", result.CaseCount, result.Passed, result.Failed, result.DurationMS)
 	if result.ExecutionFailed > 0 {
-		fmt.Fprintf(w, "execution failures: %d\n", result.ExecutionFailed)
+		_, _ = fmt.Fprintf(w, "execution failures: %d\n", result.ExecutionFailed)
 	}
-	fmt.Fprintf(w, "recall@k: %.3f  precision@k: %.3f  mrr: %.3f  false-positive rate: %.3f\n", result.RecallAtK, result.PrecisionAtK, result.MRR, result.FalsePositiveRate)
+	_, _ = fmt.Fprintf(w, "recall@k: %.3f  precision@k: %.3f  mrr: %.3f  false-positive rate: %.3f\n", result.RecallAtK, result.PrecisionAtK, result.MRR, result.FalsePositiveRate)
 	if result.AdapterContractCases > 0 {
-		fmt.Fprintf(w, "adapter contract: %d/%d passed  failed: %d\n", result.AdapterContractPassed, result.AdapterContractCases, result.AdapterContractFailed)
+		_, _ = fmt.Fprintf(w, "adapter contract: %d/%d passed  failed: %d\n", result.AdapterContractPassed, result.AdapterContractCases, result.AdapterContractFailed)
 	}
 	if result.WriteCaseCount > 0 {
-		fmt.Fprintf(w, "writes: %d/%d  write recall: %.3f  write precision: %.3f  write false-positive rate: %.3f\n", result.Writes, result.WriteCaseCount, result.WriteRecall, result.WritePrecision, result.WriteFalsePositiveRate)
-		fmt.Fprintf(w, "results: %d  returned context: %d bytes  write total: %.3fms  recall total: %.3fms\n", result.ResultCount, result.ReturnedContextBytes, float64(result.WriteDurationUS)/1000, float64(result.RecallDurationUS)/1000)
+		_, _ = fmt.Fprintf(w, "writes: %d/%d  write recall: %.3f  write precision: %.3f  write false-positive rate: %.3f\n", result.Writes, result.WriteCaseCount, result.WriteRecall, result.WritePrecision, result.WriteFalsePositiveRate)
+		_, _ = fmt.Fprintf(w, "results: %d  returned context: %d bytes  write total: %.3fms  recall total: %.3fms\n", result.ResultCount, result.ReturnedContextBytes, float64(result.WriteDurationUS)/1000, float64(result.RecallDurationUS)/1000)
 	}
 	for _, group := range result.Categories {
-		fmt.Fprintf(w, "  %-20s %3d/%-3d  recall@k %.3f  precision@k %.3f  mrr %.3f\n", group.Name, group.Passed, group.CaseCount, group.RecallAtK, group.PrecisionAtK, group.MRR)
+		_, _ = fmt.Fprintf(w, "  %-20s %3d/%-3d  recall@k %.3f  precision@k %.3f  mrr %.3f\n", group.Name, group.Passed, group.CaseCount, group.RecallAtK, group.PrecisionAtK, group.MRR)
 		if group.WriteCaseCount > 0 {
-			fmt.Fprintf(w, "  %-20s write recall %.3f  write precision %.3f  write false-positive rate %.3f\n", "", group.WriteRecall, group.WritePrecision, group.WriteFalsePositiveRate)
+			_, _ = fmt.Fprintf(w, "  %-20s write recall %.3f  write precision %.3f  write false-positive rate %.3f\n", "", group.WriteRecall, group.WritePrecision, group.WriteFalsePositiveRate)
 		}
 	}
 	for _, item := range result.Cases {
 		if item.Passed {
 			continue
 		}
-		fmt.Fprintf(w, "FAIL %s", item.ID)
+		_, _ = fmt.Fprintf(w, "FAIL %s", item.ID)
 		if item.Error != "" {
-			fmt.Fprintf(w, ": %s", item.Error)
+			_, _ = fmt.Fprintf(w, ": %s", item.Error)
 		}
 		if len(item.Missing) > 0 {
-			fmt.Fprintf(w, " missing=%s", strings.Join(item.Missing, ","))
+			_, _ = fmt.Fprintf(w, " missing=%s", strings.Join(item.Missing, ","))
 		}
 		if len(item.Forbidden) > 0 {
-			fmt.Fprintf(w, " forbidden=%s", strings.Join(item.Forbidden, ","))
+			_, _ = fmt.Fprintf(w, " forbidden=%s", strings.Join(item.Forbidden, ","))
 		}
 		if len(item.Unexpected) > 0 {
-			fmt.Fprintf(w, " unexpected=%s", strings.Join(item.Unexpected, ","))
+			_, _ = fmt.Fprintf(w, " unexpected=%s", strings.Join(item.Unexpected, ","))
 		}
 		if len(item.WriteMissing) > 0 {
-			fmt.Fprintf(w, " write-missing=%s", strings.Join(item.WriteMissing, ","))
+			_, _ = fmt.Fprintf(w, " write-missing=%s", strings.Join(item.WriteMissing, ","))
 		}
 		if len(item.WriteForbidden) > 0 {
-			fmt.Fprintf(w, " write-forbidden=%s", strings.Join(item.WriteForbidden, ","))
+			_, _ = fmt.Fprintf(w, " write-forbidden=%s", strings.Join(item.WriteForbidden, ","))
 		}
 		if len(item.MetadataMismatches) > 0 {
-			fmt.Fprintf(w, " metadata=%s", strings.Join(item.MetadataMismatches, ","))
+			_, _ = fmt.Fprintf(w, " metadata=%s", strings.Join(item.MetadataMismatches, ","))
 		}
 		if len(item.AdapterContractErrors) > 0 {
-			fmt.Fprintf(w, " adapter=%s", strings.Join(item.AdapterContractErrors, ","))
+			_, _ = fmt.Fprintf(w, " adapter=%s", strings.Join(item.AdapterContractErrors, ","))
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 }
 
@@ -1018,7 +1018,7 @@ func (r runner) runConfig(args []string) error {
 	}
 	switch args[0] {
 	case "path":
-		fmt.Fprintln(r.stdout, r.configFile())
+		_, _ = fmt.Fprintln(r.stdout, r.configFile())
 		return nil
 	case "show":
 		_, rt, err := r.loadRuntime()
@@ -1053,10 +1053,10 @@ func (r runner) runConfigDoctor(args []string) error {
 	}
 	for _, status := range statuses {
 		if status.OK {
-			fmt.Fprintf(r.stdout, "ok: %s\n", status.Provider)
+			_, _ = fmt.Fprintf(r.stdout, "ok: %s\n", status.Provider)
 			continue
 		}
-		fmt.Fprintf(r.stdout, "error: %s: %s\n", status.Provider, status.Error)
+		_, _ = fmt.Fprintf(r.stdout, "error: %s: %s\n", status.Provider, status.Error)
 	}
 	return err
 }
@@ -1605,7 +1605,7 @@ func promptBool(reader *bufio.Reader, writer io.Writer, question string, default
 		suffix = " [Y/n]: "
 	}
 	for {
-		fmt.Fprint(writer, question+suffix)
+		_, _ = fmt.Fprint(writer, question+suffix)
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
 			return false, err
@@ -1620,7 +1620,7 @@ func promptBool(reader *bufio.Reader, writer io.Writer, question string, default
 		case "n", "no":
 			return false, nil
 		default:
-			fmt.Fprintln(writer, "Please answer yes or no.")
+			_, _ = fmt.Fprintln(writer, "Please answer yes or no.")
 		}
 		if errors.Is(err, io.EOF) {
 			return defaultValue, nil
@@ -1638,15 +1638,15 @@ func promptSingleSelect(reader *bufio.Reader, writer io.Writer, question string,
 		defaultID = options[0].ID
 	}
 	for {
-		fmt.Fprintln(writer, question+":")
+		_, _ = fmt.Fprintln(writer, question+":")
 		for i, option := range options {
 			marker := "[ ]"
 			if i == defaultIndex {
 				marker = "[x]"
 			}
-			fmt.Fprintf(writer, "  %d) %s %s\n", i+1, marker, option.Label)
+			_, _ = fmt.Fprintf(writer, "  %d) %s %s\n", i+1, marker, option.Label)
 		}
-		fmt.Fprintf(writer, "Choose one [%d]: ", defaultIndex+1)
+		_, _ = fmt.Fprintf(writer, "Choose one [%d]: ", defaultIndex+1)
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
 			return "", err
@@ -1664,7 +1664,7 @@ func promptSingleSelect(reader *bufio.Reader, writer io.Writer, question string,
 				return option.ID, nil
 			}
 		}
-		fmt.Fprintln(writer, "Please choose one of the listed options.")
+		_, _ = fmt.Fprintln(writer, "Please choose one of the listed options.")
 		if errors.Is(err, io.EOF) {
 			return defaultID, nil
 		}
@@ -1677,15 +1677,15 @@ func promptMultiSelect(reader *bufio.Reader, writer io.Writer, question string, 
 	}
 	defaultText := defaultSelectionText(options, defaults)
 	for {
-		fmt.Fprintln(writer, question+":")
+		_, _ = fmt.Fprintln(writer, question+":")
 		for i, option := range options {
 			marker := "[ ]"
 			if defaults[option.ID] {
 				marker = "[x]"
 			}
-			fmt.Fprintf(writer, "  %d) %s %s\n", i+1, marker, option.Label)
+			_, _ = fmt.Fprintf(writer, "  %d) %s %s\n", i+1, marker, option.Label)
 		}
-		fmt.Fprintf(writer, "Choose numbers, comma-separated, or all/none [%s]: ", defaultText)
+		_, _ = fmt.Fprintf(writer, "Choose numbers, comma-separated, or all/none [%s]: ", defaultText)
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
@@ -1698,7 +1698,7 @@ func promptMultiSelect(reader *bufio.Reader, writer io.Writer, question string, 
 		if parseErr == nil {
 			return selected, nil
 		}
-		fmt.Fprintf(writer, "%s\n", parseErr)
+		_, _ = fmt.Fprintf(writer, "%s\n", parseErr)
 		if errors.Is(err, io.EOF) {
 			return defaultSelections(options, defaults), nil
 		}
@@ -1758,7 +1758,7 @@ func optionIndex(options []setupOption, id string) int {
 }
 
 func promptString(reader *bufio.Reader, writer io.Writer, question, defaultValue string) (string, error) {
-	fmt.Fprintf(writer, "%s [%s]: ", question, defaultValue)
+	_, _ = fmt.Fprintf(writer, "%s [%s]: ", question, defaultValue)
 	line, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
@@ -2560,27 +2560,27 @@ func writeJSON(w io.Writer, value any) error {
 
 func writeRecallMarkdown(w io.Writer, result tools.RecallResult) {
 	if len(result.Hits) == 0 {
-		fmt.Fprintln(w, "No memories found.")
+		_, _ = fmt.Fprintln(w, "No memories found.")
 		return
 	}
 	for i, hit := range result.Hits {
-		fmt.Fprintf(w, "### Memory %d (%s)\n", i+1, hit.Provider)
-		fmt.Fprintf(w, "Score: %.4f\n", hit.Score)
-		fmt.Fprintf(w, "Relevance: %.4f\n", hit.Relevance)
+		_, _ = fmt.Fprintf(w, "### Memory %d (%s)\n", i+1, hit.Provider)
+		_, _ = fmt.Fprintf(w, "Score: %.4f\n", hit.Score)
+		_, _ = fmt.Fprintf(w, "Relevance: %.4f\n", hit.Relevance)
 		if hit.RawScore != nil {
 			if hit.RawScoreKind != "" {
-				fmt.Fprintf(w, "Raw score: %.4f (%s)\n", *hit.RawScore, hit.RawScoreKind)
+				_, _ = fmt.Fprintf(w, "Raw score: %.4f (%s)\n", *hit.RawScore, hit.RawScoreKind)
 			} else {
-				fmt.Fprintf(w, "Raw score: %.4f\n", *hit.RawScore)
+				_, _ = fmt.Fprintf(w, "Raw score: %.4f\n", *hit.RawScore)
 			}
 		}
 		if hit.Source != "" {
-			fmt.Fprintf(w, "Source: %s\n\n", hit.Source)
+			_, _ = fmt.Fprintf(w, "Source: %s\n\n", hit.Source)
 		} else {
-			fmt.Fprintln(w)
+			_, _ = fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w, strings.TrimSpace(hit.Text))
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, strings.TrimSpace(hit.Text))
+		_, _ = fmt.Fprintln(w)
 	}
 }
 
@@ -2591,23 +2591,23 @@ func writeRecallContextMarkdown(w io.Writer, result tools.RecallResult, mode str
 	}
 	var context bytes.Buffer
 	writeRecallMarkdown(&context, result)
-	fmt.Fprintln(w, tools.WrapRecallContext(mode, context.String()))
+	_, _ = fmt.Fprintln(w, tools.WrapRecallContext(mode, context.String()))
 }
 
 func writeHistorySummary(w io.Writer, summary telemetry.HistorySummary) {
-	fmt.Fprintln(w, "== paxm history ==")
-	fmt.Fprintf(w, "window: last %d days\n", summary.Days)
+	_, _ = fmt.Fprintln(w, "== paxm history ==")
+	_, _ = fmt.Fprintf(w, "window: last %d days\n", summary.Days)
 	if summary.Totals.Events == 0 {
-		fmt.Fprintln(w, "status: quiet")
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "no telemetry events recorded yet")
+		_, _ = fmt.Fprintln(w, "status: quiet")
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, "no telemetry events recorded yet")
 		writeHistoryTable(w, "storage", []string{"file", "path"}, [][]string{
 			{"events", summary.Storage.EventsFile},
 			{"metrics", summary.Storage.MetricsFile},
 		})
 		return
 	}
-	fmt.Fprintf(w, "status: %s\n", historyStatus(summary.Totals))
+	_, _ = fmt.Fprintf(w, "status: %s\n", historyStatus(summary.Totals))
 	writeHistoryTable(w, "overview", []string{"metric", "value"}, [][]string{
 		{"events", formatInt(summary.Totals.Events)},
 		{"successes", formatInt(summary.Totals.Successes)},
@@ -2718,7 +2718,7 @@ func writeLogEvent(w io.Writer, event telemetry.Event) {
 	if event.Error != "" {
 		parts = append(parts, "error="+strconv.Quote(event.Error))
 	}
-	fmt.Fprintln(w, strings.Join(parts, " "))
+	_, _ = fmt.Fprintln(w, strings.Join(parts, " "))
 }
 
 func formatLogValue(value string) string {
@@ -2743,8 +2743,8 @@ func writeHistoryTable(w io.Writer, title string, headers []string, rows [][]str
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, title)
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, title)
 	widths := make([]int, len(headers))
 	for i, header := range headers {
 		widths[i] = len(header)
@@ -2774,12 +2774,12 @@ func writeHistoryRow(w io.Writer, row []string, widths []int) {
 			value = row[i]
 		}
 		if i == 0 {
-			fmt.Fprintf(w, "  %-*s", width, value)
+			_, _ = fmt.Fprintf(w, "  %-*s", width, value)
 			continue
 		}
-		fmt.Fprintf(w, "  %*s", width, value)
+		_, _ = fmt.Fprintf(w, "  %*s", width, value)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 }
 
 func historyStatus(counter telemetry.Counter) string {

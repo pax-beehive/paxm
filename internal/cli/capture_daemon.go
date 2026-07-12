@@ -25,12 +25,12 @@ func acquireHookDaemonLock(configPath string) (func(), error) {
 		file, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
 			if _, err := fmt.Fprintf(file, "%d\n", os.Getpid()); err != nil {
-				file.Close()
-				os.Remove(lockPath)
+				_ = file.Close()
+				_ = os.Remove(lockPath)
 				return nil, err
 			}
 			return func() {
-				file.Close()
+				_ = file.Close()
 				_ = os.Remove(lockPath)
 			}, nil
 		}

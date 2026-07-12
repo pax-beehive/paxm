@@ -128,7 +128,7 @@ func ReadFile(agent, path string, cutoff time.Time) ([]Turn, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var records []record
 	reader := bufio.NewReader(file)

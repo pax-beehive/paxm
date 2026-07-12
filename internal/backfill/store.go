@@ -65,7 +65,7 @@ func Open(dir string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	if _, err := db.Exec(`
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS imported_items (
   imported_at TEXT NOT NULL,
   PRIMARY KEY(scope, item_id)
 );`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return &Store{dir: dir, db: db}, nil

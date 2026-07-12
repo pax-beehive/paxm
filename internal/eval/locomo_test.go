@@ -86,6 +86,33 @@ func TestLoadLoCoMoParsesOrderedSessionsAndTextQA(t *testing.T) {
 	}
 }
 
+func TestLoadLoCoMoRejectsMalformedConversationMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{
+			name: "speaker",
+			data: `[{"conversation":{"speaker_a":{"invalid":true},"speaker_b":"Bob","session_1":[{"speaker":"Alice","dia_id":"D1:1","text":"hello"}]}}]`,
+		},
+		{
+			name: "date",
+			data: `[{"conversation":{"speaker_a":"Alice","speaker_b":"Bob","session_1_date_time":{"invalid":true},"session_1":[{"speaker":"Alice","dia_id":"D1:1","text":"hello"}]}}]`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "locomo.json")
+			if err := os.WriteFile(path, []byte(test.data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadLoCoMo(path); err == nil {
+				t.Fatal("malformed conversation metadata was accepted")
+			}
+		})
+	}
+}
+
 func TestLoCoMoRunnerIngestsScoresAndCleansEachConversation(t *testing.T) {
 	dataset := LoCoMoDataset{Conversations: []LoCoMoConversation{{
 		ID: "sample-1",

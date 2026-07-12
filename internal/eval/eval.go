@@ -327,7 +327,7 @@ func (r Runner) Run(ctx context.Context, suite Suite) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		defer os.RemoveAll(root)
+		defer func() { _ = os.RemoveAll(root) }()
 	}
 	started := time.Now()
 	result := Result{Suite: suite.Name, Version: suite.Version, CaseCount: len(suite.Cases)}

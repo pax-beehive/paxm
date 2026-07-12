@@ -141,7 +141,7 @@ func (r runner) runInternalHook(args []string) error {
 	}
 	outcome, err := handler.Handle(context.Background(), event)
 	if outcome.BufferError != nil {
-		fmt.Fprintf(r.stderr, "paxm hook buffer skipped: %s\n", outcome.BufferError)
+		_, _ = fmt.Fprintf(r.stderr, "paxm hook buffer skipped: %s\n", outcome.BufferError)
 	}
 	if err != nil || outcome.Ignored || outcome.Result == nil {
 		return err
@@ -238,7 +238,7 @@ func (r runner) serveHookDaemon(listener net.Listener, captureRuntime *capture.R
 			}
 			flushed, shutdown, err := handleCaptureQueueConn(context.Background(), captureRuntime, result.conn)
 			if err != nil {
-				fmt.Fprintf(r.stderr, "paxm hook buffer error: %s\n", err)
+				_, _ = fmt.Fprintf(r.stderr, "paxm hook buffer error: %s\n", err)
 			}
 			if shutdown {
 				return nil
@@ -256,7 +256,7 @@ func (r runner) serveHookDaemon(listener net.Listener, captureRuntime *capture.R
 }
 
 func handleCaptureQueueConn(ctx context.Context, runtime *capture.Runtime, conn net.Conn) (int, bool, error) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	var request hookBufferRequest
 	if err := json.NewDecoder(conn).Decode(&request); err != nil {
 		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
@@ -317,7 +317,7 @@ func (r runner) startHookDaemon(socket string) error {
 	}
 	cmd := exec.Command(binaryPath, "--config", r.configFile(), "__hook-daemon", "--socket", socket)
 	if devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
-		defer devNull.Close()
+		defer func() { _ = devNull.Close() }()
 		cmd.Stdin = devNull
 		cmd.Stdout = devNull
 		cmd.Stderr = devNull
@@ -331,7 +331,7 @@ func sendHookBufferRequest(socket string, event capture.Event) (hookBufferRespon
 	if err != nil {
 		return hookBufferResponse{}, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	raw := event.Raw
 	if len(raw) == 0 {
 		raw = json.RawMessage(`{}`)
@@ -384,7 +384,7 @@ func flushExistingHookBuffer(configPath string, shutdown bool) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := conn.SetDeadline(time.Now().Add(35 * time.Second)); err != nil {
 		return err
 	}
@@ -535,7 +535,7 @@ func codexTranscriptToolMessages(path string) []capture.Message {
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	var messages []capture.Message
@@ -854,7 +854,7 @@ func (r runner) recordHookWriteTelemetry(cfg config.Config, event capture.Event,
 func (r runner) recordTelemetry(cfg config.Config, event telemetry.Event) {
 	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
 	if err := recorder.Record(event); err != nil {
-		fmt.Fprintf(r.stderr, "paxm telemetry skipped: %s\n", err)
+		_, _ = fmt.Fprintf(r.stderr, "paxm telemetry skipped: %s\n", err)
 	}
 }
 
@@ -896,7 +896,7 @@ func (r runner) markInitialUserInputRecall(cfg config.Config, event capture.Even
 	}
 	first, err := markHookSessionSeen(hookSessionStatePath(r.configFile()), key, time.Now().UTC())
 	if err != nil {
-		fmt.Fprintf(r.stderr, "paxm hook state skipped: %s\n", err)
+		_, _ = fmt.Fprintf(r.stderr, "paxm hook state skipped: %s\n", err)
 		return event
 	}
 	if !first {

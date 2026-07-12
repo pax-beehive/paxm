@@ -101,14 +101,14 @@ func (u updater) Run(ctx context.Context) error {
 	}
 	if u.options.check {
 		if u.currentVersion == tag {
-			fmt.Fprintf(u.stdout, "paxm is up to date: %s\n", u.currentVersion)
+			_, _ = fmt.Fprintf(u.stdout, "paxm is up to date: %s\n", u.currentVersion)
 			return nil
 		}
-		fmt.Fprintf(u.stdout, "update available: %s -> %s\n", u.currentVersion, tag)
+		_, _ = fmt.Fprintf(u.stdout, "update available: %s -> %s\n", u.currentVersion, tag)
 		return nil
 	}
 	if u.currentVersion == tag && !u.options.force {
-		fmt.Fprintf(u.stdout, "paxm is already at %s\n", tag)
+		_, _ = fmt.Fprintf(u.stdout, "paxm is already at %s\n", tag)
 		return nil
 	}
 
@@ -120,7 +120,7 @@ func (u updater) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	archivePath := filepath.Join(tempDir, asset)
 	if err := u.download(ctx, u.releaseDownloadURL(tag, asset), archivePath); err != nil {
@@ -147,11 +147,11 @@ func (u updater) Run(ctx context.Context) error {
 	}
 	if u.reloadDaemon && u.afterInstall != nil {
 		if err := u.afterInstall(); err != nil {
-			fmt.Fprintf(u.stderr, "warning: updated paxm but could not stop the existing hook daemon: %v\n", err)
+			_, _ = fmt.Fprintf(u.stderr, "warning: updated paxm but could not stop the existing hook daemon: %v\n", err)
 		}
 	}
-	fmt.Fprintf(u.stdout, "updated paxm: %s -> %s\n", u.currentVersion, tag)
-	fmt.Fprintf(u.stdout, "installed: %s\n", installPath)
+	_, _ = fmt.Fprintf(u.stdout, "updated paxm: %s -> %s\n", u.currentVersion, tag)
+	_, _ = fmt.Fprintf(u.stdout, "installed: %s\n", installPath)
 	return nil
 }
 
@@ -168,7 +168,7 @@ func (u updater) resolveVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", fmt.Errorf("fetch latest release: %s", response.Status)
 	}
@@ -192,7 +192,7 @@ func (u updater) download(ctx context.Context, url, path string) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("download %s: %s", url, response.Status)
 	}
@@ -289,7 +289,7 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	sum := sha256.New()
 	if _, err := io.Copy(sum, file); err != nil {
 		return "", err
@@ -309,12 +309,12 @@ func extractPaxmFromTarGz(archivePath, tempDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	gzipReader, err := gzip.NewReader(file)
 	if err != nil {
 		return "", err
 	}
-	defer gzipReader.Close()
+	defer func() { _ = gzipReader.Close() }()
 	reader := tar.NewReader(gzipReader)
 	for {
 		header, err := reader.Next()
@@ -337,7 +337,7 @@ func extractPaxmFromZip(archivePath, tempDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	for _, file := range reader.File {
 		if file.FileInfo().IsDir() || filepath.Base(file.Name) != "paxm.exe" {
 			continue
@@ -346,7 +346,7 @@ func extractPaxmFromZip(archivePath, tempDir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		defer body.Close()
+		defer func() { _ = body.Close() }()
 		return writeExtractedBinary(body, tempDir, "paxm.exe")
 	}
 	return "", fmt.Errorf("paxm.exe binary not found in %s", filepath.Base(archivePath))

@@ -48,7 +48,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	terms := normalizeTerms(query.Text)
 	if len(terms) == 0 {
@@ -92,7 +92,7 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -261,7 +261,7 @@ func (p *Provider) CleanupExpired(ctx context.Context, limit int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	result, err := db.ExecContext(ctx, `
 	DELETE FROM memories
 	WHERE rowid IN (
@@ -366,7 +366,7 @@ func ensureColumn(ctx context.Context, db *sql.DB, name, definition string) erro
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var cid int
 		var columnName, columnType string
@@ -400,7 +400,7 @@ func (p *Provider) searchRecent(ctx context.Context, db *sql.DB, query memory.Se
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var hits []memory.MemoryHit
 	for rows.Next() {
@@ -433,7 +433,7 @@ func (p *Provider) searchFTS(ctx context.Context, db *sql.DB, query memory.Searc
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var hits []memory.MemoryHit
 	for rows.Next() {

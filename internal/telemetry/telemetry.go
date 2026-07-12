@@ -742,7 +742,7 @@ func (r *Recorder) loadMetrics() (Metrics, error) {
 		}
 		return Metrics{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var metrics Metrics
 	if err := json.NewDecoder(file).Decode(&metrics); err != nil && !errors.Is(err, io.EOF) {
 		return Metrics{}, err
@@ -790,7 +790,7 @@ func (r *Recorder) appendEvent(event Event) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	writer := bufio.NewWriter(file)
 	if _, err := writer.Write(line); err != nil {
 		return err

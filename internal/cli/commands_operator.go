@@ -19,7 +19,7 @@ func (r runner) runOperatorCommand(command string, args []string) error {
 	case "update":
 		return r.runUpdate(args)
 	case "version":
-		fmt.Fprintln(r.stdout, r.versionString())
+		_, _ = fmt.Fprintln(r.stdout, r.versionString())
 		return nil
 	case "config":
 		return r.runConfig(args)

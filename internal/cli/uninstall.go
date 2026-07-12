@@ -39,18 +39,18 @@ func (r runner) runUninstall(args []string) error {
 }
 
 func (r runner) confirmUninstall(targets []string) (bool, error) {
-	fmt.Fprintf(r.stdout, "Passive integrations to remove: %s\n", strings.Join(agentDisplayNames(targets), ", "))
+	_, _ = fmt.Fprintf(r.stdout, "Passive integrations to remove: %s\n", strings.Join(agentDisplayNames(targets), ", "))
 	prompter := newSetupPrompter(r.stdin, r.stdout)
 	confirmed, err := prompter.confirm("Continue uninstall?", false)
 	if err != nil {
 		if errors.Is(err, errPromptCancelled) {
-			fmt.Fprintln(r.stdout, "uninstall cancelled")
+			_, _ = fmt.Fprintln(r.stdout, "uninstall cancelled")
 			return false, nil
 		}
 		return false, err
 	}
 	if !confirmed {
-		fmt.Fprintln(r.stdout, "uninstall cancelled")
+		_, _ = fmt.Fprintln(r.stdout, "uninstall cancelled")
 	}
 	return confirmed, nil
 }
@@ -62,7 +62,7 @@ func (r runner) applyUninstall(configPath, agentName string, targets []string) e
 		return loadErr
 	}
 	if err := flushExistingHookBuffer(configPath, agentName == ""); err != nil {
-		fmt.Fprintf(r.stderr, "paxm hook buffer flush skipped: %s\n", err)
+		_, _ = fmt.Fprintf(r.stderr, "paxm hook buffer flush skipped: %s\n", err)
 	}
 	if hasConfig {
 		for _, target := range targets {
@@ -84,7 +84,7 @@ func (r runner) applyUninstall(configPath, agentName string, targets []string) e
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("%s: %w", target, err))
 			continue
 		}
-		fmt.Fprintf(r.stdout, "uninstalled %s passive integration\n", agentDisplayName(target))
+		_, _ = fmt.Fprintf(r.stdout, "uninstalled %s passive integration\n", agentDisplayName(target))
 	}
 	if agentName == "" {
 		if err := removeSharedHookState(configPath); err != nil {

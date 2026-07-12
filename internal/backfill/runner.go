@@ -46,7 +46,7 @@ func NewRunID() string {
 	return strconv.FormatInt(time.Now().UnixNano(), 36)
 }
 
-func (r Runner) Run(ctx context.Context, options RunOptions) (Status, error) {
+func (r Runner) Run(ctx context.Context, options RunOptions) (status Status, runErr error) {
 	if r.Store == nil || r.Service == nil {
 		return Status{}, errors.New("backfill runner is not configured")
 	}
@@ -57,9 +57,13 @@ func (r Runner) Run(ctx context.Context, options RunOptions) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	defer release()
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("release backfill lock: %w", releaseErr))
+		}
+	}()
 
-	status := r.initialStatus(options)
+	status = r.initialStatus(options)
 	if err := r.publish(options, status); err != nil {
 		return status, err
 	}
@@ -124,7 +128,9 @@ func (r Runner) processBackfillFile(ctx context.Context, options RunOptions, sta
 
 	items := ingestItems(turns)
 	status.Discovered += len(items)
-	_ = r.publish(options, *status)
+	if err := r.publish(options, *status); err != nil {
+		return nil, err
+	}
 	operationErrors, err := r.processBackfillItems(ctx, options, status, fileProgress{startBytes: fileStartBytes, size: file.Size, total: len(items)}, items, nextUpload)
 	if err != nil {
 		return operationErrors, err
@@ -169,7 +175,9 @@ func (r Runner) processBackfillItem(ctx context.Context, options RunOptions, sta
 	if done {
 		status.Skipped++
 		status.ProcessedBytes = processedBytes
-		_ = r.publish(options, *status)
+		if err := r.publish(options, *status); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	if err := waitForNextUpload(ctx, *nextUpload, options.RateInterval); err != nil {
@@ -180,7 +188,9 @@ func (r Runner) processBackfillItem(ctx context.Context, options RunOptions, sta
 	if ingestErr != nil {
 		status.Failed++
 		status.ProcessedBytes = processedBytes
-		_ = r.publish(options, *status)
+		if publishErr := r.publish(options, *status); publishErr != nil {
+			return nil, errors.Join(fmt.Errorf("%s: %w", item.ID, ingestErr), publishErr)
+		}
 		return fmt.Errorf("%s: %w", item.ID, ingestErr), nil
 	}
 	if err := r.Store.MarkSucceeded(options.Scope, item.ID, firstProviderRef(result)); err != nil {
@@ -188,7 +198,9 @@ func (r Runner) processBackfillItem(ctx context.Context, options RunOptions, sta
 	}
 	status.Uploaded++
 	status.ProcessedBytes = processedBytes
-	_ = r.publish(options, *status)
+	if err := r.publish(options, *status); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -224,8 +236,7 @@ func (r Runner) finishBackfillFile(options RunOptions, status *Status, fileStart
 func (r Runner) pauseBackfill(options RunOptions, status *Status, err error) error {
 	status.State = "paused"
 	status.FinishedAt = time.Now().UTC()
-	_ = r.publish(options, *status)
-	return err
+	return errors.Join(err, r.publish(options, *status))
 }
 
 func firstProviderRef(result tools.RememberResult) string {

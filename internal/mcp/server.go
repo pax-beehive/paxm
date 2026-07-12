@@ -319,7 +319,7 @@ func (s *Server) callRecall(ctx context.Context, raw json.RawMessage) toolResult
 		Meta:    args.Meta,
 	})
 	if err := s.recordRecall(rt, args.Profile, firstNonEmpty(result.Query, args.Query), result, time.Since(started), opErr); err != nil {
-		fmt.Fprintf(s.stderr, "paxm telemetry skipped: %s\n", err)
+		_, _ = fmt.Fprintf(s.stderr, "paxm telemetry skipped: %s\n", err)
 	}
 	if opErr != nil {
 		return recallErrorToolResult(opErr, result)
@@ -360,7 +360,7 @@ func (s *Server) callRemember(ctx context.Context, raw json.RawMessage) toolResu
 		Metadata: args.Metadata,
 	})
 	if err := s.recordRemember(rt, args.Profile, 1, result, time.Since(started), opErr); err != nil {
-		fmt.Fprintf(s.stderr, "paxm telemetry skipped: %s\n", err)
+		_, _ = fmt.Fprintf(s.stderr, "paxm telemetry skipped: %s\n", err)
 	}
 	if opErr != nil {
 		return errorToolResultWithContent(opErr, result)

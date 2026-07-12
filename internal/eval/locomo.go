@@ -382,8 +382,18 @@ func parseLoCoMoConversation(raw rawLoCoMoConversation, index int) (LoCoMoConver
 		id = fmt.Sprintf("conversation-%d", index+1)
 	}
 	conversation := LoCoMoConversation{ID: id}
-	_ = json.Unmarshal(raw.Conversation["speaker_a"], &conversation.SpeakerA)
-	_ = json.Unmarshal(raw.Conversation["speaker_b"], &conversation.SpeakerB)
+	for key, target := range map[string]*string{"speaker_a": &conversation.SpeakerA, "speaker_b": &conversation.SpeakerB} {
+		value, ok := raw.Conversation[key]
+		if !ok {
+			return LoCoMoConversation{}, fmt.Errorf("LoCoMo %s is missing %s", id, key)
+		}
+		if err := json.Unmarshal(value, target); err != nil {
+			return LoCoMoConversation{}, fmt.Errorf("decode LoCoMo %s %s: %w", id, key, err)
+		}
+		if strings.TrimSpace(*target) == "" {
+			return LoCoMoConversation{}, fmt.Errorf("LoCoMo %s has empty %s", id, key)
+		}
+	}
 	for key, value := range raw.Conversation {
 		number, ok := sessionNumber(key)
 		if !ok {
@@ -394,7 +404,12 @@ func parseLoCoMoConversation(raw rawLoCoMoConversation, index int) (LoCoMoConver
 			return LoCoMoConversation{}, fmt.Errorf("decode LoCoMo %s %s: %w", id, key, err)
 		}
 		var dateTime string
-		_ = json.Unmarshal(raw.Conversation[fmt.Sprintf("session_%d_date_time", number)], &dateTime)
+		dateKey := fmt.Sprintf("session_%d_date_time", number)
+		if dateValue, exists := raw.Conversation[dateKey]; exists {
+			if err := json.Unmarshal(dateValue, &dateTime); err != nil {
+				return LoCoMoConversation{}, fmt.Errorf("decode LoCoMo %s %s: %w", id, dateKey, err)
+			}
+		}
 		conversation.Sessions = append(conversation.Sessions, LoCoMoSession{Number: number, DateTime: dateTime, Turns: turns})
 	}
 	sort.Slice(conversation.Sessions, func(i, j int) bool { return conversation.Sessions[i].Number < conversation.Sessions[j].Number })

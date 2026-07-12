@@ -102,7 +102,7 @@ func (r runner) runBackfillScan(args []string) error {
 	if *jsonOut {
 		return writeJSON(r.stdout, result)
 	}
-	fmt.Fprintf(r.stdout, "Backfill scan: agent=%s files=%d turns=%d size=%s before=%s\n", result.Agent, result.Files, result.Turns, formatBytes(result.Bytes), cutoff.Format(time.RFC3339))
+	_, _ = fmt.Fprintf(r.stdout, "Backfill scan: agent=%s files=%d turns=%d size=%s before=%s\n", result.Agent, result.Files, result.Turns, formatBytes(result.Bytes), cutoff.Format(time.RFC3339))
 	return nil
 }
 
@@ -146,7 +146,7 @@ func (r runner) runBackfillRun(args []string) error {
 	if err != nil {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	options := r.backfillRunOptions(runArgs, agent, provider, files, cutoff, interval)
 	ctx, cleanup := backfillRunContext(runArgs.maxDuration)
 	defer cleanup()
@@ -232,7 +232,7 @@ func (r runner) finishBackfillRun(args backfillRunArgs, status backfill.Status, 
 	}
 	if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, context.Canceled) {
 		if !args.backgroundWorker {
-			fmt.Fprintf(r.stdout, "Backfill paused: uploaded=%d skipped=%d failed=%d\n", status.Uploaded, status.Skipped, status.Failed)
+			_, _ = fmt.Fprintf(r.stdout, "Backfill paused: uploaded=%d skipped=%d failed=%d\n", status.Uploaded, status.Skipped, status.Failed)
 		}
 		return nil
 	}
@@ -240,7 +240,7 @@ func (r runner) finishBackfillRun(args backfillRunArgs, status backfill.Status, 
 		return runErr
 	}
 	if !args.backgroundWorker {
-		fmt.Fprintf(r.stdout, "Backfill complete: uploaded=%d skipped=%d failed=%d\n", status.Uploaded, status.Skipped, status.Failed)
+		_, _ = fmt.Fprintf(r.stdout, "Backfill complete: uploaded=%d skipped=%d failed=%d\n", status.Uploaded, status.Skipped, status.Failed)
 	}
 	return nil
 }
@@ -270,7 +270,7 @@ func (r runner) runBackfillStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	status, err := store.ReadStatus(backfill.Scope(r.configFile(), agent, provider))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -320,12 +320,12 @@ func (r runner) startBackgroundBackfill(agent, provider string, cutoff time.Time
 	if err != nil {
 		return err
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
-	defer devNull.Close()
+	defer func() { _ = devNull.Close() }()
 	command.Stdin = devNull
 	command.Stdout = logFile
 	command.Stderr = logFile
@@ -344,12 +344,12 @@ func (r runner) startBackgroundBackfill(agent, provider string, cutoff time.Time
 				_ = command.Process.Release()
 				if result.Error != "" {
 					if strings.Contains(result.Error, backfill.ErrAlreadyRunning.Error()) {
-						fmt.Fprintf(r.stdout, "Backfill already running for agent=%s provider=%s\n", agent, provider)
+						_, _ = fmt.Fprintf(r.stdout, "Backfill already running for agent=%s provider=%s\n", agent, provider)
 						return nil
 					}
 					return errors.New(result.Error)
 				}
-				fmt.Fprintf(r.stdout, "Background backfill started: run=%s agent=%s provider=%s\n", result.RunID, agent, provider)
+				_, _ = fmt.Fprintf(r.stdout, "Background backfill started: run=%s agent=%s provider=%s\n", result.RunID, agent, provider)
 				return nil
 			}
 		}
@@ -462,7 +462,7 @@ func writeBackfillStatus(writer io.Writer, status backfill.Status, progress bool
 	if progress {
 		prefix = "Backfill progress"
 	}
-	fmt.Fprintf(writer, "%s: state=%s %.1f%% files=%d/%d uploaded=%d skipped=%d failed=%d speed=%.2f items/s ETA=%s\n",
+	_, _ = fmt.Fprintf(writer, "%s: state=%s %.1f%% files=%d/%d uploaded=%d skipped=%d failed=%d speed=%.2f items/s ETA=%s\n",
 		prefix, status.State, percent, status.ProcessedFiles, status.TotalFiles, status.Uploaded, status.Skipped, status.Failed, status.ItemsPerSecond, eta)
 }
 

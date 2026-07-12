@@ -128,7 +128,7 @@ func (r runner) runRemember(args []string) error {
 		return writeJSON(r.stdout, result)
 	}
 	for _, ref := range result.Refs {
-		fmt.Fprintf(r.stdout, "stored memory: %s/%s\n", ref.Provider, ref.ID)
+		_, _ = fmt.Fprintf(r.stdout, "stored memory: %s/%s\n", ref.Provider, ref.ID)
 	}
 	return nil
 }

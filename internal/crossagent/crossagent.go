@@ -280,7 +280,7 @@ func runScenario(ctx context.Context, options Options, scenario Scenario, report
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(producerDir)
+	defer func() { _ = os.RemoveAll(producerDir) }()
 	if err := prepareWorkspace(ctx, scenario, producerDir); err != nil {
 		return err
 	}
@@ -408,7 +408,7 @@ func runAgent(ctx context.Context, options Options, dir, logPath string, deniedP
 	if err != nil {
 		return "", 0, err
 	}
-	defer os.RemoveAll(runtimeDir)
+	defer func() { _ = os.RemoveAll(runtimeDir) }()
 	binary, agentEnv, err := prepareAgentRuntime(binary, runtimeDir, deniedPaths)
 	if err != nil {
 		return "", 0, err
@@ -421,7 +421,7 @@ func runAgent(ctx context.Context, options Options, dir, logPath string, deniedP
 		if err := os.MkdirAll(scratchPath, 0o700); err != nil {
 			return "", 0, err
 		}
-		defer os.RemoveAll(scratchPath)
+		defer func() { _ = os.RemoveAll(scratchPath) }()
 		deniedPaths = append(deniedPaths, otherClaudeScratchPaths(scratchPath)...)
 		writablePaths = append(writablePaths, scratchPath)
 		writableLiterals = append(writableLiterals, filepath.Dir(scratchPath))
@@ -670,7 +670,7 @@ func copyFileIfExists(source, target string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	output, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err

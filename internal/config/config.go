@@ -533,7 +533,7 @@ func Load(path string) (Config, error) {
 			legacyPath := legacyJSONPath(path)
 			if legacyPath != path {
 				if legacyFile, legacyErr := os.Open(legacyPath); legacyErr == nil {
-					defer legacyFile.Close()
+					defer func() { _ = legacyFile.Close() }()
 					var cfg Config
 					if decodeErr := decodeConfig(legacyFile, legacyPath, &cfg); decodeErr != nil {
 						return Config{}, decodeErr
@@ -548,7 +548,7 @@ func Load(path string) (Config, error) {
 		}
 		return Config{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var cfg Config
 	if err := decodeConfig(file, path, &cfg); err != nil {
@@ -575,7 +575,7 @@ func Save(path string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	return encodeConfig(file, path, Normalize(cfg))
 }
@@ -946,7 +946,7 @@ func encodeConfig(file *os.File, path string, cfg Config) error {
 	}
 	encoder := yaml.NewEncoder(file)
 	encoder.SetIndent(2)
-	defer encoder.Close()
+	defer func() { _ = encoder.Close() }()
 	return encoder.Encode(cfg)
 }
 
