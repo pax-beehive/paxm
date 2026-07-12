@@ -88,8 +88,10 @@ func PrepareProviderScope(cfg config.Config, providerName string, opts ScopeOpti
 		provider.GraphID = remoteScope
 		provider.SearchScope = "episodes"
 	case "memos":
-		// The manifest records each concrete memory id; the self-hosted adapter
-		// deletes those ids from its configured cube during cleanup.
+		if !opts.KeepMemory {
+			return nil, errors.New("memos may create multiple memories per write and does not expose reliable eval cleanup; rerun with --keep-memory only if intentional")
+		}
+		provider.UserID = remoteScope
 	case "memos-cloud":
 		if !opts.KeepMemory {
 			return nil, errors.New("memos cloud OpenMem API does not expose reliable eval cleanup; rerun with --keep-memory only if intentional")
@@ -159,6 +161,7 @@ func RestoreProviderScope(cfg config.Config, manifestPath string) (*ProviderScop
 		provider.UserID = ""
 		provider.GraphID = manifest.RemoteScope
 	case "memos":
+		provider.UserID = manifest.RemoteScope
 	case "memos-cloud":
 		provider.UserID = manifest.RemoteScope
 	case "jsonrpc":

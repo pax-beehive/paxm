@@ -188,6 +188,28 @@ func TestRegistryAllowsMultipleInstancesOfOneProviderType(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryBuildsMemOSProviderTypes(t *testing.T) {
+	registry := DefaultRegistry()
+	tests := []struct {
+		name string
+		cfg  config.ProviderConfig
+	}{
+		{"local", config.ProviderConfig{Type: "memos", BaseURL: "http://memos.test", UserID: "u", MemCubeID: "c"}},
+		{"cloud", config.ProviderConfig{Type: "memos-cloud", BaseURL: "https://memos.test", APIKey: "key", UserID: "u"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			provider, err := registry.BuildProvider(test.name, test.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if provider.Name() != test.name {
+				t.Fatalf("name = %q", provider.Name())
+			}
+		})
+	}
+}
+
 type captureProvider struct {
 	name string
 }

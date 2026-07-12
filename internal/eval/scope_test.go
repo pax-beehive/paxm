@@ -119,6 +119,33 @@ func TestPrepareProviderScopeRejectsJSONRPCWithoutCleanup(t *testing.T) {
 	}
 }
 
+func TestPrepareProviderScopeRequiresKeepMemoryForMemOS(t *testing.T) {
+	for _, providerType := range []string{"memos", "memos-cloud"} {
+		t.Run(providerType, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := config.DefaultConfig(filepath.Join(dir, "config.yaml"))
+			cfg.Providers["mos"] = config.ProviderConfig{Type: providerType, Enabled: true, UserID: "real-user"}
+			if _, err := PrepareProviderScope(cfg, "mos", ScopeOptions{RunID: "unsafe", ManifestDir: dir}); err == nil {
+				t.Fatal("expected cleanup safety rejection")
+			}
+			scope, err := PrepareProviderScope(cfg, "mos", ScopeOptions{RunID: "kept", ManifestDir: dir, KeepMemory: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := scope.Config.Providers["mos"].UserID; got != "paxm-eval-kept" {
+				t.Fatalf("isolated user_id = %q", got)
+			}
+			restored, err := RestoreProviderScope(cfg, scope.ManifestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := restored.Config.Providers["mos"].UserID; got != "paxm-eval-kept" {
+				t.Fatalf("restored user_id = %q", got)
+			}
+		})
+	}
+}
+
 func TestPrepareProviderScopeRejectsDuplicateRunID(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.DefaultConfig(filepath.Join(dir, "config.yaml"))

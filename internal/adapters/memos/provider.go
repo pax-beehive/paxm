@@ -42,8 +42,30 @@ func NewSelfHosted(name string, cfg config.ProviderConfig) (*Provider, error) {
 	return newProvider(name, cfg, selfHosted, &http.Client{Timeout: defaultTimeout}, randomID)
 }
 
-func NewCloud(name string, cfg config.ProviderConfig) (*Provider, error) {
-	return newProvider(name, cfg, cloud, &http.Client{Timeout: defaultTimeout}, randomID)
+type CloudProvider struct{ provider *Provider }
+
+func NewCloud(name string, cfg config.ProviderConfig) (*CloudProvider, error) {
+	provider, err := newProvider(name, cfg, cloud, &http.Client{Timeout: defaultTimeout}, randomID)
+	if err != nil {
+		return nil, err
+	}
+	return &CloudProvider{provider: provider}, nil
+}
+
+func (p *CloudProvider) Name() string { return p.provider.Name() }
+
+func (p *CloudProvider) Health(ctx context.Context) error { return p.provider.Health(ctx) }
+
+func (p *CloudProvider) Search(ctx context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
+	return p.provider.Search(ctx, query)
+}
+
+func (p *CloudProvider) Put(ctx context.Context, item memory.MemoryItem) (memory.MemoryRef, error) {
+	return p.provider.Put(ctx, item)
+}
+
+func (p *CloudProvider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]memory.MemoryRef, error) {
+	return p.provider.PutBatch(ctx, items)
 }
 
 func newProvider(name string, cfg config.ProviderConfig, kind dialect, client httpDoer, newID func() string) (*Provider, error) {
@@ -132,7 +154,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 func (p *Provider) cloudSearchRequest(query string, limit int) map[string]any {
 	request := map[string]any{"user_id": p.userID, "query": query, "memory_limit_number": limit, "include_preference": false, "include_tool_memory": false}
 	if p.agentID != "" {
-		request["agent_id"] = p.agentID
+		request["filter"] = map[string]any{"agent_id": p.agentID}
 	}
 	return request
 }
@@ -197,7 +219,8 @@ func (p *Provider) Delete(ctx context.Context, ref memory.MemoryRef) error {
 		return fmt.Errorf("memos delete ref belongs to provider %q", ref.Provider)
 	}
 	payload := map[string]any{"writable_cube_ids": []string{p.cubeID}, "memory_ids": []string{id}, "user_id": p.userID}
-	return p.doJSON(ctx, http.MethodPost, "/product/delete_memory", payload, nil)
+	var out any
+	return p.doJSON(ctx, http.MethodPost, "/product/delete_memory", payload, &out)
 }
 
 func (p *Provider) doJSON(ctx context.Context, method, path string, payload, out any) error {
@@ -235,6 +258,24 @@ func (p *Provider) doJSON(ctx context.Context, method, path string, payload, out
 	decoder.UseNumber()
 	if err := decoder.Decode(out); err != nil {
 		return fmt.Errorf("decode memos response: %w", err)
+	}
+	return validateEnvelope(out)
+}
+
+func validateEnvelope(decoded any) error {
+	if pointer, ok := decoded.(*any); ok {
+		decoded = *pointer
+	}
+	root, ok := decoded.(map[string]any)
+	if !ok {
+		return nil
+	}
+	if code, exists := firstNumber(root, "code"); exists && code != 0 && code != 200 {
+		return fmt.Errorf("memos API error code %v: %s", code, firstString(root, "message", "error"))
+	}
+	data, _ := root["data"].(map[string]any)
+	if strings.EqualFold(firstString(data, "status"), "failure") {
+		return fmt.Errorf("memos API operation failed: %s", firstString(root, "message", "error"))
 	}
 	return nil
 }

@@ -42,6 +42,26 @@ func TestSelfHostedContract(t *testing.T) {
 	contracttest.Run(t, provider, contracttest.Expectation{Name: "memos-test", Item: memory.MemoryItem{Text: "contract memory"}, Query: memory.SearchQuery{Text: "contract"}, RefID: "write-1", HitID: "hit-1", HitText: "contract memory"})
 }
 
+func TestCloudContract(t *testing.T) {
+	client := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/search/memory":
+			return jsonResponse(`{"code":200,"data":{"memory_detail_list":[{"memory_id":"hit-1","memory_value":"cloud memory","relativity":0.7}]}}`), nil
+		case "/add/message":
+			return jsonResponse(`{"code":200,"data":{"message_id":"receipt-1"}}`), nil
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+			return nil, nil
+		}
+	})
+	core, err := newProvider("cloud-test", config.ProviderConfig{BaseURL: "https://memos.test", APIKey: "key", UserID: "u"}, cloud, client, func() string { return "generated" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &CloudProvider{provider: core}
+	contracttest.Run(t, provider, contracttest.Expectation{Name: "cloud-test", Item: memory.MemoryItem{Text: "cloud memory"}, Query: memory.SearchQuery{Text: "cloud"}, RefID: "receipt-1", HitID: "hit-1", HitText: "cloud memory"})
+}
+
 func TestSelfHostedSearchMapsRequestAndResponse(t *testing.T) {
 	client := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path != "/product/search" || request.Header.Get("Authorization") != "Bearer secret" {
@@ -86,7 +106,8 @@ func TestCloudUsesTokenAuthAndOpenMemShapes(t *testing.T) {
 		}
 		switch request.URL.Path {
 		case "/api/openmem/v1/search/memory":
-			if body["user_id"] != "u1" || body["agent_id"] != "opencode" || body["memory_limit_number"] != float64(2) {
+			filter, _ := body["filter"].(map[string]any)
+			if body["user_id"] != "u1" || filter["agent_id"] != "opencode" || body["memory_limit_number"] != float64(2) {
 				t.Fatalf("unexpected search: %#v", body)
 			}
 			return jsonResponse(`{"data":{"memory_detail_list":[{"memory_id":"m2","memory_value":"uses Go","relativity":0.91,"update_time":"2026-07-12 10:30:00"}]}}`), nil
@@ -147,6 +168,32 @@ func TestSelfHostedPutAndDelete(t *testing.T) {
 	}
 }
 
+func TestDeleteRejectsBusinessFailure(t *testing.T) {
+	client := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{"code":200,"message":"not deleted","data":{"status":"failure"}}`), nil
+	})
+	provider, err := newProvider("local", config.ProviderConfig{BaseURL: "http://memos.test", UserID: "u", MemCubeID: "c"}, selfHosted, client, func() string { return "id" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.Delete(context.Background(), memory.MemoryRef{Provider: "local", ID: "m1"}); err == nil {
+		t.Fatal("expected business failure")
+	}
+}
+
+func TestSearchRejectsAPIErrorCode(t *testing.T) {
+	client := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{"code":500,"message":"backend unavailable"}`), nil
+	})
+	provider, err := newProvider("local", config.ProviderConfig{BaseURL: "http://memos.test", UserID: "u", MemCubeID: "c"}, selfHosted, client, func() string { return "id" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Search(context.Background(), memory.SearchQuery{Text: "query"}); err == nil {
+		t.Fatal("expected API envelope error")
+	}
+}
+
 func TestProviderValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -166,5 +213,15 @@ func TestProviderValidation(t *testing.T) {
 				t.Fatalf("error=%v want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestCloudDoesNotAdvertiseDelete(t *testing.T) {
+	provider, err := NewCloud("cloud", config.ProviderConfig{BaseURL: "https://memos.test", APIKey: "key", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := any(provider).(memory.DeleteProvider); ok {
+		t.Fatal("memos cloud must not advertise unreliable delete support")
 	}
 }

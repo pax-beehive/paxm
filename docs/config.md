@@ -398,7 +398,10 @@ their writes can be removed.
 MemOS self-hosted uses the product REST server (normally
 `http://localhost:8000`) and requires both `user_id` and `mem_cube_id`. The
 optional key is sent as a Bearer token. `search_mode` defaults to `fast`; use
-`fine` or `mixture` only when the deployment supports their extra work.
+`fine` or `mixture` only when the deployment supports their extra work. A
+single write may extract several memories while the shared provider contract
+returns one ref, so eval runs require explicit `--keep-memory` rather than
+claiming incomplete cleanup.
 
 MemOS Cloud is deliberately a separate `memos-cloud` dialect. It defaults to
 the OpenMem endpoint `https://memos.memtensor.cn/api/openmem/v1`, requires an
