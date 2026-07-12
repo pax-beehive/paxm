@@ -1569,6 +1569,9 @@ func upsertRecallRouteInProfile(cfg *config.Config, profileName, provider string
 			if profile.Providers[i].Name == provider && profile.Providers[i].Timeout == "" {
 				profile.Providers[i].Timeout = config.DefaultProviderRecallTimeout(cfg.Providers[provider].Type)
 			}
+			if profile.Providers[i].Name == provider && cfg.Providers[provider].Type == "mem0-cloud" && profile.Providers[i].Thresholds == nil {
+				profile.Providers[i].Thresholds = &config.RecallThresholdConfig{MinRelevance: 0.20, MinScore: 0.20}
+			}
 		}
 	}
 	cfg.RecallProfiles[profileName] = profile

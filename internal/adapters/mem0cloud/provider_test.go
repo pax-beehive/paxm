@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/pax-beehive/paxm/internal/adapters/contracttest"
 	"github.com/pax-beehive/paxm/internal/config"
@@ -116,5 +117,37 @@ func TestCloudEventFailure(t *testing.T) {
 	}
 	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: "hello"}); err == nil {
 		t.Fatal("expected event failure")
+	}
+}
+
+func TestCloudPutRetriesWriteLookupAfterEventSuccess(t *testing.T) {
+	t.Parallel()
+	lookups := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v3/memories/add/":
+			_, _ = w.Write([]byte(`{"status":"PENDING","event_id":"evt-1"}`))
+		case "/v1/event/evt-1/":
+			_, _ = w.Write([]byte(`{"status":"SUCCEEDED"}`))
+		case "/v3/memories/":
+			lookups++
+			if lookups < 3 {
+				_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"mem-1","memory":"hello","metadata":{"paxm_write_id":"write"}}]}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	provider, err := newWithClient("cloud", config.ProviderConfig{BaseURL: server.URL, APIKey: "key", UserID: "user"}, server.Client(), func() string { return "write" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.lookupDelay = func(int) time.Duration { return 0 }
+	ref, err := provider.Put(context.Background(), memory.MemoryItem{Text: "hello"})
+	if err != nil || ref.ID != "mem-1" || lookups != 3 {
+		t.Fatalf("ref = %#v, lookups = %d, err = %v", ref, lookups, err)
 	}
 }

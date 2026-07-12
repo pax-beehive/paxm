@@ -1330,11 +1330,17 @@ func TestCLISetupInteractiveMem0CloudProvider(t *testing.T) {
 	if !cloud.Enabled || cloud.Type != "mem0-cloud" || cloud.APIKey != "cloud-key" || cloud.BaseURL != config.DefaultMem0CloudBaseURL() || cloud.UserID != "toddzheng" {
 		t.Fatalf("unexpected mem0 cloud config: %#v", cloud)
 	}
+	if cloud.Infer == nil || *cloud.Infer {
+		t.Fatalf("mem0 cloud infer = %#v, want false", cloud.Infer)
+	}
 	for _, profileName := range []string{"passive", "passive_initial"} {
 		profile := cfg.RecallProfiles[profileName]
 		for _, route := range profile.Providers {
 			if route.Name == "mem0_cloud" && route.Timeout != "800ms" {
 				t.Fatalf("%s mem0 cloud timeout = %q, want 800ms", profileName, route.Timeout)
+			}
+			if route.Name == "mem0_cloud" && (route.Thresholds == nil || route.Thresholds.MinRelevance != 0.20 || route.Thresholds.MinScore != 0.20) {
+				t.Fatalf("%s mem0 cloud thresholds = %#v", profileName, route.Thresholds)
 			}
 		}
 	}

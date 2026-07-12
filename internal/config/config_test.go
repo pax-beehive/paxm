@@ -192,8 +192,15 @@ func TestNormalizeMigratesLegacyPassiveTimeoutDefaults(t *testing.T) {
 		}}},
 	}
 	normalized := Normalize(cfg)
-	if got := normalized.RecallProfiles["passive"].Providers[0].Timeout; got != "800ms" {
+	route := normalized.RecallProfiles["passive"].Providers[0]
+	if got := route.Timeout; got != "800ms" {
 		t.Fatalf("cloud route timeout = %q", got)
+	}
+	if route.Thresholds == nil || route.Thresholds.MinRelevance != 0.20 || route.Thresholds.MinScore != 0.20 {
+		t.Fatalf("cloud route thresholds = %#v", route.Thresholds)
+	}
+	if infer := normalized.Providers["cloud"].Infer; infer == nil || *infer {
+		t.Fatalf("cloud infer = %#v, want false", infer)
 	}
 	recall := normalized.Agents["opencode"].Hooks["user_input"].Recall
 	if recall.Timeout != "" || recall.TimeoutExtra != "100ms" {

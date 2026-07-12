@@ -40,6 +40,7 @@ const (
 	defaultPassiveRecallTimeoutExtra = "100ms"
 	defaultProviderRecallTimeout     = "250ms"
 	defaultCloudRecallTimeout        = "800ms"
+	defaultCloudRecallThreshold      = 0.20
 	defaultProviderWriteTimeout      = "30s"
 	defaultHookInsertionMinScore     = 0.8
 	defaultHookInsertionMaxItems     = passiveRecallMaxResults
@@ -291,6 +292,7 @@ func DefaultConfig(configPath string) Config {
 	defaultWriteRoutes := []ProviderRouteConfig{
 		{Name: "sqlite", Required: true, Timeout: defaultProviderWriteTimeout},
 	}
+	inferFalse := false
 	return Config{
 		Version: defaultConfigVersion,
 		Providers: map[string]ProviderConfig{
@@ -313,6 +315,7 @@ func DefaultConfig(configPath string) Config {
 				Type:    "mem0-cloud",
 				Enabled: false,
 				BaseURL: defaultMem0CloudBaseURL,
+				Infer:   &inferFalse,
 			},
 			"jsonrpc": {
 				Type:      "jsonrpc",
@@ -798,13 +801,7 @@ func normalizeProfiles(cfg *Config, renamedLegacyLocal bool) {
 	for name, profile := range cfg.RecallProfiles {
 		profile = normalizeRecallProfile(profile)
 		if name == "passive" || name == "passive_initial" {
-			for i := range profile.Providers {
-				route := &profile.Providers[i]
-				providerType := cfg.Providers[route.Name].Type
-				if route.Timeout == "" || (providerType == "mem0-cloud" && route.Timeout == defaultProviderRecallTimeout) {
-					route.Timeout = DefaultProviderRecallTimeout(providerType)
-				}
-			}
+			profile.Providers = normalizePassiveProviderRoutes(profile.Providers, cfg.Providers)
 		}
 		cfg.RecallProfiles[name] = profile
 	}
@@ -828,6 +825,20 @@ func normalizeProfiles(cfg *Config, renamedLegacyLocal bool) {
 		cfg.WriteProfiles[name] = normalizeWriteProfile(name, profile)
 	}
 	ensureMemoryTierWriteProfiles(cfg)
+}
+
+func normalizePassiveProviderRoutes(routes []ProviderRouteConfig, providers map[string]ProviderConfig) []ProviderRouteConfig {
+	for i := range routes {
+		route := &routes[i]
+		providerType := providers[route.Name].Type
+		if route.Timeout == "" || (providerType == "mem0-cloud" && route.Timeout == defaultProviderRecallTimeout) {
+			route.Timeout = DefaultProviderRecallTimeout(providerType)
+		}
+		if providerType == "mem0-cloud" && route.Thresholds == nil {
+			route.Thresholds = defaultCloudThresholds()
+		}
+	}
+	return routes
 }
 
 func normalizeAgents(cfg *Config) {
@@ -913,6 +924,10 @@ func normalizeProviderConfig(provider ProviderConfig) ProviderConfig {
 	}
 	if provider.BaseURL == "" && provider.Type == "mem0-cloud" {
 		provider.BaseURL = defaultMem0CloudBaseURL
+	}
+	if provider.Type == "mem0-cloud" && provider.Infer == nil {
+		infer := false
+		provider.Infer = &infer
 	}
 	if provider.Transport == "" && provider.Type == "jsonrpc" {
 		provider.Transport = defaultJSONRPCTransport
@@ -1058,6 +1073,10 @@ func DefaultProviderRecallTimeout(providerType string) string {
 		return defaultCloudRecallTimeout
 	}
 	return defaultProviderRecallTimeout
+}
+
+func defaultCloudThresholds() *RecallThresholdConfig {
+	return &RecallThresholdConfig{MinRelevance: defaultCloudRecallThreshold, MinScore: defaultCloudRecallThreshold}
 }
 
 func DefaultSTMExpiresAfter() string {

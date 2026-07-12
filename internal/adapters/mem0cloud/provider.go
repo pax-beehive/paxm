@@ -23,6 +23,7 @@ const (
 	defaultBaseURL    = "https://api.mem0.ai"
 	defaultTimeout    = 2 * time.Minute
 	eventPollInterval = 250 * time.Millisecond
+	writeLookupTries  = 6
 )
 
 type httpDoer interface {
@@ -34,6 +35,7 @@ type Provider struct {
 	infer                                         *bool
 	client                                        httpDoer
 	writeID                                       func() string
+	lookupDelay                                   func(int) time.Duration
 }
 
 type message struct {
@@ -105,7 +107,7 @@ func newWithClient(name string, cfg config.ProviderConfig, client httpDoer, writ
 	if client == nil || writeID == nil {
 		return nil, errors.New("mem0 cloud http dependencies are required")
 	}
-	return &Provider{name: name, baseURL: baseURL, apiKey: apiKey, userID: userID, agentID: agentID, runID: runID, infer: cfg.Infer, client: client, writeID: writeID}, nil
+	return &Provider{name: name, baseURL: baseURL, apiKey: apiKey, userID: userID, agentID: agentID, runID: runID, infer: cfg.Infer, client: client, writeID: writeID, lookupDelay: writeLookupDelay}, nil
 }
 
 func (p *Provider) Name() string { return p.name }
@@ -199,21 +201,66 @@ func (p *Provider) putOne(ctx context.Context, item memory.MemoryItem) ([]memory
 	if err := p.waitEvent(ctx, event.EventID); err != nil {
 		return nil, err
 	}
-	var listed listResponse
-	filters := p.scopeFilters(map[string]string{"paxm_write_id": writeID})
-	if err := p.doJSON(ctx, http.MethodPost, "/v3/memories/?page=1&page_size=100", listRequest{Filters: filters}, &listed); err != nil {
+	refs, err := p.lookupWriteRefs(ctx, writeID)
+	if err != nil {
 		return nil, err
-	}
-	refs := make([]memory.MemoryRef, 0, len(listed.Results))
-	for _, item := range listed.Results {
-		if item.ID != "" && fmt.Sprint(item.Metadata["paxm_write_id"]) == writeID {
-			refs = append(refs, memory.MemoryRef{Provider: p.name, ID: item.ID})
-		}
 	}
 	if len(refs) == 0 {
 		return nil, errors.New("mem0 cloud event succeeded but created memories were not found")
 	}
 	return refs, nil
+}
+
+func (p *Provider) lookupWriteRefs(ctx context.Context, writeID string) ([]memory.MemoryRef, error) {
+	filters := p.scopeFilters(map[string]string{"paxm_write_id": writeID})
+	for attempt := 0; attempt < writeLookupTries; attempt++ {
+		var listed listResponse
+		if err := p.doJSON(ctx, http.MethodPost, "/v3/memories/?page=1&page_size=100", listRequest{Filters: filters}, &listed); err != nil {
+			return nil, err
+		}
+		refs := refsForWrite(p.name, writeID, listed.Results)
+		if len(refs) > 0 {
+			return refs, nil
+		}
+		if attempt+1 < writeLookupTries {
+			if err := waitContext(ctx, p.lookupDelay(attempt)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return nil, nil
+}
+
+func refsForWrite(provider, writeID string, results []result) []memory.MemoryRef {
+	refs := make([]memory.MemoryRef, 0, len(results))
+	for _, item := range results {
+		if item.ID != "" && fmt.Sprint(item.Metadata["paxm_write_id"]) == writeID {
+			refs = append(refs, memory.MemoryRef{Provider: provider, ID: item.ID})
+		}
+	}
+	return refs
+}
+
+func waitContext(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func writeLookupDelay(attempt int) time.Duration {
+	delay := 100 * time.Millisecond << attempt
+	if delay > 2*time.Second {
+		return 2 * time.Second
+	}
+	return delay
 }
 
 func (p *Provider) waitEvent(ctx context.Context, eventID string) error {

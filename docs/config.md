@@ -40,6 +40,7 @@ providers:
     base_url: https://api.mem0.ai
     api_key: "plain-text-mem0-cloud-api-key"
     user_id: todd
+    infer: false
 
   jsonrpc:
     type: jsonrpc
@@ -368,8 +369,13 @@ deployments that intentionally run with auth disabled.
 Mem0 Cloud uses the separate `mem0-cloud` type. It defaults to
 `https://api.mem0.ai`, requires `api_key`, authenticates with `Authorization:
 Token`, and encapsulates the platform's asynchronous v3 add and search APIs.
-It uses the same scope and `infer` fields as the self-hosted adapter. Eval runs
-force `infer: false` and add an isolated `run_id` so their writes can be removed.
+It uses the same scope and `infer` fields as the self-hosted adapter, but defaults
+`infer` to `false` so agent episodes are stored verbatim with predictable write
+latency and lexical recall. Explicit `infer: true` enables platform extraction
+and may require a write-route timeout above the default `30s`. After a successful
+asynchronous event, paxm retries the metadata lookup briefly to tolerate delayed
+read visibility. Eval runs force `infer: false` and add an isolated `run_id` so
+their writes can be removed.
 
 JSON-RPC providers are custom plugin commands. Paxm invokes the command over
 stdio with one JSON-RPC 2.0 request per provider operation. The command should
@@ -454,8 +460,8 @@ recall_profiles:
         weight: 1
         timeout: 800ms
         thresholds:
-          min_relevance: 0.45
-          min_score: 0.45
+          min_relevance: 0.20
+          min_score: 0.20
     thresholds:
       min_relevance: 0.75
       min_score: 0.75
