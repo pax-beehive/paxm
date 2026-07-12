@@ -2,7 +2,9 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,65 @@ func (operatorStub) RememberBatchToProvider(_ context.Context, provider string, 
 }
 func (operatorStub) CleanupExpired(context.Context, int) (memory.CleanupExpiredResult, error) {
 	return memory.CleanupExpiredResult{}, nil
+}
+
+type operatorNoRefStub struct {
+	err error
+}
+
+func (operatorNoRefStub) RememberBatchToProvider(context.Context, string, tools.RememberBatchInput) (tools.RememberResult, error) {
+	return tools.RememberResult{}, nil
+}
+func (operatorNoRefStub) CleanupExpired(context.Context, int) (memory.CleanupExpiredResult, error) {
+	return memory.CleanupExpiredResult{}, nil
+}
+
+func TestOpenRejectsInvalidConfiguration(t *testing.T) {
+	if _, err := Open(OpenOptions{}); err == nil || !strings.Contains(err.Error(), "capture policy is required") {
+		t.Fatalf("err=%v", err)
+	}
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	if _, err := Open(OpenOptions{Config: cfg, Policy: policyStub{}}); err == nil || !strings.Contains(err.Error(), "capture operator is required") {
+		t.Fatalf("err=%v", err)
+	}
+	cfg.CaptureQueue.MaxEpisodeAge = "not-a-duration"
+	if _, err := Open(OpenOptions{Config: cfg, QueuePath: filepath.Join(t.TempDir(), "queue.sqlite"), Policy: policyStub{}, Operator: operatorStub{}}); err == nil {
+		t.Fatal("expected invalid duration error")
+	}
+}
+
+func TestDeliveryFuncReportsProviderErrors(t *testing.T) {
+	deliver := deliveryFunc(operatorNoRefStub{})
+	_, err := deliver(context.Background(), "sqlite", capturequeue.Episode{})
+	if err == nil || !strings.Contains(err.Error(), "returned no memory reference") {
+		t.Fatalf("err=%v", err)
+	}
+	var providerErr = errors.New("provider unavailable")
+	_, err = deliveryFunc(operatorNoRefErrorStub{err: providerErr})(context.Background(), "sqlite", capturequeue.Episode{})
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+type operatorNoRefErrorStub struct{ err error }
+
+func (s operatorNoRefErrorStub) RememberBatchToProvider(context.Context, string, tools.RememberBatchInput) (tools.RememberResult, error) {
+	return tools.RememberResult{}, s.err
+}
+func (operatorNoRefErrorStub) CleanupExpired(context.Context, int) (memory.CleanupExpiredResult, error) {
+	return memory.CleanupExpiredResult{}, nil
+}
+
+func TestWorkerErrorReporterAndTruncateError(t *testing.T) {
+	var recorded telemetry.Event
+	workerErrorReporter(func(event telemetry.Event) { recorded = event })("worker_error", errors.New(strings.Repeat("x", 300)))
+	if recorded.HookEvent != "worker_error" || len(recorded.Error) != 240 || recorded.Success {
+		t.Fatalf("event=%#v", recorded)
+	}
+	workerErrorReporter(nil)("ignored", errors.New("ignored"))
+	if truncateError(nil) != "" || truncateError(errors.New("short")) != "short" {
+		t.Fatalf("unexpected truncation")
+	}
 }
 
 func TestOpenOwnsDeliveryAndTelemetryWorkflow(t *testing.T) {
