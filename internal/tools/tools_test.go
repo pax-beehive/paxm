@@ -2,11 +2,25 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
 )
+
+type blockingProvider struct{ release chan struct{} }
+
+func (*blockingProvider) Name() string { return "blocked" }
+func (*blockingProvider) Search(context.Context, memory.SearchQuery) ([]memory.MemoryHit, error) {
+	return nil, nil
+}
+func (p *blockingProvider) Put(context.Context, memory.MemoryItem) (memory.MemoryRef, error) {
+	<-p.release
+	return memory.MemoryRef{ID: "late"}, nil
+}
+func (*blockingProvider) Health(context.Context) error { return nil }
 
 type providerStub struct{ item memory.MemoryItem }
 
@@ -64,5 +78,27 @@ func TestEngineValidationSurfacesDoNotRequireRouter(t *testing.T) {
 	}
 	if _, err := engine.PutPolicy("missing"); err == nil {
 		t.Fatal("missing write profile was accepted")
+	}
+}
+
+func TestRememberBatchToProviderKeepsWriteProfileTimeout(t *testing.T) {
+	provider := &blockingProvider{release: make(chan struct{})}
+	defer close(provider.release)
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig("config.yaml")
+	cfg.WriteProfiles["default"] = config.WriteProfileConfig{
+		Tier: "ltm", Providers: []config.ProviderRouteConfig{{Name: "blocked", Required: true, Timeout: "20ms"}},
+	}
+	engine := New(cfg, router)
+	started := time.Now()
+	_, err = engine.RememberBatchToProvider(context.Background(), "blocked", RememberBatchInput{Items: []RememberInput{{Text: "bounded write"}}})
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RememberBatchToProvider() error = %v, want deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		t.Fatalf("RememberBatchToProvider() returned after %s", elapsed)
 	}
 }

@@ -92,6 +92,33 @@ func (p *blockingSearchProvider) Put(context.Context, MemoryItem) (MemoryRef, er
 }
 func (p *blockingSearchProvider) Health(context.Context) error { return nil }
 
+type blockingWriteProvider struct {
+	calls   chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingWriteProvider) Name() string { return "blocked" }
+func (p *blockingWriteProvider) Search(context.Context, SearchQuery) ([]MemoryHit, error) {
+	return nil, nil
+}
+func (p *blockingWriteProvider) Put(context.Context, MemoryItem) (MemoryRef, error) {
+	p.calls <- struct{}{}
+	<-p.release
+	return MemoryRef{ID: "late"}, nil
+}
+func (p *blockingWriteProvider) Health(context.Context) error { return nil }
+
+type closeProvider struct {
+	fakeProvider
+	closed bool
+	err    error
+}
+
+func (p *closeProvider) Close() error {
+	p.closed = true
+	return p.err
+}
+
 func (p *cleanupProvider) CleanupExpired(_ context.Context, limit int) (int, error) {
 	p.limits = append(p.limits, limit)
 	if p.err != nil {
@@ -128,6 +155,29 @@ func TestRouterSearchFansOutAndDedupes(t *testing.T) {
 	}
 	if result.Hits[0].Provider != "b" || result.Hits[0].ID != "2" {
 		t.Fatalf("dedupe did not keep the highest-scoring hit: %#v", result.Hits[0])
+	}
+}
+
+func TestRouterClosesProviderResources(t *testing.T) {
+	provider := &closeProvider{fakeProvider: fakeProvider{name: "sqlite"}}
+	router, err := NewRouter([]ProviderBinding{{Provider: provider}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !provider.closed {
+		t.Fatal("provider was not closed")
+	}
+
+	failed := &closeProvider{fakeProvider: fakeProvider{name: "failed"}, err: errors.New("close failed")}
+	router, err = NewRouter([]ProviderBinding{{Provider: failed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.Close(); err == nil || !strings.Contains(err.Error(), "failed: close failed") {
+		t.Fatalf("Close() error = %v", err)
 	}
 }
 
@@ -518,6 +568,51 @@ func TestRouterPutBatchUsesProviderBatchAPI(t *testing.T) {
 	}
 	if len(result.Refs) != 2 || result.Refs[0].Provider != "writer" || result.Refs[1].Provider != "writer" {
 		t.Fatalf("unexpected batch refs: %#v", result.Refs)
+	}
+}
+
+func TestRouterPutTimeoutDoesNotWaitForStuckOptionalProvider(t *testing.T) {
+	provider := &blockingWriteProvider{calls: make(chan struct{}, 2), release: make(chan struct{})}
+	defer close(provider.release)
+	router, err := NewRouter([]ProviderBinding{{Provider: provider, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := PutPolicy{Providers: []ProviderRoute{{Name: "blocked", Timeout: 20 * time.Millisecond}}}
+
+	started := time.Now()
+	result, err := router.PutWithPolicy(context.Background(), MemoryItem{Text: "memory"}, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		t.Fatalf("optional provider blocked write for %s", elapsed)
+	}
+	if len(result.ProviderErrors) != 1 || !strings.Contains(result.ProviderErrors[0].Error, context.DeadlineExceeded.Error()) {
+		t.Fatalf("provider errors = %#v, want timeout", result.ProviderErrors)
+	}
+
+	if _, err := router.PutWithPolicy(context.Background(), MemoryItem{Text: "memory again"}, policy); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(provider.calls); got != 1 {
+		t.Fatalf("stuck provider calls = %d, want 1", got)
+	}
+}
+
+func TestRouterPutTimeoutFailsRequiredProvider(t *testing.T) {
+	provider := &blockingWriteProvider{calls: make(chan struct{}, 1), release: make(chan struct{})}
+	defer close(provider.release)
+	router, err := NewRouter([]ProviderBinding{{Provider: provider, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := router.PutWithPolicy(context.Background(), MemoryItem{Text: "memory"}, PutPolicy{Providers: []ProviderRoute{{Name: "blocked", Required: true, Timeout: 20 * time.Millisecond}}})
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("required provider timeout error = %v", err)
+	}
+	if len(result.ProviderErrors) != 1 || !result.ProviderErrors[0].Required {
+		t.Fatalf("provider errors = %#v", result.ProviderErrors)
 	}
 }
 

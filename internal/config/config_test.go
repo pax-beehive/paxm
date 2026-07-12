@@ -91,6 +91,10 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	if len(passive.Providers) != 1 || passive.Providers[0].Timeout != "250ms" {
 		t.Fatalf("passive providers should have a tight timeout: %#v", passive.Providers)
 	}
+	writeRoutes := cfg.WriteProfiles["default"].Providers
+	if len(writeRoutes) != 1 || writeRoutes[0].Timeout != "30s" {
+		t.Fatalf("write providers should have a bounded timeout: %#v", writeRoutes)
+	}
 	initialProfile := cfg.RecallProfiles["passive_initial"]
 	if initialProfile.MaxResults != 5 || initialProfile.Thresholds.MinRelevance != 0.35 || initialProfile.Thresholds.MinScore != 0.35 {
 		t.Fatalf("unexpected initial passive profile: %#v", initialProfile)

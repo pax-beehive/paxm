@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -22,8 +23,11 @@ import (
 )
 
 type Provider struct {
-	name string
-	path string
+	name   string
+	path   string
+	mu     sync.Mutex
+	db     *sql.DB
+	closed bool
 }
 
 func New(name, path string) (*Provider, error) {
@@ -44,12 +48,10 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	db, err := p.open(ctx)
+	db, err := p.database(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = db.Close() }()
-
 	terms := normalizeTerms(query.Text)
 	if len(terms) == 0 {
 		return p.searchRecent(ctx, db, query)
@@ -75,6 +77,10 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 	if len(items) == 0 {
 		return nil, nil
 	}
+	db, err := p.database(ctx)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	for i := range items {
 		if strings.TrimSpace(items[i].Text) == "" {
@@ -87,12 +93,6 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 			items[i].CreatedAt = now
 		}
 	}
-
-	db, err := p.open(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = db.Close() }()
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -246,22 +246,21 @@ func (p *Provider) Health(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	db, err := p.open(ctx)
+	db, err := p.database(ctx)
 	if err != nil {
 		return err
 	}
-	return db.Close()
+	return db.PingContext(ctx)
 }
 
 func (p *Provider) CleanupExpired(ctx context.Context, limit int) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	db, err := p.open(ctx)
+	db, err := p.database(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = db.Close() }()
 	result, err := db.ExecContext(ctx, `
 	DELETE FROM memories
 	WHERE rowid IN (
@@ -280,6 +279,36 @@ func (p *Provider) CleanupExpired(ctx context.Context, limit int) (int, error) {
 		return 0, err
 	}
 	return int(deleted), nil
+}
+
+func (p *Provider) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.db == nil {
+		p.closed = true
+		return nil
+	}
+	err := p.db.Close()
+	p.db = nil
+	p.closed = true
+	return err
+}
+
+func (p *Provider) database(ctx context.Context) (*sql.DB, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return nil, errors.New("sqlite provider is closed")
+	}
+	if p.db != nil {
+		return p.db, nil
+	}
+	db, err := p.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p.db = db
+	return db, nil
 }
 
 func (p *Provider) open(ctx context.Context) (*sql.DB, error) {

@@ -109,6 +109,11 @@ func (r runner) runInternalHook(args []string) error {
 		return err
 	}
 	var rt *paxruntime.Runtime
+	defer func() {
+		if rt != nil {
+			_ = rt.Close()
+		}
+	}()
 	lazyRecall := capture.RecallFunc(func(ctx context.Context, value capture.Event) (capture.Result, error) {
 		if rt == nil {
 			_, loaded, loadErr := r.loadRuntime()
@@ -172,6 +177,7 @@ func (r runner) runHookDaemon(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Close() }()
 	releaseLock, err := acquireHookDaemonLock(r.configFile())
 	if err != nil {
 		return err

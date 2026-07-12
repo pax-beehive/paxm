@@ -18,6 +18,7 @@ func TestProviderAdapterContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = provider.Close() })
 	contracttest.Run(t, provider, contracttest.Expectation{
 		Name: "sqlite", Item: memory.MemoryItem{Text: "cobalt adapter contract", Source: "contract"},
 		Query: memory.SearchQuery{Text: "cobalt adapter contract", Limit: 3}, RefID: "", HitID: "", HitText: "cobalt adapter contract",
@@ -67,6 +68,22 @@ func TestProviderPutAndSearch(t *testing.T) {
 	}
 	if hit.RawScore == nil || hit.RawScoreKind != "sqlite_fts_bm25_negated" {
 		t.Fatalf("expected sqlite raw score, got %#v", hit)
+	}
+}
+
+func TestProviderCloseEndsItsDatabaseLifecycle(t *testing.T) {
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: "before close"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Search(context.Background(), memory.SearchQuery{Text: "before"}); err == nil {
+		t.Fatal("Search() after Close() succeeded")
 	}
 }
 

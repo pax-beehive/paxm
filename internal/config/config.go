@@ -37,6 +37,7 @@ const (
 	defaultHookRecallMaxResults      = passiveRecallMaxResults
 	defaultPassiveRecallTimeout      = "800ms"
 	defaultProviderRecallTimeout     = "250ms"
+	defaultProviderWriteTimeout      = "30s"
 	defaultHookInsertionMinScore     = 0.8
 	defaultHookInsertionMaxItems     = passiveRecallMaxResults
 	defaultHookBufferFlushCount      = 10
@@ -283,7 +284,7 @@ func DefaultConfig(configPath string) Config {
 		Tiers: []string{"stm", "ltm"},
 	}
 	defaultWriteRoutes := []ProviderRouteConfig{
-		{Name: "sqlite", Required: true},
+		{Name: "sqlite", Required: true, Timeout: defaultProviderWriteTimeout},
 	}
 	return Config{
 		Version: defaultConfigVersion,
@@ -685,6 +686,11 @@ func validateWriteProfiles(profiles map[string]WriteProfileConfig) error {
 	writeNames := sortedKeys(profiles)
 	for _, name := range writeNames {
 		profile := profiles[name]
+		for _, route := range profile.Providers {
+			if err := validatePositiveDuration(route.Timeout); err != nil {
+				return fmt.Errorf("write profile %q provider %q timeout: %w", name, route.Name, err)
+			}
+		}
 		tier := strings.TrimSpace(profile.Tier)
 		if tier != "" {
 			var ok bool
@@ -991,6 +997,9 @@ func normalizeWriteProfile(name string, profile WriteProfileConfig) WriteProfile
 	profile.Tier = normalizeWriteProfileTier(name, profile.Tier)
 	for i, route := range profile.Providers {
 		profile.Providers[i] = normalizeProviderRoute(route)
+		if profile.Providers[i].Timeout == "" {
+			profile.Providers[i].Timeout = defaultProviderWriteTimeout
+		}
 	}
 	return profile
 }

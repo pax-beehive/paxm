@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -20,6 +19,7 @@ type ProviderBinding struct {
 	MinRelevance float64
 	MinScore     float64
 	searchSlot   chan struct{}
+	putSlot      chan struct{}
 }
 
 type SearchResult struct {
@@ -36,6 +36,12 @@ type searchResponse struct {
 	bulkheadBusy bool
 }
 
+type putResponse struct {
+	binding ProviderBinding
+	refs    []MemoryRef
+	err     error
+}
+
 type PutResult struct {
 	Refs           []MemoryRef     `json:"refs"`
 	ProviderErrors []ProviderError `json:"provider_errors,omitempty"`
@@ -44,6 +50,20 @@ type PutResult struct {
 type Router struct {
 	providers []ProviderBinding
 	byName    map[string]ProviderBinding
+}
+
+func (r *Router) Close() error {
+	var errs []error
+	for _, binding := range r.providers {
+		closer, ok := binding.Provider.(CloseProvider)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", binding.Provider.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func NewRouter(providers []ProviderBinding) (*Router, error) {
@@ -61,6 +81,7 @@ func NewRouter(providers []ProviderBinding) (*Router, error) {
 			return nil, fmt.Errorf("memory router provider %q is duplicated", name)
 		}
 		binding.searchSlot = make(chan struct{}, 1)
+		binding.putSlot = make(chan struct{}, 1)
 		byName[name] = binding
 		normalized = append(normalized, binding)
 	}
@@ -289,17 +310,7 @@ func (r *Router) PutWithPolicy(ctx context.Context, item MemoryItem, policy PutP
 }
 
 func (r *Router) PutBatchWithPolicy(ctx context.Context, items []MemoryItem, policy PutPolicy) (PutResult, error) {
-	var writable []ProviderBinding
-	var err error
-	if len(policy.Providers) > 0 {
-		writable, err = r.bindingsForRoutes(policy.Providers, "put")
-	} else {
-		for _, binding := range r.providers {
-			if binding.Write {
-				writable = append(writable, binding)
-			}
-		}
-	}
+	writable, err := r.writableBindings(policy)
 	if err != nil {
 		return PutResult{}, err
 	}
@@ -311,29 +322,63 @@ func (r *Router) PutBatchWithPolicy(ctx context.Context, items []MemoryItem, pol
 	}
 	items = applyPutPolicy(items, policy)
 	items = admitLongTermMemories(items)
+	return collectPutResponses(putProviders(ctx, writable, items))
+}
 
-	type response struct {
-		binding ProviderBinding
-		refs    []MemoryRef
-		err     error
+func (r *Router) writableBindings(policy PutPolicy) ([]ProviderBinding, error) {
+	if len(policy.Providers) > 0 {
+		return r.bindingsForRoutes(policy.Providers, "put")
 	}
+	writable := make([]ProviderBinding, 0, len(r.providers))
+	for _, binding := range r.providers {
+		if binding.Write {
+			writable = append(writable, binding)
+		}
+	}
+	return writable, nil
+}
 
-	responses := make(chan response, len(writable))
-	var wg sync.WaitGroup
+func putProviders(ctx context.Context, writable []ProviderBinding, items []MemoryItem) []putResponse {
+	responses := make(chan putResponse, len(writable))
 	for _, binding := range writable {
-		wg.Add(1)
 		go func(binding ProviderBinding) {
-			defer wg.Done()
-			refs, err := putBatch(ctx, binding.Provider, items)
-			responses <- response{binding: binding, refs: refs, err: err}
+			providerCtx := ctx
+			cancel := func() {}
+			if binding.Timeout > 0 {
+				providerCtx, cancel = context.WithTimeout(ctx, binding.Timeout)
+			}
+			defer cancel()
+			select {
+			case binding.putSlot <- struct{}{}:
+			case <-providerCtx.Done():
+				responses <- putResponse{binding: binding, err: providerCtx.Err()}
+				return
+			}
+			providerResult := make(chan putResponse, 1)
+			go func() {
+				defer func() { <-binding.putSlot }()
+				refs, err := putBatch(providerCtx, binding.Provider, items)
+				providerResult <- putResponse{binding: binding, refs: refs, err: err}
+			}()
+			select {
+			case result := <-providerResult:
+				responses <- result
+			case <-providerCtx.Done():
+				responses <- putResponse{binding: binding, err: providerCtx.Err()}
+			}
 		}(binding)
 	}
-	wg.Wait()
-	close(responses)
+	collected := make([]putResponse, 0, len(writable))
+	for range writable {
+		collected = append(collected, <-responses)
+	}
+	return collected
+}
 
+func collectPutResponses(responses []putResponse) (PutResult, error) {
 	var result PutResult
 	var requiredErrs []error
-	for res := range responses {
+	for _, res := range responses {
 		name := res.binding.Provider.Name()
 		if res.err != nil {
 			providerErr := ProviderError{

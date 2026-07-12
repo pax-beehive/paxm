@@ -247,6 +247,8 @@ event mappings, profile settings, and uninstall behavior.
 - Provider delivery is resumable and retried in the background.
 - Optional provider failures do not discard healthy provider results.
 - A stuck provider is contained by its timeout and single-call bulkhead.
+- Write-provider routes default to a 30-second timeout; optional failures remain
+  isolated while required-provider failures are returned to the caller.
 - Recall provenance is stripped before passive writes to prevent memory echo.
 - Exact LTM consolidation limits duplicate accumulation.
 - Telemetry stores hashes and lengths by default, not raw recall queries.

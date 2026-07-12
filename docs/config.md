@@ -93,17 +93,20 @@ write_profiles:
     providers:
       - name: sqlite
         required: true
+        timeout: 30s
   stm:
     tier: stm
     expires_after: 24h
     providers:
       - name: sqlite
         required: true
+        timeout: 30s
   ltm:
     tier: ltm
     providers:
       - name: sqlite
         required: true
+        timeout: 30s
 
 agents:
   claude:
@@ -413,6 +416,12 @@ Recall timeout fields:
   profiles default to `250ms`, so one slow provider cannot delay healthy hits.
 - A hook recall `timeout` limits the complete passive recall operation. It
   defaults to `800ms` and returns any partial hits collected before the budget.
+
+Write provider routes use the same `timeout` field. Write profiles default to
+`30s`; a timed-out optional provider is reported without delaying healthy
+providers, while a timed-out required provider makes the write fail. A
+single-call bulkhead prevents repeated writes from piling up behind a provider
+that ignores cancellation.
 
 Example provider-specific passive recall thresholds:
 

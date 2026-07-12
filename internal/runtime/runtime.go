@@ -58,3 +58,7 @@ func Load(configPath string) (*Runtime, error) {
 func (r *Runtime) Health(ctx context.Context) ([]memory.ProviderHealth, error) {
 	return r.router.Health(ctx)
 }
+
+func (r *Runtime) Close() error {
+	return r.router.Close()
+}

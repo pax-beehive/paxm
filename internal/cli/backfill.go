@@ -127,6 +127,7 @@ func (r runner) runBackfillRun(args []string) error {
 	if err != nil {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
 	}
+	defer func() { _ = rt.Close() }()
 	providerCfg, ok := cfg.Providers[provider]
 	if !ok || !providerCfg.Enabled {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, fmt.Errorf("provider %q is not enabled", provider))

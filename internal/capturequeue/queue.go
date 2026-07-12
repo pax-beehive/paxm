@@ -513,6 +513,7 @@ func (q *Queue) RunOnce(ctx context.Context) (RunResult, error) {
 		q.mu.Unlock()
 		return RunResult{}, err
 	}
+	touchedEpisodeIDs := deliveryEpisodeIDs(claims)
 	claims, result, err := q.verifyDeliveryClaims(ctx, claims)
 	if err != nil {
 		q.mu.Unlock()
@@ -530,7 +531,20 @@ func (q *Queue) RunOnce(ctx context.Context) (RunResult, error) {
 	if err != nil {
 		return result, err
 	}
-	return result, q.refreshEpisodeStates(ctx)
+	return result, q.refreshEpisodeStates(ctx, touchedEpisodeIDs)
+}
+
+func deliveryEpisodeIDs(claims []deliveryClaim) []string {
+	seen := make(map[string]struct{}, len(claims))
+	ids := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		if _, ok := seen[claim.episodeID]; ok {
+			continue
+		}
+		seen[claim.episodeID] = struct{}{}
+		ids = append(ids, claim.episodeID)
+	}
+	return ids
 }
 
 func (q *Queue) loadDeliveryClaims(ctx context.Context) ([]deliveryClaim, error) {
@@ -755,14 +769,23 @@ func (q *Queue) persistDeliveryOutcome(ctx context.Context, value deliveryResult
 	return result, err
 }
 
-func (q *Queue) refreshEpisodeStates(ctx context.Context) error {
+func (q *Queue) refreshEpisodeStates(ctx context.Context, episodeIDs []string) error {
+	if len(episodeIDs) == 0 {
+		return nil
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	args := make([]any, len(episodeIDs))
+	placeholders := make([]string, len(episodeIDs))
+	for i, id := range episodeIDs {
+		args[i] = id
+		placeholders[i] = "?"
+	}
 	_, err := q.db.ExecContext(ctx, `UPDATE capture_episodes SET state = CASE
   WHEN EXISTS (SELECT 1 FROM capture_deliveries d WHERE d.episode_id = capture_episodes.episode_id AND d.state = 'dead') THEN 'dead'
   WHEN NOT EXISTS (SELECT 1 FROM capture_deliveries d WHERE d.episode_id = capture_episodes.episode_id AND d.state != 'delivered') THEN 'delivered'
   ELSE 'pending'
-END`)
+END WHERE episode_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	return err
 }
 
@@ -873,6 +896,8 @@ func (q *Queue) migrate(ctx context.Context) error {
   delivered_at TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(episode_id, provider)
 )`,
+		`CREATE INDEX IF NOT EXISTS capture_deliveries_schedule ON capture_deliveries(state, next_attempt_at, provider, episode_id)`,
+		`CREATE INDEX IF NOT EXISTS capture_episodes_schedule ON capture_episodes(session_key, first_sequence, episode_id)`,
 	}
 	for _, statement := range statements {
 		if _, err := q.db.ExecContext(ctx, statement); err != nil {

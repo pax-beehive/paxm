@@ -116,7 +116,7 @@ func (s *Engine) rememberBatch(ctx context.Context, provider string, input Remem
 			continue
 		}
 		if provider != "" {
-			policy.Providers = []memory.ProviderRoute{{Name: provider, Required: true}}
+			policy.Providers = []memory.ProviderRoute{directProviderRoute(policy.Providers, provider)}
 		}
 		value, err := s.router.PutBatchWithPolicy(ctx, items, policy)
 		result.Refs = append(result.Refs, value.Refs...)
@@ -126,6 +126,16 @@ func (s *Engine) rememberBatch(ctx context.Context, provider string, input Remem
 		}
 	}
 	return result, errors.Join(errs...)
+}
+
+func directProviderRoute(routes []memory.ProviderRoute, provider string) memory.ProviderRoute {
+	for _, route := range routes {
+		if route.Name == provider {
+			route.Required = true
+			return route
+		}
+	}
+	return memory.ProviderRoute{Name: provider, Required: true, Timeout: 30 * time.Second}
 }
 func (s *Engine) CleanupExpired(ctx context.Context, limit int) (memory.CleanupExpiredResult, error) {
 	return s.router.CleanupExpired(ctx, limit)

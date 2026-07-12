@@ -19,6 +19,7 @@ func (r runner) executeHook(event capture.Event, jsonOut, codexNative bool) erro
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Close() }()
 	started := time.Now()
 	result, err := rt.Capture.Recall(context.Background(), event)
 	query := event.Query
@@ -82,6 +83,7 @@ func (r runner) runRecall(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Close() }()
 	started := time.Now()
 	result, err := rt.Tools.Recall(context.Background(), tools.RecallInput{Query: q, Profile: *profile, Limit: *limit})
 	r.recordRecallTelemetry(cfg, "recall", "cli", "", "", paxruntime.EffectiveRecallProfile(cfg, *profile), firstNonEmpty(result.Query, q), result, false, time.Since(started), err)
@@ -118,6 +120,7 @@ func (r runner) runRemember(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Close() }()
 	started := time.Now()
 	result, err := rt.Tools.Remember(context.Background(), tools.RememberInput{Text: value, Profile: *profile, Source: *source})
 	r.recordRememberTelemetry(cfg, "remember", "cli", paxruntime.EffectiveWriteProfile(*profile), 1, result, time.Since(started), err)

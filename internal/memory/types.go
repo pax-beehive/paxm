@@ -146,6 +146,10 @@ type CleanupExpiredProvider interface {
 	CleanupExpired(ctx context.Context, limit int) (int, error)
 }
 
+type CloseProvider interface {
+	Close() error
+}
+
 // DeleteProvider is an optional capability used when callers must remove
 // specific writes, such as benchmark data recorded in an eval manifest.
 type DeleteProvider interface {

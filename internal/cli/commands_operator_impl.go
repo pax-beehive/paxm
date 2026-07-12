@@ -1025,6 +1025,7 @@ func (r runner) runConfig(args []string) error {
 		if err != nil {
 			return err
 		}
+		defer func() { _ = rt.Close() }()
 		return writeJSON(r.stdout, rt.Operator.Config())
 	case "doctor":
 		return r.runConfigDoctor(args[1:])
@@ -1044,6 +1045,7 @@ func (r runner) runConfigDoctor(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Close() }()
 	statuses, err := rt.Operator.Health(context.Background())
 	if *jsonOut {
 		if writeErr := writeJSON(r.stdout, statuses); writeErr != nil {
@@ -1073,6 +1075,7 @@ func (r runner) runHistory(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Close() }()
 	summary, err := rt.Operator.History(*days)
 	if err != nil {
 		return err
@@ -1100,6 +1103,7 @@ func (r runner) runLogs(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Close() }()
 	emit := func(event telemetry.Event) error {
 		if *jsonOut {
 			return json.NewEncoder(r.stdout).Encode(event)

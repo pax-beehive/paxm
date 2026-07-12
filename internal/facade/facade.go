@@ -323,6 +323,9 @@ func toMemoryRoutes(routes []config.ProviderRouteConfig) []memory.ProviderRoute 
 			Required: route.Required,
 			Weight:   route.Weight,
 		}
+		if timeout, err := time.ParseDuration(route.Timeout); err == nil && timeout > 0 {
+			memoryRoute.Timeout = timeout
+		}
 		if route.Thresholds != nil {
 			memoryRoute.MinRelevance = route.Thresholds.MinRelevance
 			memoryRoute.MinScore = route.Thresholds.MinScore

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -144,6 +145,131 @@ func TestTerminalEpisodeDeliversProvidersIndependentlyAndConcurrently(t *testing
 	}
 	if result.Delivered != 2 || result.Failed != 0 {
 		t.Fatalf("unexpected delivery result: %#v", result)
+	}
+}
+
+func TestRunOnceRefreshesOnlyEpisodesTouchedByTheRun(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "capture.sqlite")
+	options := capturequeue.Options{
+		Providers: func(string) []string { return []string{"sqlite"} },
+		Deliver:   func(context.Context, string, capturequeue.Episode) (string, error) { return "ref", nil },
+	}
+	queue, err := capturequeue.Open(path, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.Append(ctx, capturequeue.Event{SessionKey: "session/first", Terminal: true, Item: facade.IngestInput{Text: "first", Profile: "ltm"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstID string
+	if err := db.QueryRow(`SELECT episode_id FROM capture_episodes WHERE session_key = 'session/first'`).Scan(&firstID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE capture_episodes SET state = 'pending' WHERE episode_id = ?`, firstID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	queue, err = capturequeue.Open(path, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.Append(ctx, capturequeue.Event{SessionKey: "session/second", Terminal: true, Item: facade.IngestInput{Text: "second", Profile: "ltm"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var state string
+	if err := db.QueryRow(`SELECT state FROM capture_episodes WHERE episode_id = ?`, firstID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "pending" {
+		t.Fatalf("unrelated episode state = %q, want pending", state)
+	}
+}
+
+func TestQueueCreatesSchedulingIndexes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "capture.sqlite")
+	queue, err := capturequeue.Open(path, capturequeue.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"capture_deliveries_schedule", "capture_episodes_schedule"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("scheduling index %q missing", name)
+		}
+	}
+	rows, err := db.Query(`EXPLAIN QUERY PLAN
+SELECT d.episode_id, d.provider, d.profiles_json, e.payload_json, e.payload_hash, d.attempts
+FROM capture_deliveries d JOIN capture_episodes e ON e.episode_id = d.episode_id
+WHERE d.state IN ('pending', 'retry')
+  AND (d.next_attempt_at = '' OR d.next_attempt_at <= ?)
+  AND NOT EXISTS (
+    SELECT 1 FROM capture_deliveries prior_d
+    JOIN capture_episodes prior_e ON prior_e.episode_id = prior_d.episode_id
+    WHERE prior_d.provider = d.provider
+      AND prior_e.session_key = e.session_key
+      AND prior_e.first_sequence < e.first_sequence
+      AND prior_d.state NOT IN ('delivered', 'dead')
+  )
+ORDER BY e.created_at LIMIT 100`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(detail)
+		plan.WriteByte('\n')
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"capture_deliveries_schedule", "capture_episodes_schedule"} {
+		if !strings.Contains(plan.String(), name) {
+			t.Fatalf("scheduler query plan does not use %q:\n%s", name, plan.String())
+		}
 	}
 }
 
