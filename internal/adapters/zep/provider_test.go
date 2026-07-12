@@ -40,6 +40,13 @@ type fakeGraphClient struct {
 	addErr        error
 	batchErr      error
 	searchErr     error
+	deletedGraph  string
+	deleteErr     error
+}
+
+func (c *fakeGraphClient) Delete(_ context.Context, graphID string, _ ...option.RequestOption) (*zepgo.SuccessResponse, error) {
+	c.deletedGraph = graphID
+	return &zepgo.SuccessResponse{}, c.deleteErr
 }
 
 func (c *fakeGraphClient) Add(_ context.Context, request *zepgo.AddDataRequest, _ ...option.RequestOption) (*zepgo.Episode, error) {
@@ -134,6 +141,20 @@ func TestPutAddsTextEpisode(t *testing.T) {
 	}
 	if episode.Metadata["paxm_id"] != "memory-1" || episode.Metadata["project"] != "paxm" {
 		t.Fatalf("metadata was not mapped: %#v", episode.Metadata)
+	}
+}
+
+func TestCleanupEvalScopeDeletesDedicatedGraph(t *testing.T) {
+	client := &fakeGraphClient{}
+	provider, err := newWithClient("zep", config.ProviderConfig{APIKey: "key", GraphID: "paxm-eval-run"}, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.CleanupEvalScope(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if client.deletedGraph != "paxm-eval-run" {
+		t.Fatalf("deleted graph = %q", client.deletedGraph)
 	}
 }
 

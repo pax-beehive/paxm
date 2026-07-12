@@ -119,6 +119,23 @@ func TestPutCreatesMem0Memory(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesMem0MemoryByRef(t *testing.T) {
+	t.Parallel()
+	client := httpDoerFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/memories/mem-1" || r.Method != http.MethodDelete {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})
+	provider, err := newWithClient("mem0", config.ProviderConfig{BaseURL: "http://mem0.test", RunID: "eval-run"}, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.Delete(context.Background(), memory.MemoryRef{Provider: "mem0", ID: "mem-1"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSearchMapsMem0Results(t *testing.T) {
 	t.Parallel()
 

@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/pax-beehive/paxm/internal/config"
-	"github.com/pax-beehive/paxm/internal/facade"
 	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
 	"github.com/pax-beehive/paxm/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 const protocolVersion = "2025-11-25"
@@ -312,7 +312,7 @@ func (s *Server) callRecall(ctx context.Context, raw json.RawMessage) toolResult
 		return errorToolResult(err)
 	}
 	started := time.Now()
-	result, opErr := rt.Service.Recall(ctx, facade.RecallInput{
+	result, opErr := rt.Tools.Recall(ctx, tools.RecallInput{
 		Query:   args.Query,
 		Profile: args.Profile,
 		Limit:   limit,
@@ -352,7 +352,7 @@ func (s *Server) callRemember(ctx context.Context, raw json.RawMessage) toolResu
 		return errorToolResult(err)
 	}
 	started := time.Now()
-	result, opErr := rt.Service.Ingest(ctx, facade.IngestInput{
+	result, opErr := rt.Tools.Remember(ctx, tools.RememberInput{
 		ID:       args.ID,
 		Text:     args.Text,
 		Profile:  args.Profile,
@@ -442,28 +442,28 @@ func structuredToolResult(value any) toolResult {
 	}
 }
 
-func recallToolResult(value facade.RecallResult) toolResult {
+func recallToolResult(value tools.RecallResult) toolResult {
 	structured := struct {
-		facade.RecallResult
+		tools.RecallResult
 		PaxmContext map[string]any `json:"paxm_context"`
 	}{
 		RecallResult: value,
 		PaxmContext:  recallContextMetadata(),
 	}
 	return toolResult{
-		Content:           []textContent{{Type: "text", Text: facade.WrapRecallContext("active", jsonText(value))}},
+		Content:           []textContent{{Type: "text", Text: tools.WrapRecallContext("active", jsonText(value))}},
 		StructuredContent: structured,
 	}
 }
 
-func recallErrorToolResult(err error, result facade.RecallResult) toolResult {
+func recallErrorToolResult(err error, result tools.RecallResult) toolResult {
 	content := map[string]any{
 		"error":        err.Error(),
 		"result":       result,
 		"paxm_context": recallContextMetadata(),
 	}
 	return toolResult{
-		Content:           []textContent{{Type: "text", Text: facade.WrapRecallContext("active", jsonText(content))}},
+		Content:           []textContent{{Type: "text", Text: tools.WrapRecallContext("active", jsonText(content))}},
 		StructuredContent: content,
 		IsError:           true,
 	}
@@ -512,7 +512,7 @@ func (e rpcError) Error() string {
 	return e.Message
 }
 
-func (s *Server) recordRecall(rt *paxruntime.Runtime, profile, query string, result facade.RecallResult, duration time.Duration, opErr error) error {
+func (s *Server) recordRecall(rt *paxruntime.Runtime, profile, query string, result tools.RecallResult, duration time.Duration, opErr error) error {
 	event := paxruntime.RecallTelemetryEvent(rt.Config, paxruntime.RecallTelemetryInput{
 		Kind:     "recall",
 		Source:   "mcp",
@@ -526,7 +526,7 @@ func (s *Server) recordRecall(rt *paxruntime.Runtime, profile, query string, res
 	return recorder.Record(event)
 }
 
-func (s *Server) recordRemember(rt *paxruntime.Runtime, profile string, itemCount int, result facade.IngestResult, duration time.Duration, opErr error) error {
+func (s *Server) recordRemember(rt *paxruntime.Runtime, profile string, itemCount int, result tools.RememberResult, duration time.Duration, opErr error) error {
 	event := paxruntime.RememberTelemetryEvent(rt.Config, paxruntime.RememberTelemetryInput{
 		Kind:      "remember",
 		Source:    "mcp",

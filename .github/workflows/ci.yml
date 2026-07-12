@@ -17,8 +17,26 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Test
-        run: go test ./...
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          install-only: true
+      - name: Go format and import check
+        run: golangci-lint fmt --diff
+      - name: GolangCI-Lint
+        run: golangci-lint run
+      - name: Install complexity analyzers
+        run: |
+          GOBIN="$RUNNER_TEMP/go-bin" go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
+          GOBIN="$RUNNER_TEMP/go-bin" go install github.com/uudashr/gocognit/cmd/gocognit@v1.2.0
+          echo "$RUNNER_TEMP/go-bin" >> "$GITHUB_PATH"
+      - name: Production complexity gate
+        run: scripts/check-production-complexity.sh
+      - name: Test with coverage
+        run: go test ./... -count=1 -covermode=atomic -coverprofile=coverage.out
+      - name: Enforce non-eval product coverage
+        run: scripts/check-production-coverage.sh coverage.out 75
       - name: Vet
         run: go vet ./...
       - name: Report 100-case provider benchmark (non-gating)

@@ -6,15 +6,20 @@ import (
 	"fmt"
 
 	"github.com/pax-beehive/paxm/internal/adapters"
+	"github.com/pax-beehive/paxm/internal/capture"
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/facade"
 	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/operator"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 type Runtime struct {
 	ConfigPath string
 	Config     config.Config
-	Service    *facade.Service
+	Tools      tools.Agent
+	Capture    *capture.Service
+	Operator   *operator.Service
 	router     *memory.Router
 }
 
@@ -38,10 +43,14 @@ func Load(configPath string) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	core := facade.New(cfg, router)
+	engine := core.Tools()
 	return &Runtime{
 		ConfigPath: path,
 		Config:     cfg,
-		Service:    facade.New(cfg, router),
+		Tools:      engine,
+		Capture:    capture.New(core),
+		Operator:   operator.New(path, cfg, engine, router),
 		router:     router,
 	}, nil
 }

@@ -42,7 +42,7 @@ func TestRunnerResumesWithoutUploadingSucceededTurnsAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := facade.New(config.Config{Version: 1}, router)
+	service := facade.New(config.Config{Version: 1}, router).Tools()
 	store, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestRunnerEdgeCasesTable(t *testing.T) {
 		cancel()
 		status, err := (Runner{
 			Store:     store,
-			Service:   facade.New(config.Config{Version: 1}, router),
+			Service:   facade.New(config.Config{Version: 1}, router).Tools(),
 			ProcessID: func() int { return 4242 },
 		}).Run(ctx, RunOptions{
 			Scope:    "scope",

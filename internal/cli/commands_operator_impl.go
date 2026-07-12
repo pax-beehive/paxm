@@ -4,14 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,162 +18,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pax-beehive/paxm/internal/adapters"
+	jsonrpcadapter "github.com/pax-beehive/paxm/internal/adapters/jsonrpc"
+	jsonrpcconformance "github.com/pax-beehive/paxm/internal/adapters/jsonrpc/conformance"
 	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
-	"github.com/pax-beehive/paxm/internal/capturequeue"
 	"github.com/pax-beehive/paxm/internal/config"
 	paxeval "github.com/pax-beehive/paxm/internal/eval"
-	"github.com/pax-beehive/paxm/internal/facade"
-	"github.com/pax-beehive/paxm/internal/mcp"
-	"github.com/pax-beehive/paxm/internal/memory"
 	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
 	"github.com/pax-beehive/paxm/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
-
-const (
-	defaultVersion                = "dev"
-	legacyDefaultRecallMaxResults = 8
-)
-
-type ensureZepUserFunc func(context.Context, config.ProviderConfig) (zepadapter.EnsureUserResult, error)
-type shutdownHookDaemonFunc func(string) error
-
-type Dependencies struct {
-	Version            string
-	EnsureZepUser      ensureZepUserFunc
-	ShutdownHookDaemon shutdownHookDaemonFunc
-}
-
-type runner struct {
-	stdin              io.Reader
-	stdout             io.Writer
-	stderr             io.Writer
-	configPath         string
-	version            string
-	ensureZepUser      ensureZepUserFunc
-	shutdownHookDaemon shutdownHookDaemonFunc
-}
-
-func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return MainWithDependencies(args, stdin, stdout, stderr, Dependencies{})
-}
-
-func MainWithDependencies(args []string, stdin io.Reader, stdout, stderr io.Writer, deps Dependencies) int {
-	if stdin == nil {
-		stdin = strings.NewReader("")
-	}
-	if stdout == nil {
-		stdout = io.Discard
-	}
-	if stderr == nil {
-		stderr = io.Discard
-	}
-	args, configPath, err := extractConfigFlag(args)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	deps = deps.withDefaults()
-	r := runner{
-		stdin:              stdin,
-		stdout:             stdout,
-		stderr:             stderr,
-		configPath:         configPath,
-		version:            deps.Version,
-		ensureZepUser:      deps.EnsureZepUser,
-		shutdownHookDaemon: deps.ShutdownHookDaemon,
-	}
-	if len(args) == 0 {
-		r.printHelp()
-		return 0
-	}
-	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		r.printHelp()
-		return 0
-	}
-	if args[0] == "--version" || args[0] == "-v" {
-		fmt.Fprintln(stdout, r.versionString())
-		return 0
-	}
-	if err := r.run(args); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	return 0
-}
-
-func (deps Dependencies) withDefaults() Dependencies {
-	if strings.TrimSpace(deps.Version) == "" {
-		deps.Version = defaultVersion
-	}
-	if deps.EnsureZepUser == nil {
-		deps.EnsureZepUser = zepadapter.EnsureUser
-	}
-	if deps.ShutdownHookDaemon == nil {
-		deps.ShutdownHookDaemon = func(configPath string) error {
-			return flushExistingHookBuffer(configPath, true)
-		}
-	}
-	return deps
-}
-
-func (r runner) versionString() string {
-	if strings.TrimSpace(r.version) != "" {
-		return r.version
-	}
-	return defaultVersion
-}
-
-func (r runner) ensureZepUserFunc() ensureZepUserFunc {
-	if r.ensureZepUser != nil {
-		return r.ensureZepUser
-	}
-	return zepadapter.EnsureUser
-}
-
-func (r runner) shutdownHookDaemonFunc() shutdownHookDaemonFunc {
-	if r.shutdownHookDaemon != nil {
-		return r.shutdownHookDaemon
-	}
-	return func(configPath string) error {
-		return flushExistingHookBuffer(configPath, true)
-	}
-}
-
-func (r runner) run(args []string) error {
-	switch args[0] {
-	case "setup":
-		return r.runSetup(args[1:])
-	case "uninstall":
-		return r.runUninstall(args[1:])
-	case "recall":
-		return r.runRecall(args[1:])
-	case "remember":
-		return r.runRemember(args[1:])
-	case "history":
-		return r.runHistory(args[1:])
-	case "logs":
-		return r.runLogs(args[1:])
-	case "backfill":
-		return r.runBackfill(args[1:])
-	case "eval":
-		return r.runEval(args[1:])
-	case "mcp":
-		return r.runMCP(args[1:])
-	case "update":
-		return r.runUpdate(args[1:])
-	case "version":
-		fmt.Fprintln(r.stdout, r.versionString())
-		return nil
-	case "config":
-		return r.runConfig(args[1:])
-	case "__hook":
-		return r.runInternalHook(args[1:])
-	case "__hook-daemon":
-		return r.runHookDaemon(args[1:])
-	default:
-		return fmt.Errorf("unknown command %q", args[0])
-	}
-}
 
 func (r runner) runSetup(args []string) error {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
@@ -193,73 +44,11 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	prompter := newSetupPrompter(r.stdin, r.stdout)
-	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, *force, *yes)
+	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration)
 	if err != nil || !proceed {
 		return err
 	}
-	cfg, err := setupBaseConfig(path, configExists)
-	if err != nil {
-		return err
-	}
-	selectedProviders := defaultSelections(providerOptions(cfg), cfgProviderEnabled(cfg))
-	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
-	pluginTarget := ""
-	if *integration == config.IntegrationOwnerCodexPlugin {
-		pluginTarget = "codex"
-	}
-	if *integration == config.IntegrationOwnerClaudePlugin {
-		pluginTarget = "claude"
-	}
-	previousEnabled := make(map[string]bool, len(cfg.Agents))
-	for name, agent := range cfg.Agents {
-		previousEnabled[name] = agent.Enabled
-	}
-	if pluginTarget != "" {
-		for name := range selectedHooks {
-			selectedHooks[name] = name == pluginTarget
-		}
-	}
-	if !*yes {
-		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
-		if err != nil || !proceed {
-			return err
-		}
-	}
-	if pluginTarget != "" {
-		for name := range selectedHooks {
-			selectedHooks[name] = name == pluginTarget
-		}
-	}
-	if !anySelected(selectedProviders) {
-		return errors.New("setup requires at least one memory provider")
-	}
-	applySetupSelections(&cfg, selectedProviders, selectedHooks, *yes)
-	if pluginTarget != "" {
-		for name, enabled := range previousEnabled {
-			if name == pluginTarget {
-				continue
-			}
-			agent := cfg.Agents[name]
-			agent.Enabled = enabled
-			cfg.Agents[name] = agent
-		}
-	}
-	if agent, ok := cfg.Agents["codex"]; ok {
-		if *integration == config.IntegrationOwnerPaxm || *integration == config.IntegrationOwnerCodexPlugin {
-			agent.Integration.Owner = *integration
-		}
-		cfg.Agents["codex"] = agent
-	}
-	if agent, ok := cfg.Agents["claude"]; ok && *integration == config.IntegrationOwnerClaudePlugin {
-		agent.Integration.Owner = *integration
-		cfg.Agents["claude"] = agent
-	}
-	if !*yes {
-		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
-		if err != nil || !proceed {
-			return err
-		}
-	}
+	cfg, selectedHooks := selection.cfg, selection.selectedHooks
 	zepUserResult, err := r.maybeEnsureZepUser(context.Background(), cfg)
 	if err != nil {
 		return err
@@ -279,6 +68,97 @@ func (r runner) runSetup(args []string) error {
 		fmt.Fprintf(r.stdout, "ensured Zep user: %s (%s)\n", zepUserResult.UserID, status)
 	}
 	return r.installSelectedHookIntegrations(path, cfg, selectedHooks)
+}
+
+type setupSelection struct {
+	cfg           config.Config
+	selectedHooks map[string]bool
+}
+
+func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration string) (setupSelection, bool, error) {
+	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, force, yes)
+	if err != nil || !proceed {
+		return setupSelection{}, false, err
+	}
+	cfg, err := setupBaseConfig(path, configExists)
+	if err != nil {
+		return setupSelection{}, false, err
+	}
+	selectedProviders := defaultSelections(providerOptions(cfg), cfgProviderEnabled(cfg))
+	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
+	pluginTarget := setupPluginTarget(integration)
+	previousEnabled := enabledAgents(cfg)
+	constrainPluginHooks(selectedHooks, pluginTarget)
+	if !yes {
+		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
+		if err != nil || !proceed {
+			return setupSelection{}, false, err
+		}
+	}
+	constrainPluginHooks(selectedHooks, pluginTarget)
+	if !anySelected(selectedProviders) {
+		return setupSelection{}, false, errors.New("setup requires at least one memory provider")
+	}
+	applySetupSelections(&cfg, selectedProviders, selectedHooks, yes)
+	applySetupIntegration(&cfg, integration, pluginTarget, previousEnabled)
+	if !yes {
+		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
+		if err != nil || !proceed {
+			return setupSelection{}, false, err
+		}
+	}
+	return setupSelection{cfg: cfg, selectedHooks: selectedHooks}, true, nil
+}
+
+func setupPluginTarget(integration string) string {
+	switch integration {
+	case config.IntegrationOwnerCodexPlugin:
+		return "codex"
+	case config.IntegrationOwnerClaudePlugin:
+		return "claude"
+	default:
+		return ""
+	}
+}
+
+func enabledAgents(cfg config.Config) map[string]bool {
+	result := make(map[string]bool, len(cfg.Agents))
+	for name, agent := range cfg.Agents {
+		result[name] = agent.Enabled
+	}
+	return result
+}
+
+func constrainPluginHooks(selected map[string]bool, target string) {
+	if target == "" {
+		return
+	}
+	for name := range selected {
+		selected[name] = name == target
+	}
+}
+
+func applySetupIntegration(cfg *config.Config, integration, pluginTarget string, previousEnabled map[string]bool) {
+	if pluginTarget != "" {
+		for name, enabled := range previousEnabled {
+			if name == pluginTarget {
+				continue
+			}
+			agent := cfg.Agents[name]
+			agent.Enabled = enabled
+			cfg.Agents[name] = agent
+		}
+	}
+	if agent, ok := cfg.Agents["codex"]; ok {
+		if integration == config.IntegrationOwnerPaxm || integration == config.IntegrationOwnerCodexPlugin {
+			agent.Integration.Owner = integration
+		}
+		cfg.Agents["codex"] = agent
+	}
+	if agent, ok := cfg.Agents["claude"]; ok && integration == config.IntegrationOwnerClaudePlugin {
+		agent.Integration.Owner = integration
+		cfg.Agents["claude"] = agent
+	}
 }
 
 func (r runner) confirmSetupOverwrite(path string, prompter *setupPrompter, force, yes bool) (bool, bool, error) {
@@ -371,67 +251,88 @@ func (r runner) installSelectedHookIntegrations(path string, cfg config.Config, 
 		if !selectedHooks[name] {
 			continue
 		}
-		if name == "codex" && strings.EqualFold(cfg.Agents[name].Integration.Owner, config.IntegrationOwnerCodexPlugin) {
-			// Remove legacy paxm-managed Codex registrations before handing
-			// ownership to the plugin. Plugin hooks are discovered and trusted by
-			// Codex itself; paxm must not register a second copy.
-			marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "codex-")
-			if err := removeCodexGlobalHooks(codexConfigPath(), marker); err != nil {
-				return err
-			}
-			if err := removeAgentHookShims(path, name); err != nil {
-				return err
-			}
-			fmt.Fprintln(r.stdout, "Codex hooks are owned by the paxm-memory plugin")
+		if handled, err := r.reconcilePluginOwnership(path, cfg, name); err != nil {
+			return err
+		} else if handled {
 			continue
 		}
-		if name == "claude" && strings.EqualFold(cfg.Agents[name].Integration.Owner, config.IntegrationOwnerClaudePlugin) {
-			marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "claude-")
-			if err := removeClaudeGlobalHooks(claudeSettingsPath(), marker); err != nil {
-				return err
-			}
-			if err := removeAgentHookShims(path, name); err != nil {
-				return err
-			}
-			fmt.Fprintln(r.stdout, "Claude hooks are owned by the paxm-claude plugin")
-			continue
-		}
-		if err := removeLegacyHookShim(path, name); err != nil {
+		if err := r.installAgentHookIntegration(path, cfg.Agents[name], name); err != nil {
 			return err
 		}
-		if err := uninstallAgentIntegration(path, name); err != nil {
-			return fmt.Errorf("reset %s integration: %w", name, err)
+	}
+	return nil
+}
+
+func (r runner) reconcilePluginOwnership(path string, cfg config.Config, name string) (bool, error) {
+	agent, ok := cfg.Agents[name]
+	if !ok {
+		return false, nil
+	}
+	owner := strings.ToLower(agent.Integration.Owner)
+	switch {
+	case name == "codex" && owner == config.IntegrationOwnerCodexPlugin:
+		marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "codex-")
+		if err := removeCodexGlobalHooks(codexConfigPath(), marker); err != nil {
+			return true, err
 		}
-		installedScripts := make(map[string]string)
-		for _, event := range hookInstallEventsForAgent(cfg.Agents[name]) {
-			scriptPath, err := installHookShim(path, name, event.ConfigEvent)
-			if err != nil {
-				return err
-			}
-			installedScripts[event.ConfigEvent] = scriptPath
-			fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+		if err := removeAgentHookShims(path, name); err != nil {
+			return true, err
 		}
-		if name == "codex" {
-			fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
+		fmt.Fprintln(r.stdout, "Codex hooks are owned by the paxm-memory plugin")
+		return true, nil
+	case name == "claude" && owner == config.IntegrationOwnerClaudePlugin:
+		marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "claude-")
+		if err := removeClaudeGlobalHooks(claudeSettingsPath(), marker); err != nil {
+			return true, err
 		}
-		if name == "claude" {
-			if err := installClaudeGlobalHooks(claudeSettingsPath(), installedScripts); err != nil {
-				return err
-			}
-			fmt.Fprintf(r.stdout, "registered Claude Code global hook: %s\n", claudeSettingsPath())
+		if err := removeAgentHookShims(path, name); err != nil {
+			return true, err
 		}
-		if name == "pi" {
-			if err := installPiGlobalHook(piExtensionPath(), installedScripts); err != nil {
-				return err
-			}
-			fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
+		fmt.Fprintln(r.stdout, "Claude hooks are owned by the paxm-claude plugin")
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func (r runner) installAgentHookIntegration(path string, agent config.AgentConfig, name string) error {
+	if err := removeLegacyHookShim(path, name); err != nil {
+		return err
+	}
+	if err := uninstallAgentIntegration(path, name); err != nil {
+		return fmt.Errorf("reset %s integration: %w", name, err)
+	}
+	installedScripts := make(map[string]string)
+	for _, event := range hookInstallEventsForAgent(agent) {
+		scriptPath, err := installHookShim(path, name, event.ConfigEvent)
+		if err != nil {
+			return err
 		}
-		if name == "opencode" {
-			if err := installOpenCodeGlobalHook(openCodePluginPath(), installedScripts); err != nil {
-				return err
-			}
-			fmt.Fprintf(r.stdout, "registered OpenCode global plugin: %s\n", openCodePluginPath())
+		installedScripts[event.ConfigEvent] = scriptPath
+		fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+	}
+	return r.registerAgentIntegration(name, installedScripts)
+}
+
+func (r runner) registerAgentIntegration(name string, installedScripts map[string]string) error {
+	switch name {
+	case "codex":
+		fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
+	case "claude":
+		if err := installClaudeGlobalHooks(claudeSettingsPath(), installedScripts); err != nil {
+			return err
 		}
+		fmt.Fprintf(r.stdout, "registered Claude Code global hook: %s\n", claudeSettingsPath())
+	case "pi":
+		if err := installPiGlobalHook(piExtensionPath(), installedScripts); err != nil {
+			return err
+		}
+		fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
+	case "opencode":
+		if err := installOpenCodeGlobalHook(openCodePluginPath(), installedScripts); err != nil {
+			return err
+		}
+		fmt.Fprintf(r.stdout, "registered OpenCode global plugin: %s\n", openCodePluginPath())
 	}
 	return nil
 }
@@ -466,31 +367,49 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		return config.Config{}, err
 	}
 	cfg = config.Normalize(cfg)
-	for name, provider := range defaultCfg.Providers {
+	mergeDefaultProviders(&cfg, defaultCfg)
+	mergeDefaultRecallProfiles(&cfg, defaultCfg)
+	mergeDefaultWriteProfiles(&cfg, defaultCfg)
+	cfg.Telemetry = mergeTelemetryDefaults(cfg.Telemetry, defaultCfg.Telemetry)
+	mergeDefaultAgents(&cfg, defaultCfg)
+	return cfg, nil
+}
+
+func mergeDefaultProviders(cfg *config.Config, defaults config.Config) {
+	for name, provider := range defaults.Providers {
 		if _, ok := cfg.Providers[name]; !ok {
 			cfg.Providers[name] = provider
 		}
 	}
-	for name, profile := range defaultCfg.RecallProfiles {
+}
+
+func mergeDefaultRecallProfiles(cfg *config.Config, defaults config.Config) {
+	for name, profile := range defaults.RecallProfiles {
 		if existing, ok := cfg.RecallProfiles[name]; ok {
 			cfg.RecallProfiles[name] = mergeRecallProfileDefaults(name, existing, profile)
-		} else {
-			if name == "passive" {
-				cfg.RecallProfiles[name] = config.PassiveRecallProfileFrom(cfg.RecallProfiles["default"])
-			} else if name == "passive_initial" {
-				cfg.RecallProfiles[name] = config.PassiveInitialRecallProfileFrom(cfg.RecallProfiles["default"])
-			} else {
-				cfg.RecallProfiles[name] = profile
-			}
+			continue
+		}
+		switch name {
+		case "passive":
+			cfg.RecallProfiles[name] = config.PassiveRecallProfileFrom(cfg.RecallProfiles["default"])
+		case "passive_initial":
+			cfg.RecallProfiles[name] = config.PassiveInitialRecallProfileFrom(cfg.RecallProfiles["default"])
+		default:
+			cfg.RecallProfiles[name] = profile
 		}
 	}
-	for name, profile := range defaultCfg.WriteProfiles {
+}
+
+func mergeDefaultWriteProfiles(cfg *config.Config, defaults config.Config) {
+	for name, profile := range defaults.WriteProfiles {
 		if _, ok := cfg.WriteProfiles[name]; !ok {
 			cfg.WriteProfiles[name] = profile
 		}
 	}
-	cfg.Telemetry = mergeTelemetryDefaults(cfg.Telemetry, defaultCfg.Telemetry)
-	for name, agent := range defaultCfg.Agents {
+}
+
+func mergeDefaultAgents(cfg *config.Config, defaults config.Config) {
+	for name, agent := range defaults.Agents {
 		existing, ok := cfg.Agents[name]
 		if !ok {
 			cfg.Agents[name] = agent
@@ -499,17 +418,20 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		if existing.Hooks == nil {
 			existing.Hooks = make(map[string]config.AgentHookConfig)
 		}
-		for eventName, eventCfg := range agent.Hooks {
-			existingHook, ok := existing.Hooks[eventName]
-			if !ok {
-				existing.Hooks[eventName] = eventCfg
-				continue
-			}
-			existing.Hooks[eventName] = mergeHookDefaults(existingHook, eventCfg)
-		}
+		mergeDefaultAgentHooks(&existing, agent)
 		cfg.Agents[name] = existing
 	}
-	return cfg, nil
+}
+
+func mergeDefaultAgentHooks(existing *config.AgentConfig, defaults config.AgentConfig) {
+	for eventName, eventCfg := range defaults.Hooks {
+		existingHook, ok := existing.Hooks[eventName]
+		if !ok {
+			existing.Hooks[eventName] = eventCfg
+			continue
+		}
+		existing.Hooks[eventName] = mergeHookDefaults(existingHook, eventCfg)
+	}
 }
 
 func mergeRecallProfileDefaults(name string, current, defaults config.RecallProfileConfig) config.RecallProfileConfig {
@@ -580,81 +502,21 @@ func mergeHookDefaults(current, defaults config.AgentHookConfig) config.AgentHoo
 	return current
 }
 
-func (r runner) runRecall(args []string) error {
-	fs := flag.NewFlagSet("recall", flag.ContinueOnError)
-	fs.SetOutput(r.stderr)
-	query := fs.String("query", "", "recall query")
-	queryShort := fs.String("q", "", "recall query")
-	profile := fs.String("profile", "", "recall profile")
-	limit := fs.Int("limit", 0, "maximum memories to return")
-	jsonOut := fs.Bool("json", false, "write JSON")
-	stdin := fs.Bool("stdin", false, "read query from stdin")
-	hookEvent := fs.Bool("hook-event", false, "read a hook event from stdin")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *hookEvent {
-		bytes, err := io.ReadAll(r.stdin)
-		if err != nil {
-			return err
-		}
-		event, err := decodeHookEvent(bytes, "codex", "user_input")
-		if err != nil {
-			return err
-		}
-		return r.executeHook(event, *jsonOut, false)
-	}
-	q := firstNonEmpty(*query, *queryShort)
-	if *stdin {
-		bytes, err := io.ReadAll(r.stdin)
-		if err != nil {
-			return err
-		}
-		q = string(bytes)
-	}
-
-	cfg, service, err := r.loadRuntime()
-	if err != nil {
-		return err
-	}
-	started := time.Now()
-	result, err := service.Recall(context.Background(), facade.RecallInput{
-		Query:   q,
-		Profile: *profile,
-		Limit:   *limit,
-	})
-	r.recordRecallTelemetry(cfg, "recall", "cli", "", "", paxruntime.EffectiveRecallProfile(cfg, *profile), firstNonEmpty(result.Query, q), result, false, time.Since(started), err)
-	if err != nil {
-		return err
-	}
-	if *jsonOut {
-		return writeRecallJSON(r.stdout, result, "active")
-	}
-	writeRecallContextMarkdown(r.stdout, result, "active")
-	return nil
-}
-
-type recallJSONOutput struct {
-	facade.RecallResult
-	PaxmContext recallJSONContext `json:"paxm_context"`
-}
-
-type recallJSONContext struct {
-	Version int    `json:"version"`
-	Kind    string `json:"kind"`
-	Mode    string `json:"mode"`
-}
-
-func writeRecallJSON(w io.Writer, result facade.RecallResult, mode string) error {
-	return writeJSON(w, recallJSONOutput{
-		RecallResult: result,
-		PaxmContext:  recallJSONContext{Version: 1, Kind: "recall", Mode: mode},
-	})
-}
-
 func (r runner) runEval(args []string) error {
+	if len(args) > 0 && args[0] == "cleanup" {
+		return r.runEvalCleanup(args[1:])
+	}
+	if len(args) > 1 && args[0] == "retrieval" && args[1] == "locomo" {
+		return r.runLoCoMoEval(args[2:])
+	}
+	if len(args) > 1 && args[0] == "provider" && args[1] == "jsonrpc" {
+		return r.runJSONRPCConformance(args[2:])
+	}
 	if len(args) == 0 || args[0] != "run" {
-		return errors.New("usage: paxm eval run --suite PATH [--gate none|adapter|quality] [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]")
+		return errors.New("usage: paxm eval run locomo --agent NAME [options] | paxm eval retrieval locomo [options] | paxm eval provider jsonrpc --command PATH")
+	}
+	if len(args) > 1 && args[1] == "locomo" {
+		return r.runLoCoMoAgentEval(args[2:])
 	}
 	fs := flag.NewFlagSet("eval run", flag.ContinueOnError)
 	fs.SetOutput(r.stderr)
@@ -760,6 +622,335 @@ func (r runner) runEval(args []string) error {
 	return nil
 }
 
+type stringListFlag []string
+
+func (v *stringListFlag) String() string         { return strings.Join(*v, ",") }
+func (v *stringListFlag) Set(value string) error { *v = append(*v, value); return nil }
+
+func (r runner) runJSONRPCConformance(args []string) error {
+	fs := flag.NewFlagSet("eval provider jsonrpc", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	command := fs.String("command", "", "provider executable")
+	timeout := fs.Duration("timeout", 10*time.Second, "timeout per RPC call")
+	jsonOut := fs.Bool("json", false, "write JSON")
+	var commandArgs stringListFlag
+	fs.Var(&commandArgs, "arg", "provider argument; repeat as needed")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*command) == "" {
+		return errors.New("JSON-RPC conformance requires --command PATH")
+	}
+	provider, err := jsonrpcadapter.New("conformance", config.ProviderConfig{Transport: "stdio", Command: *command, Args: commandArgs, Timeout: timeout.String()})
+	if err != nil {
+		return err
+	}
+	result := jsonrpcconformance.Run(context.Background(), provider)
+	if *jsonOut {
+		if err := writeJSON(r.stdout, result); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(r.stdout, "paxm JSON-RPC provider conformance: passed=%t protocol=%s\n", result.Passed, result.Protocol)
+		for _, check := range result.Checks {
+			status := "PASS"
+			if check.Skipped {
+				status = "SKIP"
+			} else if !check.Passed {
+				status = "FAIL"
+			}
+			fmt.Fprintf(r.stdout, "  %-5s %s", status, check.Name)
+			if check.Error != "" {
+				fmt.Fprintf(r.stdout, ": %s", check.Error)
+			}
+			fmt.Fprintln(r.stdout)
+		}
+	}
+	if !result.Passed {
+		return errors.New("JSON-RPC provider failed required conformance checks")
+	}
+	return nil
+}
+
+func (r runner) runEvalCleanup(args []string) error {
+	fs := flag.NewFlagSet("eval cleanup", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	runID := fs.String("run", "", "run id or run id prefix to clean")
+	stale := fs.Bool("stale", false, "clean all non-cleaned manifests not marked keep-memory")
+	manifestDir := fs.String("manifest-dir", filepath.Join(filepath.Dir(config.DefaultDataPath()), "eval-runs"), "eval run manifest directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" && !*stale {
+		return errors.New("eval cleanup requires --run ID or --stale")
+	}
+	entries, err := os.ReadDir(*manifestDir)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(paxruntime.ConfigFile(r.configPath))
+	if err != nil {
+		return err
+	}
+	registry := adapters.DefaultRegistry()
+	cleaned := 0
+	var cleanupErr error
+	for _, entry := range entries {
+		if !entry.IsDir() || (*runID != "" && entry.Name() != *runID && !strings.HasPrefix(entry.Name(), *runID+"-")) {
+			continue
+		}
+		manifestPath := filepath.Join(*manifestDir, entry.Name(), "manifest.json")
+		scope, restoreErr := paxeval.RestoreProviderScope(cfg, manifestPath)
+		if restoreErr != nil {
+			cleanupErr = errors.Join(cleanupErr, restoreErr)
+			continue
+		}
+		if *stale && *runID == "" && scope.Manifest.Status == paxeval.EvalStatusCleaned {
+			continue
+		}
+		if *stale && *runID == "" && scope.Manifest.KeepMemory {
+			continue
+		}
+		if *runID != "" {
+			scope.Manifest.KeepMemory = false
+		}
+		provider, buildErr := registry.BuildProvider(scope.Manifest.Provider, scope.Config.Providers[scope.Manifest.Provider])
+		if buildErr != nil {
+			cleanupErr = errors.Join(cleanupErr, buildErr)
+			continue
+		}
+		if err := paxeval.CleanupProviderScope(context.Background(), scope, provider); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup %s: %w", entry.Name(), err))
+			continue
+		}
+		cleaned++
+		fmt.Fprintf(r.stdout, "cleaned eval run: %s\n", entry.Name())
+	}
+	if cleanupErr != nil {
+		return cleanupErr
+	}
+	if cleaned == 0 {
+		return errors.New("no matching eval runs required cleanup")
+	}
+	return nil
+}
+
+func (r runner) runLoCoMoAgentEval(args []string) error {
+	fs := flag.NewFlagSet("eval run locomo", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	datasetPath := fs.String("dataset", "", "path to the official locomo10.json dataset")
+	agentName := fs.String("agent", "", "agent runtime to evaluate (opencode)")
+	agentBinary := fs.String("agent-binary", "", "agent executable path")
+	model := fs.String("model", "", "agent model override")
+	providerName := fs.String("provider", "sqlite", "configured provider name")
+	armsValue := fs.String("arms", "control,passive,active", "comma-separated control, passive, active arms")
+	maxQuestions := fs.Int("max-questions", 0, "limit paid agent questions")
+	allQuestions := fs.Bool("all", false, "run every eligible LoCoMo question")
+	matchThreshold := fs.Float64("match-threshold", 0.5, "token-F1 threshold for a matched answer")
+	manifestDir := fs.String("manifest-dir", filepath.Join(filepath.Dir(config.DefaultDataPath()), "eval-runs"), "eval run manifest directory")
+	runID := fs.String("run-id", "", "stable eval run id")
+	settle := fs.Duration("settle", 0, "wait after ingest before agent questions")
+	timeout := fs.Duration("timeout", 3*time.Minute, "timeout for each agent call")
+	keepMemory := fs.Bool("keep-memory", false, "intentionally retain benchmark memories")
+	jsonOut := fs.Bool("json", false, "write JSON")
+	outputPath := fs.String("output", "", "write result JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*datasetPath) == "" || strings.TrimSpace(*agentName) == "" {
+		return errors.New("LoCoMo agent evaluation requires --dataset PATH and --agent NAME")
+	}
+	if strings.TrimSpace(*model) == "" {
+		return errors.New("LoCoMo agent evaluation requires --model PROVIDER/MODEL so runs are reproducible")
+	}
+	if *maxQuestions <= 0 && !*allQuestions {
+		return errors.New("LoCoMo agent evaluation makes paid model calls; choose --max-questions N or explicitly pass --all")
+	}
+	if *maxQuestions < 0 || *matchThreshold <= 0 || *matchThreshold > 1 || *timeout <= 0 {
+		return errors.New("invalid LoCoMo agent evaluation limits")
+	}
+	arms, err := parseAgentArms(*armsValue)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(paxruntime.ConfigFile(r.configPath))
+	if err != nil {
+		return err
+	}
+	dataset, err := paxeval.LoadLoCoMo(*datasetPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" {
+		*runID = newHookEventID()
+	}
+	executor := r.agentExecutor
+	if executor == nil {
+		if *agentName != "opencode" {
+			return fmt.Errorf("agent %q is not supported", *agentName)
+		}
+		binary, findErr := findOpenCodeBinary(*agentBinary)
+		if findErr != nil {
+			return findErr
+		}
+		paxmBinary, executableErr := os.Executable()
+		if executableErr != nil {
+			return executableErr
+		}
+		executor = paxeval.OpenCodeExecutor{Binary: binary, PaxmBinary: paxmBinary, Model: *model, Timeout: *timeout}
+	}
+	registry := adapters.DefaultRegistry()
+	result, runErr := (paxeval.LoCoMoAgentRunner{BuildProvider: registry.BuildProvider, Agent: executor}).Run(context.Background(), dataset, paxeval.LoCoMoAgentOptions{
+		Config: cfg, Provider: *providerName, RunID: *runID, ManifestDir: *manifestDir,
+		AgentName: *agentName, Arms: arms, MaxQuestions: *maxQuestions, MatchThreshold: *matchThreshold,
+		KeepMemory: *keepMemory, Settle: *settle,
+	})
+	if *outputPath != "" {
+		data, marshalErr := json.MarshalIndent(result, "", "  ")
+		if marshalErr != nil {
+			return errors.Join(runErr, marshalErr)
+		}
+		if writeErr := os.WriteFile(*outputPath, append(data, '\n'), 0o600); writeErr != nil {
+			return errors.Join(runErr, writeErr)
+		}
+	}
+	if *jsonOut {
+		if err := writeJSON(r.stdout, result); err != nil {
+			return errors.Join(runErr, err)
+		}
+	} else {
+		writeLoCoMoAgentReport(r.stdout, result)
+	}
+	if runErr != nil {
+		return runErr
+	}
+	for _, summary := range result.Summaries {
+		if summary.Errors > 0 {
+			return fmt.Errorf("LoCoMo agent eval %s arm had %d execution errors", summary.Arm, summary.Errors)
+		}
+	}
+	return nil
+}
+
+func parseAgentArms(value string) ([]paxeval.AgentArm, error) {
+	seen := make(map[paxeval.AgentArm]bool)
+	var arms []paxeval.AgentArm
+	for _, item := range strings.Split(value, ",") {
+		arm := paxeval.AgentArm(strings.TrimSpace(item))
+		switch arm {
+		case paxeval.AgentArmControl, paxeval.AgentArmPassive, paxeval.AgentArmActive:
+		default:
+			return nil, fmt.Errorf("unsupported eval arm %q", item)
+		}
+		if !seen[arm] {
+			seen[arm] = true
+			arms = append(arms, arm)
+		}
+	}
+	if len(arms) == 0 {
+		return nil, errors.New("at least one eval arm is required")
+	}
+	return arms, nil
+}
+
+func findOpenCodeBinary(explicit string) (string, error) {
+	if strings.TrimSpace(explicit) != "" {
+		return config.ExpandPath(explicit), nil
+	}
+	if path, err := exec.LookPath("opencode"); err == nil {
+		return path, nil
+	}
+	home, _ := os.UserHomeDir()
+	candidate := filepath.Join(home, ".opencode", "bin", "opencode")
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		return candidate, nil
+	}
+	return "", errors.New("OpenCode binary not found; pass --agent-binary PATH")
+}
+
+func writeLoCoMoAgentReport(w io.Writer, result paxeval.LoCoMoAgentResult) {
+	fmt.Fprintf(w, "paxm eval: %s  agent=%s  provider=%s  model=%s\n", result.Benchmark, result.Agent, result.Provider, result.Model)
+	fmt.Fprintf(w, "  agent write canary: %t\n", result.WriteCanary)
+	fmt.Fprintf(w, "  questions: %d  trials: %d  duration: %s\n", result.QuestionCount, result.TrialCount, time.Duration(result.DurationMS)*time.Millisecond)
+	for _, summary := range result.Summaries {
+		fmt.Fprintf(w, "  %-7s accuracy %.1f%%  mean-f1 %.3f  exact %.1f%%  recall-used %d/%d  useful %.1f%%  errors %d  tokens %d/%d  cost $%.4f\n",
+			summary.Arm, summary.Accuracy*100, summary.MeanF1, summary.ExactMatch*100, summary.RecallUsed, summary.Trials, summary.UsefulRecallRate*100,
+			summary.Errors, summary.InputTokens, summary.OutputTokens, summary.Cost)
+	}
+	fmt.Fprintf(w, "  memory lift: passive %+.1fpp  active %+.1fpp\n", result.PassiveLift*100, result.ActiveLift*100)
+}
+
+func (r runner) runLoCoMoEval(args []string) error {
+	fs := flag.NewFlagSet("eval retrieval locomo", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	datasetPath := fs.String("dataset", "", "path to the official locomo10.json dataset")
+	providerName := fs.String("provider", "sqlite", "configured provider name")
+	manifestDir := fs.String("manifest-dir", filepath.Join(filepath.Dir(config.DefaultDataPath()), "eval-runs"), "eval run manifest directory")
+	runID := fs.String("run-id", "", "stable eval run id")
+	limit := fs.Int("limit", 10, "retrieval result limit")
+	settle := fs.Duration("settle", 0, "wait after ingest before recall")
+	keepMemory := fs.Bool("keep-memory", false, "intentionally retain benchmark memories")
+	jsonOut := fs.Bool("json", false, "write JSON")
+	outputPath := fs.String("output", "", "write result JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*datasetPath) == "" {
+		return errors.New("LoCoMo evaluation requires --dataset PATH")
+	}
+	if *limit <= 0 {
+		return errors.New("LoCoMo --limit must be positive")
+	}
+	cfg, err := config.Load(paxruntime.ConfigFile(r.configPath))
+	if err != nil {
+		return err
+	}
+	dataset, err := paxeval.LoadLoCoMo(*datasetPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" {
+		*runID = newHookEventID()
+	}
+	registry := adapters.DefaultRegistry()
+	result, runErr := (paxeval.LoCoMoRunner{BuildProvider: registry.BuildProvider}).Run(context.Background(), dataset, paxeval.LoCoMoRunOptions{
+		Config: cfg, Provider: *providerName, RunID: *runID, ManifestDir: *manifestDir,
+		Limit: *limit, KeepMemory: *keepMemory, Settle: *settle,
+	})
+	if *outputPath != "" {
+		data, marshalErr := json.MarshalIndent(result, "", "  ")
+		if marshalErr != nil {
+			return errors.Join(runErr, marshalErr)
+		}
+		if writeErr := os.WriteFile(*outputPath, append(data, '\n'), 0o600); writeErr != nil {
+			return errors.Join(runErr, writeErr)
+		}
+	}
+	if *jsonOut {
+		if err := writeJSON(r.stdout, result); err != nil {
+			return errors.Join(runErr, err)
+		}
+	} else {
+		writeLoCoMoReport(r.stdout, result)
+	}
+	if runErr != nil {
+		return runErr
+	}
+	if result.ExecutionFailed > 0 {
+		return fmt.Errorf("LoCoMo eval execution failed for %d questions", result.ExecutionFailed)
+	}
+	return nil
+}
+
+func writeLoCoMoReport(w io.Writer, result paxeval.LoCoMoResult) {
+	fmt.Fprintf(w, "paxm eval: %s (%s)\n", result.Benchmark, result.Provider)
+	fmt.Fprintf(w, "  conversations: %d  questions: %d  passed: %d  failed: %d\n", result.ConversationCount, result.QuestionCount, result.Passed, result.Failed)
+	fmt.Fprintf(w, "  recall@k: %.3f  precision@k: %.3f  mrr: %.3f  duration: %dms\n", result.RecallAtK, result.PrecisionAtK, result.MRR, result.DurationMS)
+	for _, category := range result.Categories {
+		fmt.Fprintf(w, "  category %d: %d/%d  recall@k %.3f  precision@k %.3f  mrr %.3f\n", category.Category, category.Passed, category.Questions, category.RecallAtK, category.PrecisionAtK, category.MRR)
+	}
+}
+
 func writeEvalComparison(w io.Writer, comparison paxeval.Comparison) {
 	fmt.Fprintf(w, "comparison: %s -> %s\n", comparison.BaselineSuite, comparison.CurrentSuite)
 	fmt.Fprintf(w, "  passed %+d  recall@k %+.3f  precision@k %+.3f  mrr %+.3f  false-positive rate %+.3f  duration %+dms\n", comparison.PassedDelta, comparison.RecallAtKDelta, comparison.PrecisionAtKDelta, comparison.MRRDelta, comparison.FalsePositiveRateDelta, comparison.DurationMSDelta)
@@ -821,964 +1012,6 @@ func writeEvalReport(w io.Writer, result paxeval.Result) {
 	}
 }
 
-func (r runner) runRemember(args []string) error {
-	fs := flag.NewFlagSet("remember", flag.ContinueOnError)
-	fs.SetOutput(r.stderr)
-	text := fs.String("text", "", "memory text")
-	profile := fs.String("profile", "", "write profile")
-	source := fs.String("source", "cli", "memory source")
-	jsonOut := fs.Bool("json", false, "write JSON")
-	stdin := fs.Bool("stdin", false, "read memory text from stdin")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	value := *text
-	if *stdin {
-		bytes, err := io.ReadAll(r.stdin)
-		if err != nil {
-			return err
-		}
-		value = string(bytes)
-	}
-
-	cfg, service, err := r.loadRuntime()
-	if err != nil {
-		return err
-	}
-	started := time.Now()
-	result, err := service.Ingest(context.Background(), facade.IngestInput{
-		Text:    value,
-		Profile: *profile,
-		Source:  *source,
-	})
-	r.recordRememberTelemetry(cfg, "remember", "cli", paxruntime.EffectiveWriteProfile(*profile), 1, result, time.Since(started), err)
-	if err != nil {
-		return err
-	}
-	if *jsonOut {
-		return writeJSON(r.stdout, result)
-	}
-	for _, ref := range result.Refs {
-		fmt.Fprintf(r.stdout, "stored memory: %s/%s\n", ref.Provider, ref.ID)
-	}
-	return nil
-}
-
-func (r runner) executeHook(event facade.HookEvent, jsonOut, codexNative bool) error {
-	cfg, service, err := r.loadRuntime()
-	if err != nil {
-		return err
-	}
-	started := time.Now()
-	result, err := service.RunHook(context.Background(), event)
-	query := event.Query
-	if result.Recall != nil {
-		query = result.Recall.Query
-	}
-	var recall facade.RecallResult
-	if result.Recall != nil {
-		recall = *result.Recall
-	}
-	r.recordRecallTelemetry(cfg, "hook_recall", "hook", result.Target, result.Event, hookRecallProfile(cfg, event), query, recall, result.Skipped, time.Since(started), err)
-	if err != nil {
-		return err
-	}
-	if codexNative {
-		return writeCodexUserPromptHookOutput(r.stdout, result)
-	}
-	if jsonOut {
-		return writeJSON(r.stdout, result)
-	}
-	if result.Skipped || result.Recall == nil {
-		return nil
-	}
-	writeRecallContextMarkdown(r.stdout, *result.Recall, "passive")
-	return nil
-}
-
-type codexUserPromptHookOutput struct {
-	HookSpecificOutput codexUserPromptHookSpecificOutput `json:"hookSpecificOutput"`
-}
-
-type codexUserPromptHookSpecificOutput struct {
-	HookEventName     string `json:"hookEventName"`
-	AdditionalContext string `json:"additionalContext"`
-}
-
-func writeCodexUserPromptHookOutput(w io.Writer, result facade.HookResult) error {
-	if result.Skipped || result.Recall == nil || len(result.Recall.Hits) == 0 {
-		return nil
-	}
-	var context bytes.Buffer
-	writeRecallMarkdown(&context, *result.Recall)
-	additionalContext := facade.WrapRecallContext("passive", "Relevant memory recalled by paxm:\n\n"+strings.TrimSpace(context.String()))
-	if additionalContext == "" {
-		return nil
-	}
-	return writeJSON(w, codexUserPromptHookOutput{
-		HookSpecificOutput: codexUserPromptHookSpecificOutput{
-			HookEventName:     "UserPromptSubmit",
-			AdditionalContext: additionalContext,
-		},
-	})
-}
-
-type hookBufferRequest struct {
-	Action  string          `json:"action,omitempty"`
-	EventID string          `json:"event_id,omitempty"`
-	Target  string          `json:"target"`
-	Event   string          `json:"event"`
-	Raw     json.RawMessage `json:"raw"`
-}
-
-type hookBufferResponse struct {
-	OK             bool                   `json:"ok"`
-	Buffered       bool                   `json:"buffered,omitempty"`
-	Flushed        int                    `json:"flushed,omitempty"`
-	ProviderWrites map[string]int         `json:"provider_writes,omitempty"`
-	ProviderRefs   map[string]int         `json:"provider_refs,omitempty"`
-	ProviderErrors []memory.ProviderError `json:"provider_errors,omitempty"`
-	Error          string                 `json:"error,omitempty"`
-}
-
-type hookCleanupWorker struct {
-	requests chan struct{}
-	done     chan struct{}
-	cleanup  func(context.Context)
-}
-
-func newHookCleanupWorker(cleanup func(context.Context)) *hookCleanupWorker {
-	worker := &hookCleanupWorker{
-		requests: make(chan struct{}, 1),
-		done:     make(chan struct{}),
-		cleanup:  cleanup,
-	}
-	go func() {
-		defer close(worker.done)
-		for range worker.requests {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			worker.cleanup(ctx)
-			cancel()
-		}
-	}()
-	return worker
-}
-
-func (w *hookCleanupWorker) Schedule() {
-	select {
-	case w.requests <- struct{}{}:
-	default:
-	}
-}
-
-func (w *hookCleanupWorker) Close() {
-	close(w.requests)
-	<-w.done
-}
-
-func (r runner) runInternalHook(args []string) error {
-	fs := flag.NewFlagSet("__hook", flag.ContinueOnError)
-	fs.SetOutput(r.stderr)
-	target := fs.String("target", "codex", "hook target")
-	eventName := fs.String("event", "", "hook event")
-	jsonOut := fs.Bool("json", false, "write JSON recall output")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	raw, err := io.ReadAll(r.stdin)
-	if err != nil {
-		return err
-	}
-	event, err := decodeHookEvent(raw, *target, *eventName)
-	if err != nil {
-		return err
-	}
-	if cfg, cfgErr := config.Load(r.configFile()); cfgErr == nil {
-		if !hookSourceAllowed(cfg, event) {
-			return nil
-		}
-		event = r.markInitialUserInputRecall(cfg, event)
-		if hookWriteEnabled(cfg, event) {
-			bufferStarted := time.Now()
-			response, err := r.sendHookToBuffer(event)
-			r.recordHookWriteTelemetry(cfg, event, response, time.Since(bufferStarted), err)
-			if err != nil {
-				fmt.Fprintf(r.stderr, "paxm hook buffer skipped: %s\n", err)
-			}
-		}
-	}
-	if event.Event == "user_input" {
-		codexNative := *jsonOut && event.Target == "codex" && event.Event == "user_input"
-		return r.executeHook(event, *jsonOut, codexNative)
-	}
-	return nil
-}
-
-func hookSourceAllowed(cfg config.Config, event facade.HookEvent) bool {
-	owner := strings.ToLower(strings.TrimSpace(cfg.Agents[event.Target].Integration.Owner))
-	source := strings.ToLower(strings.TrimSpace(os.Getenv("PAXM_INTEGRATION_OWNER")))
-	if owner == config.IntegrationOwnerCodexPlugin || owner == config.IntegrationOwnerClaudePlugin {
-		return source == owner
-	}
-	return source == "" || source == config.IntegrationOwnerPaxm
-}
-
-func (r runner) runHookDaemon(args []string) error {
-	fs := flag.NewFlagSet("__hook-daemon", flag.ContinueOnError)
-	fs.SetOutput(r.stderr)
-	socket := fs.String("socket", hookSocketPath(r.configFile()), "daemon socket")
-	idleTimeout := fs.Duration("idle-timeout", 30*time.Minute, "daemon idle timeout")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	cfg, service, err := r.loadRuntime()
-	if err != nil {
-		return err
-	}
-	releaseLock, err := acquireHookDaemonLock(r.configFile())
-	if err != nil {
-		return err
-	}
-	defer releaseLock()
-	queuePath := hookQueuePath(r.configFile())
-	if strings.TrimSpace(cfg.CaptureQueue.Path) != "" {
-		queuePath = cfg.CaptureQueue.Path
-	}
-	maxEpisodeAge, _ := time.ParseDuration(cfg.CaptureQueue.MaxEpisodeAge)
-	retryMin, _ := time.ParseDuration(cfg.CaptureQueue.RetryMin)
-	queue, err := capturequeue.Open(queuePath, capturequeue.Options{
-		MaxEpisodeAge: maxEpisodeAge,
-		RetryMin:      retryMin,
-		MaxAttempts:   cfg.CaptureQueue.MaxAttempts,
-		Providers: func(profile string) []string {
-			writeProfile, ok := cfg.WriteProfiles[paxruntime.EffectiveWriteProfile(profile)]
-			if !ok {
-				return nil
-			}
-			providers := make([]string, 0, len(writeProfile.Providers))
-			for _, route := range writeProfile.Providers {
-				providers = append(providers, route.Name)
-			}
-			return providers
-		},
-		ProviderConcurrency: func(provider string) int {
-			if concurrency := cfg.CaptureQueue.ProviderConcurrency[provider]; concurrency > 0 {
-				return concurrency
-			}
-			return cfg.CaptureQueue.ProviderConcurrency["default"]
-		},
-		Deliver: func(ctx context.Context, provider string, episode capturequeue.Episode) (string, error) {
-			items := episode.IngestInputs()
-			result, err := service.IngestBatchToProvider(ctx, provider, facade.IngestBatchInput{Items: items})
-			if len(result.Refs) == 0 {
-				if err != nil {
-					return "", err
-				}
-				return "", fmt.Errorf("provider %s returned no memory reference", provider)
-			}
-			return result.Refs[0].ID, err
-		},
-		OnDelivery: func(outcome capturequeue.DeliveryOutcome) {
-			hookEvent := "delivery"
-			if outcome.Dead {
-				hookEvent = "delivery_dead"
-			}
-			event := telemetry.Event{
-				Time:                       time.Now().UTC(),
-				Kind:                       "hook_delivery",
-				Source:                     "capture_queue",
-				Command:                    "hook",
-				HookEvent:                  hookEvent,
-				Success:                    outcome.Err == nil,
-				DurationMS:                 outcome.Duration.Milliseconds(),
-				ProviderDurationMS:         outcome.Duration.Milliseconds(),
-				PassiveWriteLatencyTotalMS: outcome.PassiveWriteLatencyTotal.Milliseconds(),
-				PassiveWriteSamples:        outcome.PassiveWriteSamples,
-				ItemCount:                  1,
-				EpisodeID:                  outcome.EpisodeID,
-				SessionKey:                 outcome.SessionKey,
-				Provider:                   outcome.Provider,
-				Error:                      paxruntime.TelemetryError(outcome.Err),
-			}
-			if outcome.Err != nil {
-				event.ProviderErrorDetails = []telemetry.ProviderErrorDetail{{Provider: outcome.Provider, Op: "put"}}
-			}
-			if outcome.Ref != "" {
-				event.RefCount = 1
-				event.ProviderWrites = map[string]int{outcome.Provider: 1}
-				event.ProviderRefs = map[string]int{outcome.Provider: 1}
-			}
-			r.recordTelemetry(cfg, event)
-		},
-	})
-	if err != nil {
-		return err
-	}
-	defer queue.Close()
-	worker := newCaptureDeliveryWorker(queue)
-	defer worker.Close()
-	cleanupWorker := newHookCleanupWorker(func(ctx context.Context) {
-		_, _ = service.CleanupExpired(ctx, 500)
-	})
-	defer cleanupWorker.Close()
-	if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
-		return err
-	}
-	_ = os.Remove(*socket)
-	listener, err := net.Listen("unix", *socket)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = listener.Close()
-		_ = os.Remove(*socket)
-	}()
-
-	deadline := time.NewTimer(*idleTimeout)
-	defer deadline.Stop()
-	for {
-		type acceptResult struct {
-			conn net.Conn
-			err  error
-		}
-		accepted := make(chan acceptResult, 1)
-		go func() {
-			conn, err := listener.Accept()
-			accepted <- acceptResult{conn: conn, err: err}
-		}()
-		select {
-		case <-deadline.C:
-			_, _ = queue.SealAll(context.Background())
-			_, _ = queue.RunOnce(context.Background())
-			return nil
-		case result := <-accepted:
-			if result.err != nil {
-				return result.err
-			}
-			flushed, shutdown, err := handleCaptureQueueConn(context.Background(), service, queue, result.conn, worker.Notify, cleanupWorker.Schedule)
-			if err != nil {
-				fmt.Fprintf(r.stderr, "paxm hook buffer error: %s\n", err)
-			}
-			if shutdown {
-				return nil
-			}
-			if !deadline.Stop() {
-				select {
-				case <-deadline.C:
-				default:
-				}
-			}
-			deadline.Reset(*idleTimeout)
-			_ = flushed
-		}
-	}
-}
-
-func handleCaptureQueueConn(ctx context.Context, service *facade.Service, queue *capturequeue.Queue, conn net.Conn, notifyDelivery, scheduleCleanup func()) (int, bool, error) {
-	defer conn.Close()
-	var request hookBufferRequest
-	if err := json.NewDecoder(conn).Decode(&request); err != nil {
-		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
-		return 0, false, err
-	}
-	if request.Action == "flush" || request.Action == "shutdown" {
-		sealed, err := queue.SealAll(ctx)
-		if err == nil && request.Action == "flush" {
-			_, err = queue.RunOnce(ctx)
-		}
-		if err != nil {
-			_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
-			return 0, false, err
-		}
-		scheduleCleanup()
-		_ = writeJSON(conn, hookBufferResponse{OK: true, Flushed: sealed})
-		return sealed, request.Action == "shutdown", nil
-	}
-	event, err := decodeHookEvent(request.Raw, request.Target, request.Event)
-	if err != nil {
-		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
-		return 0, false, err
-	}
-	if request.EventID != "" {
-		if event.Metadata == nil {
-			event.Metadata = make(map[string]string)
-		}
-		event.Metadata["event_id"] = request.EventID
-	}
-	item, ok, err := service.HookWriteItem(event)
-	if err != nil || !ok {
-		response := hookBufferResponse{OK: err == nil}
-		if err != nil {
-			response.Error = err.Error()
-		}
-		_ = writeJSON(conn, response)
-		return 0, false, err
-	}
-	sessionKey := captureSessionKey(event)
-	bufferCfg := service.HookBufferConfig(event)
-	receipt, err := queue.Append(ctx, capturequeue.Event{
-		ID:         strings.TrimSpace(event.Metadata["event_id"]),
-		SessionKey: sessionKey,
-		Terminal:   bufferCfg.Flush,
-		Sequence:   hookSequence(event.Metadata, "event_sequence", "sequence"),
-		Final:      hookSequence(event.Metadata, "final_sequence"),
-		Item:       item,
-	})
-	if err != nil {
-		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
-		return 0, false, err
-	}
-	notifyDelivery()
-	flushed := 0
-	if bufferCfg.Flush {
-		flushed = 1
-	}
-	_ = writeJSON(conn, hookBufferResponse{
-		OK:       true,
-		Buffered: true,
-		Flushed:  flushed,
-	})
-	_ = receipt
-	return flushed, false, nil
-}
-
-func captureSessionKey(event facade.HookEvent) string {
-	target := firstNonEmpty(strings.TrimSpace(event.Target), "codex")
-	workspace := firstNonEmpty(strings.TrimSpace(event.Workspace), strings.TrimSpace(event.Metadata["cwd"]), "unknown")
-	if sessionID := strings.TrimSpace(event.Metadata["session_id"]); sessionID != "" {
-		return target + "/workspace/" + workspace + "/session/" + sessionID
-	}
-	if transcript := strings.TrimSpace(event.Metadata["transcript_path"]); transcript != "" {
-		return target + "/workspace/" + workspace + "/transcript/" + transcript
-	}
-	return target + "/workspace/" + workspace + "/event/" + firstNonEmpty(strings.TrimSpace(event.Metadata["event_id"]), newHookEventID())
-}
-
-func hookSequence(metadata map[string]string, keys ...string) *int64 {
-	for _, key := range keys {
-		value := strings.TrimSpace(metadata[key])
-		if value == "" {
-			continue
-		}
-		sequence, err := strconv.ParseInt(value, 10, 64)
-		if err == nil && sequence > 0 {
-			return &sequence
-		}
-	}
-	return nil
-}
-
-func (r runner) sendHookToBuffer(event facade.HookEvent) (hookBufferResponse, error) {
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]string)
-	}
-	if strings.TrimSpace(event.Metadata["event_id"]) == "" {
-		event.Metadata["event_id"] = newHookEventID()
-	}
-	socket := hookSocketPath(r.configFile())
-	response, err := sendHookBufferRequest(socket, event)
-	if err != nil {
-		if startErr := r.startHookDaemon(socket); startErr != nil {
-			return hookBufferResponse{}, startErr
-		}
-		for i := 0; i < 20; i++ {
-			time.Sleep(50 * time.Millisecond)
-			response, err = sendHookBufferRequest(socket, event)
-			if err == nil {
-				break
-			}
-		}
-	}
-	if err != nil {
-		return hookBufferResponse{}, err
-	}
-	if !response.OK && response.Error != "" {
-		return response, errors.New(response.Error)
-	}
-	return response, nil
-}
-
-func (r runner) startHookDaemon(socket string) error {
-	binaryPath, err := os.Executable()
-	if err != nil || binaryPath == "" {
-		binaryPath = "paxm"
-	}
-	cmd := exec.Command(binaryPath, "--config", r.configFile(), "__hook-daemon", "--socket", socket)
-	if devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
-		defer devNull.Close()
-		cmd.Stdin = devNull
-		cmd.Stdout = devNull
-		cmd.Stderr = devNull
-	}
-	detachCommand(cmd)
-	return cmd.Start()
-}
-
-func sendHookBufferRequest(socket string, event facade.HookEvent) (hookBufferResponse, error) {
-	conn, err := net.DialTimeout("unix", socket, time.Second)
-	if err != nil {
-		return hookBufferResponse{}, err
-	}
-	defer conn.Close()
-	raw := event.Raw
-	if len(raw) == 0 {
-		raw = json.RawMessage(`{}`)
-	}
-	request := hookBufferRequest{
-		EventID: event.Metadata["event_id"],
-		Target:  event.Target,
-		Event:   event.Event,
-		Raw:     raw,
-	}
-	if err := json.NewEncoder(conn).Encode(request); err != nil {
-		return hookBufferResponse{}, err
-	}
-	var response hookBufferResponse
-	if err := json.NewDecoder(conn).Decode(&response); err != nil {
-		return hookBufferResponse{}, err
-	}
-	return response, nil
-}
-
-func newHookEventID() string {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err == nil {
-		return "evt_" + hex.EncodeToString(bytes)
-	}
-	return "evt_" + strconv.FormatInt(time.Now().UnixNano(), 10)
-}
-
-func flushExistingHookBuffer(configPath string, shutdown bool) error {
-	socketPath := hookSocketPath(configPath)
-	if _, err := os.Stat(socketPath); errors.Is(err, os.ErrNotExist) {
-		lockPath := hookDaemonLockPath(configPath)
-		if pathDoesNotExist(lockPath) {
-			return nil
-		}
-		deadline := time.Now().Add(time.Second)
-		for pathDoesNotExist(socketPath) {
-			if pathDoesNotExist(lockPath) {
-				return nil
-			}
-			if time.Now().After(deadline) {
-				return errors.New("hook daemon lock exists but socket did not become ready")
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-	} else if err != nil {
-		return err
-	}
-	conn, err := net.DialTimeout("unix", socketPath, 250*time.Millisecond)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(35 * time.Second)); err != nil {
-		return err
-	}
-	action := "flush"
-	if shutdown {
-		action = "shutdown"
-	}
-	if err := json.NewEncoder(conn).Encode(hookBufferRequest{Action: action}); err != nil {
-		return err
-	}
-	var response hookBufferResponse
-	if err := json.NewDecoder(conn).Decode(&response); err != nil {
-		return err
-	}
-	if !response.OK {
-		return errors.New(firstNonEmpty(response.Error, "hook buffer flush failed"))
-	}
-	if shutdown {
-		return waitForHookDaemonStop(configPath, 5*time.Second)
-	}
-	return nil
-}
-
-func waitForHookDaemonStop(configPath string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		socketGone := pathDoesNotExist(hookSocketPath(configPath))
-		lockGone := pathDoesNotExist(hookDaemonLockPath(configPath))
-		if socketGone && lockGone {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return errors.New("hook daemon did not stop before timeout")
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
-func pathDoesNotExist(path string) bool {
-	_, err := os.Stat(path)
-	return errors.Is(err, os.ErrNotExist)
-}
-
-func decodeHookEvent(raw []byte, target, eventName string) (facade.HookEvent, error) {
-	raw = bytesTrimSpace(raw)
-	if len(raw) == 0 {
-		raw = []byte(`{}`)
-	}
-	var event facade.HookEvent
-	typedRaw := raw
-	var rawObject map[string]any
-	if json.Unmarshal(raw, &rawObject) == nil {
-		delete(rawObject, "messages")
-		if encoded, err := json.Marshal(rawObject); err == nil {
-			typedRaw = encoded
-		}
-	}
-	if err := json.Unmarshal(typedRaw, &event); err != nil {
-		return facade.HookEvent{}, fmt.Errorf("decode hook event JSON: %w", err)
-	}
-	if event.Target == "" {
-		event.Target = target
-	}
-	if event.Target == "" {
-		event.Target = "codex"
-	}
-	if event.Event == "" {
-		event.Event = eventName
-	}
-	if event.Event == "" {
-		event.Event = "user_input"
-	}
-	if event.Prompt == "" {
-		event.Prompt = promptFromRawHook(raw)
-	}
-	enrichHookEventFromRaw(&event, raw)
-	event.Raw = append(json.RawMessage(nil), raw...)
-	return event, nil
-}
-
-func promptFromRawHook(raw []byte) string {
-	var object map[string]any
-	if err := json.Unmarshal(raw, &object); err != nil {
-		return ""
-	}
-	for _, key := range []string{"prompt", "user_prompt", "input", "message"} {
-		value, ok := object[key].(string)
-		if ok && strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func enrichHookEventFromRaw(event *facade.HookEvent, raw []byte) {
-	var object map[string]any
-	if err := json.Unmarshal(raw, &object); err != nil {
-		return
-	}
-	if event.Workspace == "" {
-		for _, key := range []string{"workspace", "cwd", "current_dir"} {
-			if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
-				event.Workspace = value
-				break
-			}
-		}
-	}
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]string)
-	}
-	for _, key := range []string{"session_id", "transcript_path", "cwd", "current_dir", "model", "source"} {
-		if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
-			event.Metadata[key] = value
-		}
-	}
-	if event.Assistant == "" {
-		for _, key := range []string{"last_assistant_message", "assistant", "assistant_message", "response", "output"} {
-			if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
-				event.Assistant = value
-				break
-			}
-		}
-	}
-	if len(event.Messages) == 0 {
-		event.Messages = hookMessagesFromRaw(object["messages"])
-	}
-	if event.Event == "tool_use" || event.Event == "tool_failure" {
-		event.Messages = append(event.Messages, hookMessagesFromToolEvent(object)...)
-	}
-	if event.Target == "codex" && event.Event == "turn_end" {
-		if path := strings.TrimSpace(stringField(object, "transcript_path")); path != "" {
-			event.Messages = append(event.Messages, codexTranscriptToolMessages(path)...)
-		}
-	}
-	event.Messages = dedupeHookMessages(event.Messages)
-}
-
-func codexTranscriptToolMessages(path string) []facade.HookMessage {
-	file, err := os.Open(config.ExpandPath(path))
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	var messages []facade.HookMessage
-	for scanner.Scan() {
-		var record struct {
-			Type    string         `json:"type"`
-			Payload map[string]any `json:"payload"`
-		}
-		if json.Unmarshal(scanner.Bytes(), &record) != nil {
-			continue
-		}
-		kind := strings.ToLower(stringField(record.Payload, "type"))
-		if record.Type == "event_msg" && kind == "task_started" {
-			messages = nil
-			continue
-		}
-		if record.Type != "response_item" {
-			continue
-		}
-		switch kind {
-		case "function_call", "custom_tool_call":
-			name := firstNonEmpty(stringField(record.Payload, "name"), stringField(record.Payload, "namespace"))
-			input := hookValueText(firstNonNil(record.Payload["arguments"], record.Payload["input"]))
-			if text := strings.TrimSpace(strings.Join(nonEmptyStrings(name, input), " ")); text != "" {
-				messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: "codex_transcript"})
-			}
-		case "function_call_output", "custom_tool_call_output":
-			if text := hookValueText(record.Payload["output"]); text != "" {
-				messages = append(messages, facade.HookMessage{Role: "tool_result", Text: text, Source: "codex_transcript"})
-			}
-		}
-	}
-	return dedupeHookMessages(messages)
-}
-
-func dedupeHookMessages(messages []facade.HookMessage) []facade.HookMessage {
-	seen := make(map[string]struct{}, len(messages))
-	result := make([]facade.HookMessage, 0, len(messages))
-	for _, message := range messages {
-		key := strings.ToLower(strings.TrimSpace(message.Role)) + "\x00" + strings.TrimSpace(firstNonEmpty(message.Text, message.Content))
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		result = append(result, message)
-	}
-	return result
-}
-
-func hookMessagesFromToolEvent(object map[string]any) []facade.HookMessage {
-	name := strings.TrimSpace(stringField(object, "tool_name"))
-	input := hookValueText(object["tool_input"])
-	response := hookValueText(firstNonNil(object["tool_response"], object["tool_result"], object["output"]))
-	if response == "" {
-		if failure := strings.TrimSpace(stringField(object, "error")); failure != "" {
-			response = "Error: " + failure
-		}
-	}
-	var messages []facade.HookMessage
-	if call := strings.TrimSpace(strings.Join(nonEmptyStrings(name, input), " ")); call != "" {
-		messages = append(messages, facade.HookMessage{Role: "tool_call", Text: call})
-	}
-	if response != "" {
-		messages = append(messages, facade.HookMessage{Role: "tool_result", Text: response})
-	}
-	return messages
-}
-
-func hookMessagesFromRaw(value any) []facade.HookMessage {
-	rawMessages, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	messages := make([]facade.HookMessage, 0, len(rawMessages))
-	for _, rawMessage := range rawMessages {
-		object, ok := rawMessage.(map[string]any)
-		if !ok {
-			continue
-		}
-		if nested, ok := object["message"].(map[string]any); ok {
-			messages = append(messages, hookMessagesFromRaw([]any{nested})...)
-			continue
-		}
-		role := stringField(object, "role")
-		source := stringField(object, "source")
-		kind := strings.ToLower(stringField(object, "type"))
-		if role == "" {
-			switch kind {
-			case "tool_use", "tool_call", "function_call":
-				if text := formatHookToolCall(object); text != "" {
-					messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: source})
-				}
-				continue
-			case "tool_result", "tool_response", "function_call_output", "function_result":
-				if text := hookValueText(firstNonNil(object["content"], object["output"], object["result"])); text != "" {
-					messages = append(messages, facade.HookMessage{Role: "tool_result", Text: text, Source: source})
-				}
-				continue
-			case "thinking", "reasoning", "analysis", "redacted_thinking":
-				continue
-			}
-		}
-		if text := strings.TrimSpace(firstNonEmpty(stringField(object, "text"), stringField(object, "content"))); role != "" && text != "" {
-			messages = append(messages, facade.HookMessage{Role: role, Text: text, Source: source})
-		}
-		messages = append(messages, hookContentMessages(role, source, object["content"])...)
-		messages = append(messages, hookToolCallMessages(source, object["tool_calls"])...)
-	}
-	return messages
-}
-
-func hookContentMessages(defaultRole, source string, value any) []facade.HookMessage {
-	blocks, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	var messages []facade.HookMessage
-	for _, value := range blocks {
-		block, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		kind := strings.ToLower(firstNonEmpty(stringField(block, "type"), defaultRole))
-		switch kind {
-		case "thinking", "reasoning", "analysis", "redacted_thinking":
-			continue
-		case "tool_use", "tool_call", "function_call":
-			if text := formatHookToolCall(block); text != "" {
-				messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: source})
-			}
-		case "tool_result", "tool_response", "function_call_output", "function_result":
-			if text := hookValueText(firstNonNil(block["content"], block["output"], block["result"])); text != "" {
-				messages = append(messages, facade.HookMessage{Role: "tool_result", Text: text, Source: source})
-			}
-		default:
-			if text := strings.TrimSpace(firstNonEmpty(stringField(block, "text"), stringField(block, "content"))); text != "" {
-				messages = append(messages, facade.HookMessage{Role: defaultRole, Text: text, Source: source})
-			}
-		}
-	}
-	return messages
-}
-
-func hookToolCallMessages(source string, value any) []facade.HookMessage {
-	values, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	var messages []facade.HookMessage
-	for _, value := range values {
-		call, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		if function, ok := call["function"].(map[string]any); ok {
-			call = function
-		}
-		if text := formatHookToolCall(call); text != "" {
-			messages = append(messages, facade.HookMessage{Role: "tool_call", Text: text, Source: source})
-		}
-	}
-	return messages
-}
-
-func formatHookToolCall(call map[string]any) string {
-	name := strings.TrimSpace(firstNonEmpty(stringField(call, "name"), stringField(call, "tool")))
-	input := hookValueText(firstNonNil(call["input"], call["arguments"], call["args"]))
-	return strings.TrimSpace(strings.Join(nonEmptyStrings(name, input), " "))
-}
-
-func hookValueText(value any) string {
-	value = sanitizeHookValue(value)
-	if value == nil {
-		return ""
-	}
-	if text, ok := value.(string); ok {
-		text = strings.TrimSpace(text)
-		var structured any
-		if (strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[")) && json.Unmarshal([]byte(text), &structured) == nil {
-			value = sanitizeHookValue(structured)
-		} else {
-			return text
-		}
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(encoded))
-}
-
-func sanitizeHookValue(value any) any {
-	switch typed := value.(type) {
-	case []any:
-		result := make([]any, 0, len(typed))
-		for _, item := range typed {
-			if clean := sanitizeHookValue(item); clean != nil {
-				result = append(result, clean)
-			}
-		}
-		return result
-	case map[string]any:
-		kind := strings.ToLower(stringField(typed, "type"))
-		if kind == "thinking" || kind == "reasoning" || kind == "analysis" || kind == "redacted_thinking" {
-			return nil
-		}
-		result := make(map[string]any, len(typed))
-		for key, item := range typed {
-			if isReasoningField(key) {
-				continue
-			}
-			if clean := sanitizeHookValue(item); clean != nil {
-				result[key] = clean
-			}
-		}
-		return result
-	default:
-		return value
-	}
-}
-
-func isReasoningField(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "thinking", "thinking_content", "reasoning", "reasoning_content", "analysis", "chain_of_thought", "thought", "thoughts", "redacted_thinking":
-		return true
-	default:
-		return false
-	}
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-func nonEmptyStrings(values ...string) []string {
-	var result []string
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			result = append(result, strings.TrimSpace(value))
-		}
-	}
-	return result
-}
-
-func stringField(object map[string]any, key string) string {
-	if value, ok := object[key].(string); ok {
-		return value
-	}
-	return ""
-}
-
-func bytesTrimSpace(bytes []byte) []byte {
-	return []byte(strings.TrimSpace(string(bytes)))
-}
-
-func hookSocketPath(configPath string) string {
-	return filepath.Join(filepath.Dir(config.ExpandPath(configPath)), "hooks", "paxm-hook.sock")
-}
-
 func (r runner) runConfig(args []string) error {
 	if len(args) == 0 {
 		return errors.New("config command requires a subcommand: path, show, doctor")
@@ -1788,11 +1021,11 @@ func (r runner) runConfig(args []string) error {
 		fmt.Fprintln(r.stdout, r.configFile())
 		return nil
 	case "show":
-		cfg, err := config.Load(r.configFile())
+		_, rt, err := r.loadRuntime()
 		if err != nil {
 			return err
 		}
-		return writeJSON(r.stdout, cfg)
+		return writeJSON(r.stdout, rt.Operator.Config())
 	case "doctor":
 		return r.runConfigDoctor(args[1:])
 	default:
@@ -1811,7 +1044,7 @@ func (r runner) runConfigDoctor(args []string) error {
 	if err != nil {
 		return err
 	}
-	statuses, err := rt.Health(context.Background())
+	statuses, err := rt.Operator.Health(context.Background())
 	if *jsonOut {
 		if writeErr := writeJSON(r.stdout, statuses); writeErr != nil {
 			return writeErr
@@ -1828,29 +1061,6 @@ func (r runner) runConfigDoctor(args []string) error {
 	return err
 }
 
-func (r runner) runMCP(args []string) error {
-	if len(args) == 0 {
-		return errors.New("mcp command requires a subcommand: serve")
-	}
-	switch args[0] {
-	case "serve":
-		fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
-		fs.SetOutput(r.stderr)
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		return mcp.Serve(mcp.Options{
-			ConfigPath: r.configFile(),
-			Version:    r.versionString(),
-			Stdin:      r.stdin,
-			Stdout:     r.stdout,
-			Stderr:     r.stderr,
-		})
-	default:
-		return fmt.Errorf("unknown mcp subcommand %q", args[0])
-	}
-}
-
 func (r runner) runHistory(args []string) error {
 	fs := flag.NewFlagSet("history", flag.ContinueOnError)
 	fs.SetOutput(r.stderr)
@@ -1859,12 +1069,11 @@ func (r runner) runHistory(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := config.Load(r.configFile())
+	_, rt, err := r.loadRuntime()
 	if err != nil {
 		return err
 	}
-	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
-	summary, err := recorder.History(*days)
+	summary, err := rt.Operator.History(*days)
 	if err != nil {
 		return err
 	}
@@ -1887,11 +1096,10 @@ func (r runner) runLogs(args []string) error {
 	if *tail < 0 {
 		return errors.New("logs tail must be non-negative")
 	}
-	cfg, err := config.Load(r.configFile())
+	_, rt, err := r.loadRuntime()
 	if err != nil {
 		return err
 	}
-	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
 	emit := func(event telemetry.Event) error {
 		if *jsonOut {
 			return json.NewEncoder(r.stdout).Encode(event)
@@ -1902,9 +1110,9 @@ func (r runner) runLogs(args []string) error {
 	if *follow {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		return recorder.FollowEvents(ctx, *tail, 250*time.Millisecond, emit)
+		return rt.Operator.FollowEvents(ctx, *tail, 250*time.Millisecond, emit)
 	}
-	events, err := recorder.TailEvents(*tail)
+	events, err := rt.Operator.TailEvents(*tail)
 	if err != nil {
 		return err
 	}
@@ -1914,313 +1122,6 @@ func (r runner) runLogs(args []string) error {
 		}
 	}
 	return nil
-}
-
-func (r runner) loadRuntime() (config.Config, *facade.Service, error) {
-	rt, err := paxruntime.Load(r.configFile())
-	if err != nil {
-		return config.Config{}, nil, err
-	}
-	return rt.Config, rt.Service, nil
-}
-
-func (r runner) loadService() (*facade.Service, error) {
-	_, service, err := r.loadRuntime()
-	return service, err
-}
-
-func (r runner) configFile() string {
-	return paxruntime.ConfigFile(r.configPath)
-}
-
-func (r runner) printHelp() {
-	fmt.Fprintln(r.stdout, "paxm - memory adapter CLI")
-	fmt.Fprintln(r.stdout)
-	fmt.Fprintln(r.stdout, "Usage:")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] setup [--integration paxm|codex-plugin|claude-plugin]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] uninstall [--agent AGENT] [--yes]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] recall --query TEXT [--limit N] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] remember --profile stm|ltm --text TEXT")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] history [--days N] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] logs [--tail N] [--follow] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill scan --agent AGENT [--before TIME]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] backfill status --agent AGENT --provider NAME")
-	fmt.Fprintln(r.stdout, "  paxm eval run [--suite PATH] [--json]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] mcp serve")
-	fmt.Fprintln(r.stdout, "  paxm update [--check] [--version VERSION]")
-	fmt.Fprintln(r.stdout, "  paxm [--config PATH] config doctor")
-	fmt.Fprintln(r.stdout, "  paxm version")
-}
-
-func (r runner) recordRecallTelemetry(cfg config.Config, kind, source, target, hookEvent, profile, query string, result facade.RecallResult, skipped bool, duration time.Duration, opErr error) {
-	event := paxruntime.RecallTelemetryEvent(cfg, paxruntime.RecallTelemetryInput{
-		Kind:      kind,
-		Source:    source,
-		Target:    target,
-		HookEvent: hookEvent,
-		Profile:   profile,
-		Result:    result,
-		Skipped:   skipped,
-		Duration:  duration,
-		Err:       opErr,
-	})
-	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
-	recorder.PrepareQueryEvent(&event, query)
-	r.recordTelemetry(cfg, event)
-}
-
-func (r runner) recordRememberTelemetry(cfg config.Config, kind, source, profile string, itemCount int, result facade.IngestResult, duration time.Duration, opErr error) {
-	event := paxruntime.RememberTelemetryEvent(cfg, paxruntime.RememberTelemetryInput{
-		Kind:      kind,
-		Source:    source,
-		Profile:   profile,
-		ItemCount: itemCount,
-		Result:    result,
-		Duration:  duration,
-		Err:       opErr,
-	})
-	r.recordTelemetry(cfg, event)
-}
-
-func (r runner) recordHookWriteTelemetry(cfg config.Config, event facade.HookEvent, response hookBufferResponse, duration time.Duration, opErr error) {
-	telemetryEvent := telemetry.Event{
-		Time:                 time.Now().UTC(),
-		Kind:                 "hook_write",
-		Source:               "hook",
-		Command:              "hook",
-		Target:               event.Target,
-		HookEvent:            event.Event,
-		Profile:              hookWriteProfile(cfg, event),
-		Success:              opErr == nil,
-		Skipped:              opErr != nil || !response.Buffered,
-		DurationMS:           duration.Milliseconds(),
-		ItemCount:            boolInt(response.Buffered),
-		Flushed:              response.Flushed,
-		ProviderWrites:       response.ProviderWrites,
-		ProviderRefs:         response.ProviderRefs,
-		ProviderErrorDetails: telemetry.ProviderErrors(response.ProviderErrors),
-		Error:                paxruntime.TelemetryError(opErr),
-	}
-	r.recordTelemetry(cfg, telemetryEvent)
-}
-
-func (r runner) recordTelemetry(cfg config.Config, event telemetry.Event) {
-	recorder := telemetry.NewRecorder(cfg.Telemetry, r.configFile())
-	if err := recorder.Record(event); err != nil {
-		fmt.Fprintf(r.stderr, "paxm telemetry skipped: %s\n", err)
-	}
-}
-
-func hookRecallProfile(cfg config.Config, event facade.HookEvent) string {
-	if event.Target == "" {
-		event.Target = "codex"
-	}
-	if event.Event == "" {
-		event.Event = "user_input"
-	}
-	if agent, ok := cfg.Agents[event.Target]; ok {
-		if hook, ok := agent.Hooks[event.Event]; ok {
-			if event.Metadata != nil && event.Metadata[facade.HookRecallPhaseMetadataKey] == facade.HookRecallPhaseInitial && hook.Recall.Initial != nil && hook.Recall.Initial.Enabled {
-				return paxruntime.EffectiveRecallProfile(cfg, hook.Recall.Initial.Profile)
-			}
-			return paxruntime.EffectiveRecallProfile(cfg, hook.Recall.Profile)
-		}
-	}
-	return "default"
-}
-
-func hookWriteProfile(cfg config.Config, event facade.HookEvent) string {
-	if event.Target == "" {
-		event.Target = "codex"
-	}
-	if agent, ok := cfg.Agents[event.Target]; ok {
-		if hook, ok := agent.Hooks[event.Event]; ok {
-			return paxruntime.EffectiveWriteProfile(hook.Write.Profile)
-		}
-	}
-	return "default"
-}
-
-func hookWriteEnabled(cfg config.Config, event facade.HookEvent) bool {
-	if event.Target == "" {
-		event.Target = "codex"
-	}
-	agent, ok := cfg.Agents[event.Target]
-	if !ok || !agent.Enabled {
-		return false
-	}
-	hook, ok := agent.Hooks[event.Event]
-	return ok && hook.Write.Enabled
-}
-
-func (r runner) markInitialUserInputRecall(cfg config.Config, event facade.HookEvent) facade.HookEvent {
-	if !hookInitialRecallEnabled(cfg, event) {
-		return event
-	}
-	key := hookSessionStateKey(event)
-	if key == "" {
-		return event
-	}
-	first, err := markHookSessionSeen(hookSessionStatePath(r.configFile()), key, time.Now().UTC())
-	if err != nil {
-		fmt.Fprintf(r.stderr, "paxm hook state skipped: %s\n", err)
-		return event
-	}
-	if !first {
-		return event
-	}
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]string)
-	}
-	event.Metadata[facade.HookRecallPhaseMetadataKey] = facade.HookRecallPhaseInitial
-	return event
-}
-
-func hookInitialRecallEnabled(cfg config.Config, event facade.HookEvent) bool {
-	if event.Target == "" {
-		event.Target = "codex"
-	}
-	if event.Event == "" {
-		event.Event = "user_input"
-	}
-	if event.Event != "user_input" {
-		return false
-	}
-	agent, ok := cfg.Agents[event.Target]
-	if !ok || !agent.Enabled {
-		return false
-	}
-	hook, ok := agent.Hooks[event.Event]
-	return ok && hook.Recall.Enabled && hook.Recall.Initial != nil && hook.Recall.Initial.Enabled
-}
-
-func hookSessionStateKey(event facade.HookEvent) string {
-	target := event.Target
-	if target == "" {
-		target = "codex"
-	}
-	if value := strings.TrimSpace(event.Metadata["session_id"]); value != "" {
-		return target + "/session/" + value
-	}
-	if value := strings.TrimSpace(event.Metadata["transcript_path"]); value != "" {
-		return target + "/transcript/" + value
-	}
-	if value := strings.TrimSpace(event.Workspace); value != "" {
-		return target + "/workspace/" + value
-	}
-	if value := strings.TrimSpace(event.Metadata["cwd"]); value != "" {
-		return target + "/workspace/" + value
-	}
-	return ""
-}
-
-func hookSessionStatePath(configPath string) string {
-	return filepath.Join(filepath.Dir(config.ExpandPath(configPath)), "hooks", "session_state.json")
-}
-
-const (
-	hookSessionStateVersion    = 1
-	hookSessionStateMaxEntries = 1000
-	hookSessionStateTTL        = 7 * 24 * time.Hour
-)
-
-type hookSessionState struct {
-	Version int                  `json:"version"`
-	Seen    map[string]time.Time `json:"seen"`
-}
-
-func markHookSessionSeen(path, key string, now time.Time) (bool, error) {
-	state, err := loadHookSessionState(path)
-	if err != nil {
-		return false, err
-	}
-	if state.Seen == nil {
-		state.Seen = make(map[string]time.Time)
-	}
-	pruneHookSessionState(&state, now)
-	_, exists := state.Seen[key]
-	state.Seen[key] = now.UTC()
-	if err := saveHookSessionState(path, state); err != nil {
-		return false, err
-	}
-	return !exists, nil
-}
-
-func loadHookSessionState(path string) (hookSessionState, error) {
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return hookSessionState{Version: hookSessionStateVersion, Seen: make(map[string]time.Time)}, nil
-		}
-		return hookSessionState{}, err
-	}
-	var state hookSessionState
-	if err := json.Unmarshal(bytes, &state); err != nil {
-		return hookSessionState{Version: hookSessionStateVersion, Seen: make(map[string]time.Time)}, nil
-	}
-	if state.Version == 0 {
-		state.Version = hookSessionStateVersion
-	}
-	if state.Seen == nil {
-		state.Seen = make(map[string]time.Time)
-	}
-	return state, nil
-}
-
-func saveHookSessionState(path string, state hookSessionState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	state.Version = hookSessionStateVersion
-	bytes, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
-	if err := os.WriteFile(tmp, bytes, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-func pruneHookSessionState(state *hookSessionState, now time.Time) {
-	cutoff := now.Add(-hookSessionStateTTL)
-	for key, seenAt := range state.Seen {
-		if seenAt.Before(cutoff) {
-			delete(state.Seen, key)
-		}
-	}
-	if len(state.Seen) <= hookSessionStateMaxEntries {
-		return
-	}
-	type seenEntry struct {
-		Key    string
-		SeenAt time.Time
-	}
-	entries := make([]seenEntry, 0, len(state.Seen))
-	for key, seenAt := range state.Seen {
-		entries = append(entries, seenEntry{Key: key, SeenAt: seenAt})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].SeenAt.Before(entries[j].SeenAt)
-	})
-	for len(entries) > hookSessionStateMaxEntries {
-		delete(state.Seen, entries[0].Key)
-		entries = entries[1:]
-	}
-}
-
-func boolInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
-}
-
-type setupOption struct {
-	ID    string
-	Label string
 }
 
 func providerOptions(cfg config.Config) []setupOption {
@@ -2512,8 +1413,6 @@ func agentOptionPriority(name string) int {
 		return 1
 	case "pi":
 		return 2
-	case "opencode":
-		return 3
 	default:
 		return 100
 	}
@@ -2527,8 +1426,6 @@ func agentDisplayName(name string) string {
 		return "Claude Code"
 	case "pi":
 		return "Pi"
-	case "opencode":
-		return "OpenCode"
 	default:
 		return name
 	}
@@ -3661,7 +2558,7 @@ func writeJSON(w io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
-func writeRecallMarkdown(w io.Writer, result facade.RecallResult) {
+func writeRecallMarkdown(w io.Writer, result tools.RecallResult) {
 	if len(result.Hits) == 0 {
 		fmt.Fprintln(w, "No memories found.")
 		return
@@ -3687,14 +2584,14 @@ func writeRecallMarkdown(w io.Writer, result facade.RecallResult) {
 	}
 }
 
-func writeRecallContextMarkdown(w io.Writer, result facade.RecallResult, mode string) {
+func writeRecallContextMarkdown(w io.Writer, result tools.RecallResult, mode string) {
 	if len(result.Hits) == 0 {
 		writeRecallMarkdown(w, result)
 		return
 	}
 	var context bytes.Buffer
 	writeRecallMarkdown(&context, result)
-	fmt.Fprintln(w, facade.WrapRecallContext(mode, context.String()))
+	fmt.Fprintln(w, tools.WrapRecallContext(mode, context.String()))
 }
 
 func writeHistorySummary(w io.Writer, summary telemetry.HistorySummary) {
@@ -3717,7 +2614,6 @@ func writeHistorySummary(w io.Writer, summary telemetry.HistorySummary) {
 		{"errors", formatInt(summary.Totals.Errors)},
 		{"skipped", formatInt(summary.Totals.Skipped)},
 		{"provider_errors", formatInt(summary.Totals.ProviderErrors)},
-		{"recall_timeouts", formatInt(summary.Totals.RecallTimeouts)},
 	})
 	writeHistoryTable(w, "recall funnel", []string{"recalls", "hits", "inserted", "insert_rate"}, [][]string{{
 		formatInt(summary.Totals.Recalls),
@@ -3764,8 +2660,8 @@ func writeHistorySummary(w io.Writer, summary telemetry.HistorySummary) {
 	writeNamedCounters(w, "by hook", []string{"hook", "recalls", "inserted", "writes", "flushes", "errors"}, summary.HookEvents, func(counter telemetry.Counter) []string {
 		return []string{formatInt(counter.Recalls), formatInt(counter.Inserted), formatInt(counter.Writes), formatInt(counter.Flushes), formatInt(counter.Errors)}
 	})
-	writeNamedCounters(w, "by provider", []string{"provider", "recalls", "hits", "avg_recall", "p95_recall", "recall_timeouts", "bulkhead_skips", "writes", "refs", "avg_write", "avg_passive_latency", "provider_errors"}, summary.Providers, func(counter telemetry.Counter) []string {
-		return []string{formatInt(counter.Recalls), formatInt(counter.Hits), formatAverageMS(counter.ProviderRecallDurationMS, counter.ProviderRecallSamples), formatDurationMS(telemetry.ProviderRecallP95MS(counter)), formatInt(counter.ProviderRecallTimeouts), formatInt(counter.ProviderRecallBulkheadSkips), formatInt(counter.Writes), formatInt(counter.Refs), formatAverageMS(counter.ProviderWriteDurationMS, counter.ProviderWriteSamples), formatAverageMS(counter.PassiveWriteLatencyTotalMS, counter.PassiveWriteSamples), formatInt(counter.ProviderErrors)}
+	writeNamedCounters(w, "by provider", []string{"provider", "recalls", "hits", "writes", "refs", "avg_write", "avg_passive_latency", "provider_errors"}, summary.Providers, func(counter telemetry.Counter) []string {
+		return []string{formatInt(counter.Recalls), formatInt(counter.Hits), formatInt(counter.Writes), formatInt(counter.Refs), formatAverageMS(counter.ProviderWriteDurationMS, counter.ProviderWriteSamples), formatAverageMS(counter.PassiveWriteLatencyTotalMS, counter.PassiveWriteSamples), formatInt(counter.ProviderErrors)}
 	})
 }
 
@@ -3924,13 +2820,6 @@ func formatAverageMS(total int64, samples int) string {
 		return "n/a"
 	}
 	return fmt.Sprintf("%.1fms", float64(total)/float64(samples))
-}
-
-func formatDurationMS(value int64) string {
-	if value == 0 {
-		return "n/a"
-	}
-	return strconv.FormatInt(value, 10) + "ms"
 }
 
 func firstNonEmpty(values ...string) string {

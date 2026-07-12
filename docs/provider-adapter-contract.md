@@ -20,3 +20,8 @@ Provider-specific tests supplement this shared matrix with the request shapes
 and response fields each backend actually supports. Coverage is intentionally
 not represented as identical across providers: paxm does not invent tier,
 expiry, raw-score, batch, or error capabilities that a backend does not expose.
+
+External provider authors should use the normative
+[`JSON-RPC Provider Protocol v1`](jsonrpc-provider-protocol.md) and run
+`paxm eval provider jsonrpc --command ./provider`. The black-box kit verifies
+required fidelity and advertised batch/delete lifecycle capabilities.

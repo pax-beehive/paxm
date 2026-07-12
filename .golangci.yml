@@ -1,0 +1,56 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - gocognit
+    - gocyclo
+    - govet
+  settings:
+    gocognit:
+      min-complexity: 26
+    gocyclo:
+      min-complexity: 21
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go$
+        linters:
+          - gocognit
+          - gocyclo
+      - path: (^|/)internal/eval/
+        linters:
+          - gocognit
+          - gocyclo
+      - path: (^|/)evals/
+        linters:
+          - gocognit
+          - gocyclo
+      - path: (^|/)internal/crossagent/
+        linters:
+          - gocognit
+          - gocyclo
+      - path: (^|/)internal/adapters/contracttest/
+        linters:
+          - gocognit
+          - gocyclo
+      - path: (^|/)internal/adapters/jsonrpc/conformance/
+        linters:
+          - gocognit
+          - gocyclo
+      - path: (^|/)internal/cli/commands_operator_impl\.go$
+        text: func.*(Eval|LoCoMo|Conformance)
+        linters:
+          - gocognit
+          - gocyclo
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,63 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
-	"github.com/pax-beehive/paxm/internal/capturequeue"
 	"github.com/pax-beehive/paxm/internal/config"
 )
-
-type captureDeliveryWorker struct {
-	queue  *capturequeue.Queue
-	notify chan struct{}
-	stop   chan struct{}
-	done   chan struct{}
-	cancel context.CancelFunc
-}
-
-func newCaptureDeliveryWorker(queue *capturequeue.Queue) *captureDeliveryWorker {
-	ctx, cancel := context.WithCancel(context.Background())
-	worker := &captureDeliveryWorker{
-		queue:  queue,
-		notify: make(chan struct{}, 1),
-		stop:   make(chan struct{}),
-		done:   make(chan struct{}),
-		cancel: cancel,
-	}
-	go func() {
-		defer close(worker.done)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-worker.notify:
-				_, _ = worker.queue.RunOnce(ctx)
-			case <-ticker.C:
-				_, _ = worker.queue.SealExpired(ctx)
-				_, _ = worker.queue.RunOnce(ctx)
-			case <-worker.stop:
-				return
-			}
-		}
-	}()
-	return worker
-}
-
-func (w *captureDeliveryWorker) Notify() {
-	select {
-	case w.notify <- struct{}{}:
-	default:
-	}
-}
-
-func (w *captureDeliveryWorker) Close() {
-	w.cancel()
-	close(w.stop)
-	select {
-	case <-w.done:
-	case <-time.After(time.Second):
-	}
-}
 
 func hookQueuePath(configPath string) string {
 	return filepath.Join(filepath.Dir(config.ExpandPath(configPath)), "hooks", "capture.sqlite")

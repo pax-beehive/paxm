@@ -268,13 +268,23 @@ integration when passive lifecycle hooks or distribution materially improve the
 experience. Each new agent integration must include a real end-to-end test that
 proves write and recall through the agent's actual runtime.
 
-Claude Code plugin status: local spike completed. The repo plugin packages the
-paxm skills, all five existing Claude lifecycle hooks, and `paxm mcp serve`.
-`paxm setup --integration claude-plugin` migrates ownership and removes only
-legacy paxm-managed Claude hooks. Local real-runtime acceptance proved passive
-write, fresh-session passive recall, MCP active recall, marketplace install,
-disable, and re-enable behavior. Public release/version pairing remains before
-the plugin is treated as a supported distribution channel.
+Claude Code plugin status: released and supported as of paxm v0.1.17. The repo
+marketplace publishes `paxm-claude` version 0.1.17 with the paxm and paxm-setup
+skills, all five existing Claude lifecycle hooks, and `paxm mcp serve`. Users
+install it with:
+
+```text
+claude plugin marketplace add pax-beehive/memory-adaptor
+claude plugin install paxm-claude@pax-memory --scope user
+paxm setup --integration claude-plugin
+```
+
+Setup migrates integration ownership and removes only legacy paxm-managed
+Claude hooks. Release acceptance used the real Claude Code runtime and proved
+passive write to SQLite and Zep, fresh-session passive recall without tool use,
+explicit active recall through the paxm MCP tool, marketplace installation,
+disable, and re-enable behavior. The release also fixed episode integrity
+verification for captured events carrying admission text.
 
 OpenCode is the first integration candidate to investigate:
 
@@ -302,7 +312,6 @@ in core:
 
 1. Review the in-progress macOS design, then implement Phase 3A.
 2. Continue through 3B-3D without duplicating the Go runtime in Swift.
-3. Release and document the validated Claude Code plugin.
-4. Run an OpenCode integration spike; ship only if MCP plus plugin lifecycle
+3. Run an OpenCode integration spike; ship only if MCP plus plugin lifecycle
    events provide a clear passive-memory improvement.
-5. Expand other agents or providers only from demonstrated demand.
+4. Expand other agents or providers only from demonstrated demand.

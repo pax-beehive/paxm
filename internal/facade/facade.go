@@ -12,6 +12,7 @@ import (
 
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 const (
@@ -22,43 +23,14 @@ const (
 type Service struct {
 	cfg    config.Config
 	router *memory.Router
+	tools  *tools.Engine
 }
 
-type RecallInput struct {
-	Query   string            `json:"query"`
-	Profile string            `json:"profile,omitempty"`
-	Limit   int               `json:"limit,omitempty"`
-	Meta    map[string]string `json:"meta,omitempty"`
-}
-
-type RecallResult struct {
-	Query           string                  `json:"query"`
-	Hits            []memory.MemoryHit      `json:"hits"`
-	ProviderErrors  []memory.ProviderError  `json:"provider_errors,omitempty"`
-	ProviderRecalls []memory.ProviderRecall `json:"provider_recalls,omitempty"`
-	TimedOut        bool                    `json:"timed_out,omitempty"`
-}
-
-type IngestInput struct {
-	ID            string            `json:"id,omitempty"`
-	Text          string            `json:"text"`
-	AdmissionText string            `json:"-"`
-	Profile       string            `json:"profile,omitempty"`
-	Source        string            `json:"source,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
-	CreatedAt     time.Time         `json:"created_at,omitempty"`
-	Tier          memory.MemoryTier `json:"tier,omitempty"`
-	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
-}
-
-type IngestResult struct {
-	Refs           []memory.MemoryRef     `json:"refs"`
-	ProviderErrors []memory.ProviderError `json:"provider_errors,omitempty"`
-}
-
-type IngestBatchInput struct {
-	Items []IngestInput `json:"items"`
-}
+type RecallInput = tools.RecallInput
+type RecallResult = tools.RecallResult
+type IngestInput = tools.RememberInput
+type IngestResult = tools.RememberResult
+type IngestBatchInput = tools.RememberBatchInput
 
 type HookEvent struct {
 	Target    string            `json:"target,omitempty"`
@@ -89,117 +61,34 @@ type HookResult struct {
 }
 
 func New(cfg config.Config, router *memory.Router) *Service {
-	return &Service{cfg: config.Normalize(cfg), router: router}
+	normalized := config.Normalize(cfg)
+	return &Service{cfg: normalized, router: router, tools: tools.New(normalized, router)}
 }
+
+func (s *Service) Tools() *tools.Engine { return s.tools }
 
 func (s *Service) Config() config.Config {
 	return s.cfg
 }
 
 func (s *Service) Recall(ctx context.Context, input RecallInput) (RecallResult, error) {
-	query := strings.TrimSpace(input.Query)
-	if query == "" {
-		return RecallResult{}, errors.New("recall query is required")
-	}
-	policy, err := s.searchPolicy(input.Profile, input.Limit)
-	if err != nil {
-		return RecallResult{}, err
-	}
-	searchResult, err := s.router.SearchWithPolicy(ctx, memory.SearchQuery{
-		Text:     query,
-		Metadata: input.Meta,
-	}, policy)
-	result := RecallResult{
-		Query:           query,
-		Hits:            searchResult.Hits,
-		ProviderErrors:  searchResult.ProviderErrors,
-		ProviderRecalls: searchResult.ProviderRecalls,
-	}
-	return result, err
+	return s.tools.Recall(ctx, input)
 }
 
 func (s *Service) Ingest(ctx context.Context, input IngestInput) (IngestResult, error) {
-	item, profile, ok := memoryItemFromIngestInput(input)
-	if !ok {
-		return IngestResult{}, errors.New("ingest text is required")
-	}
-	policy, err := s.putPolicy(profile)
-	if err != nil {
-		return IngestResult{}, err
-	}
-	putResult, err := s.router.PutWithPolicy(ctx, item, policy)
-	result := IngestResult{
-		Refs:           putResult.Refs,
-		ProviderErrors: putResult.ProviderErrors,
-	}
-	return result, err
+	return s.tools.Remember(ctx, input)
 }
 
 func (s *Service) IngestBatch(ctx context.Context, input IngestBatchInput) (IngestResult, error) {
-	grouped := make(map[string][]memory.MemoryItem)
-	for _, item := range input.Items {
-		memoryItem, profile, ok := memoryItemFromIngestInput(item)
-		if !ok {
-			continue
-		}
-		grouped[profile] = append(grouped[profile], memoryItem)
-	}
-	if len(grouped) == 0 {
-		return IngestResult{}, nil
-	}
-
-	var result IngestResult
-	var errs []error
-	for profile, items := range grouped {
-		policy, err := s.putPolicy(profile)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		putResult, err := s.router.PutBatchWithPolicy(ctx, items, policy)
-		result.Refs = append(result.Refs, putResult.Refs...)
-		result.ProviderErrors = append(result.ProviderErrors, putResult.ProviderErrors...)
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return result, errors.Join(errs...)
+	return s.tools.RememberBatch(ctx, input)
 }
 
 func (s *Service) IngestBatchToProvider(ctx context.Context, provider string, input IngestBatchInput) (IngestResult, error) {
-	provider = strings.TrimSpace(provider)
-	if provider == "" {
-		return IngestResult{}, errors.New("provider is required")
-	}
-	grouped := make(map[string][]memory.MemoryItem)
-	for _, item := range input.Items {
-		memoryItem, profile, ok := memoryItemFromIngestInput(item)
-		if !ok {
-			continue
-		}
-		grouped[profile] = append(grouped[profile], memoryItem)
-	}
-	var result IngestResult
-	var errs []error
-	for profile, items := range grouped {
-		policy, err := s.putPolicy(profile)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		policy.Providers = []memory.ProviderRoute{{Name: provider, Required: true}}
-		putResult, err := s.router.PutBatchWithPolicy(ctx, items, policy)
-		result.Refs = append(result.Refs, putResult.Refs...)
-		result.ProviderErrors = append(result.ProviderErrors, putResult.ProviderErrors...)
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return result, errors.Join(errs...)
+	return s.tools.RememberBatchToProvider(ctx, provider, input)
 }
 
 func (s *Service) CleanupExpired(ctx context.Context, limit int) (memory.CleanupExpiredResult, error) {
-	return s.router.CleanupExpired(ctx, limit)
+	return s.tools.CleanupExpired(ctx, limit)
 }
 
 func memoryItemFromIngestInput(input IngestInput) (memory.MemoryItem, string, bool) {
@@ -433,9 +322,6 @@ func toMemoryRoutes(routes []config.ProviderRouteConfig) []memory.ProviderRoute 
 			Name:     route.Name,
 			Required: route.Required,
 			Weight:   route.Weight,
-		}
-		if timeout, err := time.ParseDuration(route.Timeout); err == nil {
-			memoryRoute.Timeout = timeout
 		}
 		if route.Thresholds != nil {
 			memoryRoute.MinRelevance = route.Thresholds.MinRelevance

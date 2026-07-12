@@ -11,15 +11,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/pax-beehive/paxm/internal/facade"
 	"github.com/pax-beehive/paxm/internal/sessions"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 const maxItemBytes = 24 * 1024
 
 type Runner struct {
-	Store     *Store
-	Service   *facade.Service
+	Store   *Store
+	Service interface {
+		RememberBatchToProvider(context.Context, string, tools.RememberBatchInput) (tools.RememberResult, error)
+	}
 	ProcessID func() int
 }
 
@@ -130,8 +132,8 @@ func (r Runner) processBackfillFile(ctx context.Context, options RunOptions, sta
 	return operationErrors, r.finishBackfillFile(options, status, fileStartBytes, file.Size)
 }
 
-func ingestItems(turns []sessions.Turn) []facade.IngestInput {
-	var items []facade.IngestInput
+func ingestItems(turns []sessions.Turn) []tools.RememberInput {
+	var items []tools.RememberInput
 	for _, turn := range turns {
 		items = append(items, turnItems(turn)...)
 	}
@@ -144,7 +146,7 @@ type fileProgress struct {
 	total      int
 }
 
-func (r Runner) processBackfillItems(ctx context.Context, options RunOptions, status *Status, progress fileProgress, items []facade.IngestInput, nextUpload *time.Time) ([]error, error) {
+func (r Runner) processBackfillItems(ctx context.Context, options RunOptions, status *Status, progress fileProgress, items []tools.RememberInput, nextUpload *time.Time) ([]error, error) {
 	var operationErrors []error
 	for index, item := range items {
 		operationErr, err := r.processBackfillItem(ctx, options, status, progress, index, item, nextUpload)
@@ -158,7 +160,7 @@ func (r Runner) processBackfillItems(ctx context.Context, options RunOptions, st
 	return operationErrors, nil
 }
 
-func (r Runner) processBackfillItem(ctx context.Context, options RunOptions, status *Status, progress fileProgress, index int, item facade.IngestInput, nextUpload *time.Time) (error, error) {
+func (r Runner) processBackfillItem(ctx context.Context, options RunOptions, status *Status, progress fileProgress, index int, item tools.RememberInput, nextUpload *time.Time) (error, error) {
 	done, checkErr := r.Store.Succeeded(options.Scope, item.ID)
 	if checkErr != nil {
 		return nil, checkErr
@@ -173,7 +175,7 @@ func (r Runner) processBackfillItem(ctx context.Context, options RunOptions, sta
 	if err := waitForNextUpload(ctx, *nextUpload, options.RateInterval); err != nil {
 		return nil, r.pauseBackfill(options, status, err)
 	}
-	result, ingestErr := r.Service.IngestBatchToProvider(ctx, options.Provider, facade.IngestBatchInput{Items: []facade.IngestInput{item}})
+	result, ingestErr := r.Service.RememberBatchToProvider(ctx, options.Provider, tools.RememberBatchInput{Items: []tools.RememberInput{item}})
 	*nextUpload = time.Now().Add(options.RateInterval)
 	if ingestErr != nil {
 		status.Failed++
@@ -226,7 +228,7 @@ func (r Runner) pauseBackfill(options RunOptions, status *Status, err error) err
 	return err
 }
 
-func firstProviderRef(result facade.IngestResult) string {
+func firstProviderRef(result tools.RememberResult) string {
 	if len(result.Refs) == 0 {
 		return ""
 	}
@@ -273,11 +275,11 @@ func updateRates(status *Status) {
 	}
 }
 
-func turnItems(turn sessions.Turn) []facade.IngestInput {
+func turnItems(turn sessions.Turn) []tools.RememberInput {
 	header := fmt.Sprintf("Historical %s agent session turn.\n\nUser:\n%s\n\nAssistant:\n", turn.Agent, turn.User)
 	text := header + turn.Assistant
 	parts := splitUTF8(text, maxItemBytes)
-	items := make([]facade.IngestInput, 0, len(parts))
+	items := make([]tools.RememberInput, 0, len(parts))
 	for index, part := range parts {
 		id := turn.ID
 		if len(parts) > 1 {
@@ -293,7 +295,7 @@ func turnItems(turn sessions.Turn) []facade.IngestInput {
 			metadata["part"] = strconv.Itoa(index + 1)
 			metadata["parts"] = strconv.Itoa(len(parts))
 		}
-		items = append(items, facade.IngestInput{
+		items = append(items, tools.RememberInput{
 			ID:        id,
 			Text:      part,
 			Source:    "backfill:" + turn.Agent,

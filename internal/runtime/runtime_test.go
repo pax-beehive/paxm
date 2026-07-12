@@ -68,7 +68,7 @@ func TestLoadTable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load() error = %v", err)
 			}
-			if rt.ConfigPath != path || rt.Service == nil {
+			if rt.ConfigPath != path || rt.Tools == nil || rt.Capture == nil || rt.Operator == nil {
 				t.Fatalf("unexpected runtime: %#v", rt)
 			}
 			health, err := rt.Health(context.Background())

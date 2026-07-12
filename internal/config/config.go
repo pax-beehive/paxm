@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -320,41 +322,19 @@ func DefaultConfig(configPath string) Config {
 		},
 		Agents: map[string]AgentConfig{
 			"opencode": {
-				Enabled: false,
-				ActiveRecall: ActiveRecallConfig{
-					Enabled: true,
-					Profile: "default",
-					Output:  "markdown",
-				},
+				Enabled:      false,
+				ActiveRecall: ActiveRecallConfig{Enabled: true, Profile: "default", Output: "markdown"},
 				Hooks: map[string]AgentHookConfig{
 					"user_input": {
 						Recall: HookRecallConfig{
-							Enabled:       true,
-							Profile:       "passive",
-							QueryTemplate: "{{ .prompt }}",
-							MaxResults:    defaultHookRecallMaxResults,
-							Timeout:       defaultPassiveRecallTimeout,
-							Output:        "markdown",
-							Insertion: HookInsertionConfig{
-								MinScore:          defaultHookInsertionMinScore,
-								MaxItems:          defaultHookInsertionMaxItems,
-								RequireQueryTerms: true,
-							},
-							Initial: defaultInitialHookRecall(),
+							Enabled: true, Profile: "passive", QueryTemplate: "{{ .prompt }}", MaxResults: defaultHookRecallMaxResults,
+							Timeout: defaultPassiveRecallTimeout, Output: "markdown",
+							Insertion: HookInsertionConfig{MinScore: defaultHookInsertionMinScore, MaxItems: defaultHookInsertionMaxItems, RequireQueryTerms: true},
+							Initial:   defaultInitialHookRecall(),
 						},
 					},
 					"turn_end": {
-						Write: HookWriteConfig{
-							Enabled:  true,
-							Profile:  "ltm",
-							Template: defaultHookWriteTemplate,
-							Mode:     "turn_end",
-							Buffer: HookBufferConfig{
-								Enabled:    true,
-								Flush:      true,
-								FlushCount: defaultHookBufferFlushCount,
-							},
-						},
+						Write: HookWriteConfig{Enabled: true, Profile: "ltm", Template: defaultHookWriteTemplate, Mode: "turn_end", Buffer: HookBufferConfig{Enabled: true, Flush: true, FlushCount: defaultHookBufferFlushCount}},
 					},
 				},
 			},
@@ -601,18 +581,162 @@ func Save(path string, cfg Config) error {
 }
 
 func Validate(cfg Config) error {
-	for _, validate := range []func(Config) error{
-		validateCaptureQueue,
-		validateAgentIntegrationOwners,
-		validateRecallProfiles,
-		validateAgentRecallTimeouts,
-		validateWriteProfiles,
+	if err := validateCaptureQueue(cfg.CaptureQueue); err != nil {
+		return err
+	}
+	if err := validateAgentOwners(cfg.Agents); err != nil {
+		return err
+	}
+	if err := validateAgentRecallTimeouts(cfg.Agents); err != nil {
+		return err
+	}
+	if err := validateRecallProfiles(cfg.RecallProfiles); err != nil {
+		return err
+	}
+	return validateWriteProfiles(cfg.WriteProfiles)
+}
+
+func validateCaptureQueue(queue CaptureQueueConfig) error {
+	for name, value := range map[string]string{
+		"max_episode_age": queue.MaxEpisodeAge,
+		"retry_min":       queue.RetryMin,
 	} {
-		if err := validate(cfg); err != nil {
-			return err
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		duration, err := time.ParseDuration(value)
+		if err != nil || duration <= 0 {
+			return fmt.Errorf("capture_queue.%s must be a positive duration", name)
+		}
+	}
+	for provider, concurrency := range queue.ProviderConcurrency {
+		if concurrency <= 0 {
+			return fmt.Errorf("capture_queue.provider_concurrency.%s must be positive", provider)
+		}
+	}
+	if queue.MaxAttempts < 0 {
+		return errors.New("capture_queue.max_attempts must not be negative")
+	}
+	return nil
+}
+
+func validateAgentOwners(agents map[string]AgentConfig) error {
+	for name, agent := range agents {
+		owner := strings.TrimSpace(strings.ToLower(agent.Integration.Owner))
+		if owner == "" || owner == IntegrationOwnerPaxm || owner == IntegrationOwnerCodexPlugin || owner == IntegrationOwnerClaudePlugin {
+			if owner == IntegrationOwnerCodexPlugin && name != "codex" {
+				return fmt.Errorf("agent %q cannot use integration owner %q", name, owner)
+			}
+			if owner == IntegrationOwnerClaudePlugin && name != "claude" {
+				return fmt.Errorf("agent %q cannot use integration owner %q", name, owner)
+			}
+			continue
+		}
+		return fmt.Errorf("agent %q has invalid integration owner %q; expected paxm, codex-plugin, or claude-plugin", name, agent.Integration.Owner)
+	}
+	return nil
+}
+
+func validateRecallProfiles(profiles map[string]RecallProfileConfig) error {
+	recallNames := sortedKeys(profiles)
+	for _, name := range recallNames {
+		for _, route := range profiles[name].Providers {
+			if err := validatePositiveDuration(route.Timeout); err != nil {
+				return fmt.Errorf("recall profile %q provider %q timeout: %w", name, route.Name, err)
+			}
+		}
+		for _, tier := range profiles[name].Tiers {
+			if _, ok := canonicalTier(tier); !ok {
+				return fmt.Errorf("recall profile %q has invalid tier %q; expected stm or ltm", name, tier)
+			}
 		}
 	}
 	return nil
+}
+
+func validateAgentRecallTimeouts(agents map[string]AgentConfig) error {
+	for name, agent := range agents {
+		for event, hook := range agent.Hooks {
+			if err := validatePositiveDuration(hook.Recall.Timeout); err != nil {
+				return fmt.Errorf("agent %q hook %q recall timeout: %w", name, event, err)
+			}
+			if hook.Recall.Initial != nil {
+				if err := validatePositiveDuration(hook.Recall.Initial.Timeout); err != nil {
+					return fmt.Errorf("agent %q hook %q initial recall timeout: %w", name, event, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validatePositiveDuration(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return errors.New("must be a positive duration")
+	}
+	return nil
+}
+
+func validateWriteProfiles(profiles map[string]WriteProfileConfig) error {
+	writeNames := sortedKeys(profiles)
+	for _, name := range writeNames {
+		profile := profiles[name]
+		tier := strings.TrimSpace(profile.Tier)
+		if tier != "" {
+			var ok bool
+			tier, ok = canonicalTier(tier)
+			if !ok {
+				return fmt.Errorf("write profile %q has invalid tier %q; expected stm or ltm", name, profile.Tier)
+			}
+		} else if strings.EqualFold(strings.TrimSpace(name), "stm") {
+			tier = "stm"
+		} else {
+			tier = "ltm"
+		}
+
+		expiresAfter := strings.TrimSpace(profile.ExpiresAfter)
+		if tier == "ltm" {
+			if expiresAfter != "" {
+				return fmt.Errorf("write profile %q with tier ltm must not set expires_after", name)
+			}
+			continue
+		}
+		if expiresAfter == "" {
+			return fmt.Errorf("write profile %q with tier stm requires expires_after", name)
+		}
+		duration, err := time.ParseDuration(expiresAfter)
+		if err != nil {
+			return fmt.Errorf("write profile %q has invalid expires_after %q: %w", name, profile.ExpiresAfter, err)
+		}
+		if duration <= 0 {
+			return fmt.Errorf("write profile %q expires_after must be positive", name)
+		}
+	}
+	return nil
+}
+
+func sortedKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func canonicalTier(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "stm":
+		return "stm", true
+	case "ltm":
+		return "ltm", true
+	default:
+		return "", false
+	}
 }
 
 func Exists(path string) bool {
@@ -639,10 +763,15 @@ func Normalize(cfg Config) Config {
 		cfg.Providers = make(map[string]ProviderConfig)
 	}
 	renamedLegacyLocal := normalizeProviders(&cfg)
+	normalizeProfiles(&cfg, renamedLegacyLocal)
+	normalizeAgents(&cfg)
+	normalizeRuntime(&cfg)
+	return cfg
+}
+
+func normalizeProfiles(cfg *Config, renamedLegacyLocal bool) {
 	if len(cfg.RecallProfiles) == 0 {
-		cfg.RecallProfiles = map[string]RecallProfileConfig{
-			"default": legacyRecallProfile(cfg.Providers),
-		}
+		cfg.RecallProfiles = map[string]RecallProfileConfig{"default": legacyRecallProfile(cfg.Providers)}
 	}
 	for name, profile := range cfg.RecallProfiles {
 		profile = normalizeRecallProfile(profile)
@@ -666,23 +795,27 @@ func Normalize(cfg Config) Config {
 		cfg.RecallProfiles["passive_initial"] = PassiveInitialRecallProfileFrom(base)
 	}
 	if len(cfg.WriteProfiles) == 0 {
-		cfg.WriteProfiles = map[string]WriteProfileConfig{
-			"default": legacyWriteProfile(cfg.Providers),
-		}
+		cfg.WriteProfiles = map[string]WriteProfileConfig{"default": legacyWriteProfile(cfg.Providers)}
 	}
 	if renamedLegacyLocal {
-		renameProviderRoutes(&cfg, "local", "sqlite")
+		renameProviderRoutes(cfg, "local", "sqlite")
 	}
 	for name, profile := range cfg.WriteProfiles {
 		cfg.WriteProfiles[name] = normalizeWriteProfile(name, profile)
 	}
-	ensureMemoryTierWriteProfiles(&cfg)
+	ensureMemoryTierWriteProfiles(cfg)
+}
+
+func normalizeAgents(cfg *Config) {
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = legacyAgents(cfg.Hooks)
 	}
 	for name, agent := range cfg.Agents {
 		cfg.Agents[name] = normalizeAgent(agent)
 	}
+}
+
+func normalizeRuntime(cfg *Config) {
 	cfg.Telemetry = normalizeTelemetry(cfg.Telemetry)
 	if cfg.CaptureQueue.Path != "" {
 		cfg.CaptureQueue.Path = ExpandPath(cfg.CaptureQueue.Path)
@@ -713,7 +846,6 @@ func Normalize(cfg Config) Config {
 		cfg.Providers[name] = provider
 	}
 	cfg.Hooks = nil
-	return cfg
 }
 
 func normalizeProviders(cfg *Config) bool {

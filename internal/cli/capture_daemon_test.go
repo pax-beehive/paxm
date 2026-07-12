@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/pax-beehive/paxm/internal/adapters"
+	"github.com/pax-beehive/paxm/internal/capture"
 	"github.com/pax-beehive/paxm/internal/capturequeue"
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/facade"
+	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
 )
 
 func TestHookDaemonLockAllowsOnlyOneOwnerAndRecoversAfterRelease(t *testing.T) {
@@ -34,14 +36,14 @@ func TestHookDaemonLockAllowsOnlyOneOwnerAndRecoversAfterRelease(t *testing.T) {
 }
 
 func TestCaptureSessionKeyIncludesTargetWorkspaceAndSession(t *testing.T) {
-	first := captureSessionKey(facade.HookEvent{Target: "codex", Workspace: "/workspace/a", Metadata: map[string]string{"session_id": "same"}})
-	second := captureSessionKey(facade.HookEvent{Target: "codex", Workspace: "/workspace/b", Metadata: map[string]string{"session_id": "same"}})
-	third := captureSessionKey(facade.HookEvent{Target: "claude", Workspace: "/workspace/a", Metadata: map[string]string{"session_id": "same"}})
+	first := capture.SessionKey(capture.Event{Target: "codex", Workspace: "/workspace/a", Metadata: map[string]string{"session_id": "same"}})
+	second := capture.SessionKey(capture.Event{Target: "codex", Workspace: "/workspace/b", Metadata: map[string]string{"session_id": "same"}})
+	third := capture.SessionKey(capture.Event{Target: "claude", Workspace: "/workspace/a", Metadata: map[string]string{"session_id": "same"}})
 	if first == second || first == third || second == third {
 		t.Fatalf("capture partitions collided: %q %q %q", first, second, third)
 	}
-	unknownA := captureSessionKey(facade.HookEvent{Target: "codex", Workspace: "/workspace/a", Metadata: map[string]string{"event_id": "a"}})
-	unknownB := captureSessionKey(facade.HookEvent{Target: "codex", Workspace: "/workspace/a", Metadata: map[string]string{"event_id": "b"}})
+	unknownA := capture.SessionKey(capture.Event{Target: "codex", Workspace: "/workspace/a", Metadata: map[string]string{"event_id": "a"}})
+	unknownB := capture.SessionKey(capture.Event{Target: "codex", Workspace: "/workspace/a", Metadata: map[string]string{"event_id": "b"}})
 	if unknownA == unknownB {
 		t.Fatalf("unidentified sessions were collapsed: %q", unknownA)
 	}
@@ -58,6 +60,7 @@ func TestCaptureQueueHookAcknowledgesDurableTerminalWithoutWaitingForProvider(t 
 		t.Fatal(err)
 	}
 	service := facade.New(cfg, router)
+	rt := &paxruntime.Runtime{Config: cfg, Tools: service.Tools(), Capture: capture.New(service)}
 	providerStarted := make(chan struct{})
 	releaseProvider := make(chan struct{})
 	queue, err := capturequeue.Open(filepath.Join(t.TempDir(), "capture.sqlite"), capturequeue.Options{
@@ -72,12 +75,12 @@ func TestCaptureQueueHookAcknowledgesDurableTerminalWithoutWaitingForProvider(t 
 		t.Fatal(err)
 	}
 	defer queue.Close()
-	worker := newCaptureDeliveryWorker(queue)
-	defer worker.Close()
+	notify := func() { go func() { _, _ = queue.RunOnce(context.Background()) }() }
+	captureRuntime := capture.NewRuntime(rt.Capture, queue, notify, func() {})
 	server, client := net.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := handleCaptureQueueConn(context.Background(), service, queue, server, worker.Notify, func() {})
+		_, _, err := handleCaptureQueueConn(context.Background(), captureRuntime, server)
 		done <- err
 	}()
 	raw := json.RawMessage(`{"session_id":"session-a","last_assistant_message":"done"}`)
@@ -130,13 +133,14 @@ func TestCaptureQueueShutdownSealsWithoutWaitingForProvider(t *testing.T) {
 	}
 
 	server, client := net.Pipe()
+	captureRuntime := capture.NewRuntime(nil, queue, func() {}, func() {})
 	done := make(chan struct {
 		flushed  int
 		shutdown bool
 		err      error
 	}, 1)
 	go func() {
-		flushed, shutdown, err := handleCaptureQueueConn(context.Background(), nil, queue, server, func() {}, func() {})
+		flushed, shutdown, err := handleCaptureQueueConn(context.Background(), captureRuntime, server)
 		done <- struct {
 			flushed  int
 			shutdown bool
@@ -161,50 +165,6 @@ func TestCaptureQueueShutdownSealsWithoutWaitingForProvider(t *testing.T) {
 	}
 	if stats.PendingDeliveries != 1 {
 		t.Fatalf("sealed episode was not retained for the next daemon: %#v", stats)
-	}
-}
-
-func TestCaptureDeliveryWorkerCloseIsBoundedByBlockedProvider(t *testing.T) {
-	started := make(chan struct{})
-	blocked := make(chan struct{})
-	queue, err := capturequeue.Open(filepath.Join(t.TempDir(), "capture.sqlite"), capturequeue.Options{
-		Providers: func(string) []string { return []string{"blocked"} },
-		Deliver: func(context.Context, string, capturequeue.Episode) (string, error) {
-			close(started)
-			<-blocked
-			return "", nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := queue.Append(context.Background(), capturequeue.Event{
-		SessionKey: "session-a",
-		Terminal:   true,
-		Item:       facade.IngestInput{Text: "pending"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	worker := newCaptureDeliveryWorker(queue)
-	worker.Notify()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("provider did not start")
-	}
-	startedAt := time.Now()
-	worker.Close()
-	if elapsed := time.Since(startedAt); elapsed > 1500*time.Millisecond {
-		t.Fatalf("worker shutdown remained blocked for %s", elapsed)
-	}
-	close(blocked)
-	select {
-	case <-worker.done:
-	case <-time.After(time.Second):
-		t.Fatal("worker did not finish after provider release")
-	}
-	if err := queue.Close(); err != nil {
-		t.Fatal(err)
 	}
 }
 

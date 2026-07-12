@@ -146,6 +146,18 @@ type CleanupExpiredProvider interface {
 	CleanupExpired(ctx context.Context, limit int) (int, error)
 }
 
+// DeleteProvider is an optional capability used when callers must remove
+// specific writes, such as benchmark data recorded in an eval manifest.
+type DeleteProvider interface {
+	Delete(ctx context.Context, ref MemoryRef) error
+}
+
+// EvalScopeCleaner is an optional capability for providers that can remove an
+// entire isolated benchmark scope more reliably than deleting individual refs.
+type EvalScopeCleaner interface {
+	CleanupEvalScope(ctx context.Context) error
+}
+
 type ProviderError struct {
 	Provider string `json:"provider"`
 	Required bool   `json:"required"`

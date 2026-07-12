@@ -26,6 +26,7 @@ type graphClient interface {
 	Add(context.Context, *zepgo.AddDataRequest, ...option.RequestOption) (*zepgo.Episode, error)
 	AddBatch(context.Context, *zepgo.AddDataBatchRequest, ...option.RequestOption) ([]*zepgo.Episode, error)
 	Search(context.Context, *zepgo.GraphSearchQuery, ...option.RequestOption) (*zepgo.GraphSearchResults, error)
+	Delete(context.Context, string, ...option.RequestOption) (*zepgo.SuccessResponse, error)
 }
 
 type Provider struct {
@@ -185,6 +186,17 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 
 func (p *Provider) Health(ctx context.Context) error {
 	return ctx.Err()
+}
+
+func (p *Provider) CleanupEvalScope(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(p.graphID, "paxm-eval-") {
+		return errors.New("zep eval cleanup requires a dedicated paxm-eval graph")
+	}
+	_, err := p.client.Delete(ctx, p.graphID)
+	return err
 }
 
 func (p *Provider) applyTarget(request *zepgo.GraphSearchQuery) {

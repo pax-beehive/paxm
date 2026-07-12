@@ -7,21 +7,38 @@ hook installation, and recall policy in user-owned configuration.
 
 ```text
 cmd/paxm
-  internal/cli          command parsing and interactive setup
+  internal/cli          thin command adapters grouped by audience
+  internal/tools        agent-facing recall and remember interface
+  internal/capture      passive lifecycle and durable capture workflow
   internal/mcp          stdio MCP server and memory tools
-  internal/runtime      shared config, router, and facade loading
+  internal/runtime      shared config, router, tools, and capture loading
   internal/eval         versioned suites, isolated runtime runs, and metrics
-  internal/facade       active recall, hook recall, and writes
+  internal/facade       compatibility implementation behind tools/capture
   internal/memory       provider interface, routing, ranking, thresholds
   internal/adapters     provider registry
   internal/config       YAML config model and compatibility loading
   internal/telemetry    bounded local logs, metrics, and history summaries
 ```
 
-The CLI, MCP server, and evaluation runner never talk to concrete providers
-directly. They load config, build the provider registry/router, and call the
-facade through the shared runtime seam. Evaluation cases use an isolated
-temporary config and provider store rather than the user's normal config.
+The CLI no longer imports the facade. Active CLI commands and MCP are adapters
+over `runtime.Tools`; passive hooks are adapters over `runtime.Capture`.
+`capture.Runtime` owns write-item policy, durable append, sequence, seal/flush,
+and shutdown ordering. Provider diagnostics and evals may call adapter seams
+directly because their purpose is to test below the application interfaces.
+
+Top-level commands have an explicit audience:
+
+- operator: setup, uninstall, config, history, logs, backfill, eval, update;
+- agent tools: recall, remember, MCP;
+- internal transport: hook, hook daemon, and hook control commands.
+
+The macOS application is expected to replace operator CLI as the primary human
+interface, not as the only recovery and automation adapter. Config inspection,
+provider health, observation, batch operations, and cleanup already enter the
+typed `operator.Service`; setup/install and binary update remain platform
+adapters that should be moved behind operator application services as Desktop
+is implemented. The application must never parse CLI text. Agent tools intentionally
+cannot install hooks, mutate credentials, update paxm, or change routing.
 
 ## Provider Boundary
 
@@ -89,11 +106,11 @@ The default active recall profile reads both `stm` and `ltm`, so short-lived
 working memory can help active reasoning without being inserted by passive hooks.
 
 Agents that support MCP can use `paxm mcp serve` instead of shelling out to the
-CLI. The MCP server exposes `paxm_recall`, `paxm_remember`, `paxm_history`, and
-`paxm_config_doctor` over stdio. It reuses the same facade and telemetry paths
-as the CLI, so recall/write policy remains entirely in user-owned paxm config.
-It intentionally does not expose setup, uninstall, hook installation, or
-backfill execution as MCP tools.
+CLI. The MCP server exposes only `paxm_recall` and `paxm_remember` over stdio.
+It reuses the same least-privilege tools and telemetry paths as the CLI, so
+recall/write policy remains entirely in user-owned paxm config. History,
+provider diagnostics, setup, uninstall, hook installation, routing changes,
+and backfill remain operator capabilities and are not MCP tools.
 
 ## Write Profiles
 
@@ -173,11 +190,16 @@ paxm [--config PATH] backfill scan --agent AGENT [--before TIME]
 paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]
 paxm [--config PATH] backfill status --agent AGENT --provider NAME
 paxm eval run [--suite PATH] [--gate quality|adapter|none] [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]
+paxm eval run locomo --dataset PATH --agent NAME --model PROVIDER/MODEL --provider NAME (--max-questions N | --all) [--arms control,passive,active] [--json] [--output RESULT.json]
+paxm eval retrieval locomo --dataset PATH --provider NAME [--limit N] [--settle DURATION] [--keep-memory] [--json] [--output RESULT.json]
+paxm eval provider jsonrpc --command PATH [--arg VALUE] [--timeout DURATION] [--json]
+paxm eval cleanup (--run RUN_ID | --stale) [--manifest-dir PATH]
 paxm [--config PATH] mcp serve
 paxm [--config PATH] config doctor
 ```
 
-Evaluation suites share the production runtime and facade. Retrieval cases can
+Evaluation suites share the production runtime through `runtime.Tools`,
+`runtime.Operator`, and `runtime.Capture`. Retrieval cases can
 seed known memories before active or passive recall. Conversation-write cases
 instead keep normalized user/assistant history separate from the normalized
 hook-event messages rendered through `HookWriteItem`, persist the result through
@@ -188,6 +210,20 @@ assistant or tool field.
 Their reports add capture-quality metrics, result count, write and recall
 latency totals, returned recall-content bytes, and metadata survival checks
 without introducing a second hook or retrieval implementation.
+
+The primary LoCoMo runner evaluates a real agent in fresh control, passive, and
+active sessions. Passive uses the agent's lifecycle hook and active uses the
+same paxm MCP server exposed to users. It reports deterministic normalized
+answer F1 and memory lift rather than claiming compatibility with the official
+LLM-judge accuracy. Direct evidence Recall@K remains under `eval retrieval` as
+a diagnostic for explaining agent failures.
+
+Both modes give each conversation a provider-specific isolated scope and an
+atomic manifest of created refs. SQLite databases are disposable, Mem0 uses a
+unique run scope, and Zep uses a unique graph. Cleanup is attempted on both
+success and failure; unsupported remote providers fail closed unless the
+caller explicitly chooses `--keep-memory`. Stale manifests make interrupted
+remote runs recoverable with `paxm eval cleanup`.
 
 `user_input` runs passive recall by rendering the configured hook recall
 template into a query. The first `user_input` for a session can use the
@@ -240,7 +276,7 @@ user/assistant turns. They discard system instructions, hidden reasoning, tool
 traffic, sidechains, and attachments. Each normalized turn receives a
 deterministic item ID, original timestamp, session ID, workspace, agent, and
 `backfill:<agent>` source. Oversized turns are split into bounded deterministic
-parts before entering the normal facade/router/provider write path.
+parts before entering the normal operator/router/provider write path.
 
 The target is an exact enabled provider name rather than a write profile. This
 keeps multiple Mem0 or custom provider instances unambiguous. Extraction rules

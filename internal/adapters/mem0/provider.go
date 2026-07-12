@@ -168,6 +168,20 @@ func (p *Provider) Health(ctx context.Context) error {
 	return nil
 }
 
+func (p *Provider) Delete(ctx context.Context, ref memory.MemoryRef) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(ref.ID)
+	if id == "" {
+		return errors.New("mem0 delete requires a memory id")
+	}
+	if ref.Provider != "" && ref.Provider != p.name {
+		return fmt.Errorf("mem0 delete ref belongs to provider %q", ref.Provider)
+	}
+	return p.doJSON(ctx, http.MethodDelete, "/memories/"+url.PathEscape(id), nil, nil)
+}
+
 func (p *Provider) putOne(ctx context.Context, item memory.MemoryItem) ([]memory.MemoryRef, error) {
 	text := strings.TrimSpace(item.Text)
 	if text == "" {

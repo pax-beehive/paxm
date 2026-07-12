@@ -47,7 +47,7 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 
 	responses := decodeResponses(t, stdout.String())
 	if len(responses) != 6 {
-		t.Fatalf("expected 6 responses, got %d: %s", len(responses), stdout.String())
+		t.Fatalf("expected 4 responses, got %d: %s", len(responses), stdout.String())
 	}
 	assertNoRPCError(t, responses)
 
@@ -101,6 +101,7 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	if doctorResult.IsError || !strings.Contains(doctorResult.Content[0].Text, `"provider": "sqlite"`) {
 		t.Fatalf("unexpected doctor result: %#v", doctorResult)
 	}
+
 }
 
 func TestRecallErrorToolResultMarksPartialHits(t *testing.T) {
@@ -161,7 +162,7 @@ func TestServerRejectsInvalidToolArguments(t *testing.T) {
 	responses := decodeResponses(t, stdout.String())
 	assertNoRPCError(t, responses)
 	if len(responses) != 5 {
-		t.Fatalf("expected 5 responses, got %d: %s", len(responses), stdout.String())
+		t.Fatalf("expected 4 responses, got %d: %s", len(responses), stdout.String())
 	}
 	for _, response := range responses {
 		var result toolResult

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -16,12 +17,41 @@ import (
 	"time"
 
 	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
+	"github.com/pax-beehive/paxm/internal/capture"
 	"github.com/pax-beehive/paxm/internal/config"
 	paxeval "github.com/pax-beehive/paxm/internal/eval"
 	"github.com/pax-beehive/paxm/internal/facade"
 	"github.com/pax-beehive/paxm/internal/memory"
 	"github.com/pax-beehive/paxm/internal/telemetry"
 )
+
+func TestEvalProviderJSONRPCPublicCommand(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "sample-provider")
+	build := exec.Command("go", "build", "-o", binary, "../../examples/jsonrpc-provider")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build sample: %v: %s", err, output)
+	}
+	t.Setenv("PAXM_SAMPLE_PROVIDER_STORE", filepath.Join(dir, "store.json"))
+	var stdout, stderr bytes.Buffer
+	exit := Main([]string{"eval", "provider", "jsonrpc", "--command", binary, "--json"}, nil, &stdout, &stderr)
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, stderr.String())
+	}
+	var result struct {
+		Passed bool `json:"passed"`
+		Checks []struct {
+			Name   string `json:"name"`
+			Passed bool   `json:"passed"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Passed || len(result.Checks) < 7 {
+		t.Fatalf("result=%#v", result)
+	}
+}
 
 func TestEvalReportIncludesConversationWriteMetrics(t *testing.T) {
 	var output bytes.Buffer
@@ -35,6 +65,99 @@ func TestEvalReportIncludesConversationWriteMetrics(t *testing.T) {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("eval report missing %q: %s", expected, output.String())
 		}
+	}
+}
+
+func TestEvalRunLoCoMoUsesConfiguredProviderAndReturnsJSON(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	datasetPath := filepath.Join(dir, "locomo.json")
+	dataset := `[{"sample_id":"sample-1","qa":[{"question":"What did Alice adopt?","answer":"A dog","evidence":["D1:1"],"category":1}],"conversation":{"speaker_a":"Alice","speaker_b":"Bob","session_1_date_time":"1 June 2023","session_1":[{"speaker":"Alice","dia_id":"D1:1","text":"I adopted a dog."}]}}]`
+	if err := os.WriteFile(datasetPath, []byte(dataset), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	exit := Main([]string{"--config", configPath, "eval", "retrieval", "locomo", "--dataset", datasetPath, "--provider", "sqlite", "--manifest-dir", filepath.Join(dir, "runs"), "--run-id", "cli-test", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if exit != 0 {
+		t.Fatalf("exit = %d, stderr = %s", exit, stderr.String())
+	}
+	var result paxeval.LoCoMoResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout.String())
+	}
+	if result.Benchmark != "locomo-text-qa-retrieval" || result.Passed != 1 || result.RecallAtK != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+type cliAgentExecutor struct{}
+
+func (cliAgentExecutor) Execute(_ context.Context, request paxeval.AgentRequest) (paxeval.AgentResponse, error) {
+	answer := "a cat"
+	if request.Arm != paxeval.AgentArmControl {
+		answer = "a dog"
+	}
+	return paxeval.AgentResponse{Text: answer, InputTokens: 10, OutputTokens: 2}, nil
+}
+
+func TestEvalRunLoCoMoUsesAgentArms(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	datasetPath := filepath.Join(dir, "locomo.json")
+	dataset := `[{"sample_id":"sample-1","qa":[{"question":"What did Alice adopt?","answer":"A dog","evidence":["D1:1"],"category":1}],"conversation":{"speaker_a":"Alice","speaker_b":"Bob","session_1_date_time":"1 June 2023","session_1":[{"speaker":"Alice","dia_id":"D1:1","text":"I adopted a dog."}]}}]`
+	if err := os.WriteFile(datasetPath, []byte(dataset), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	exit := MainWithDependencies([]string{"--config", configPath, "eval", "run", "locomo", "--dataset", datasetPath, "--agent", "opencode", "--model", "test/model", "--provider", "sqlite", "--max-questions", "1", "--manifest-dir", filepath.Join(dir, "runs"), "--run-id", "agent-cli-test", "--json"}, nil, &stdout, &stderr, Dependencies{AgentExecutor: cliAgentExecutor{}})
+	if exit != 0 {
+		t.Fatalf("exit = %d, stderr = %s", exit, stderr.String())
+	}
+	var result paxeval.LoCoMoAgentResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.QuestionCount != 1 || result.TrialCount != 3 || result.PassiveLift != 1 || result.ActiveLift != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestEvalCleanupRemovesStaleSQLiteRun(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	runsDir := filepath.Join(dir, "runs")
+	scope, err := paxeval.PrepareProviderScope(cfg, "sqlite", paxeval.ScopeOptions{RunID: "stale-run", ManifestDir: runsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(scope.Config.Providers["sqlite"].Path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scope.Config.Providers["sqlite"].Path, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.SetStatus(paxeval.EvalStatusComplete, nil); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	exit := Main([]string{"--config", configPath, "eval", "cleanup", "--stale", "--manifest-dir", runsDir}, nil, &stdout, &stderr)
+	if exit != 0 {
+		t.Fatalf("exit = %d, stderr = %s", exit, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(runsDir, "stale-run")); !os.IsNotExist(err) {
+		t.Fatalf("stale run still exists: %v", err)
 	}
 }
 
@@ -200,7 +323,7 @@ func TestCLISetupCodexPluginOwnsHooks(t *testing.T) {
 
 func TestCLIHookSourceMatchesConfiguredCodexOwner(t *testing.T) {
 	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
-	event := facade.HookEvent{Target: "codex", Event: "user_input"}
+	event := capture.Event{Target: "codex", Event: "user_input"}
 	if !hookSourceAllowed(cfg, event) {
 		t.Fatal("paxm-owned Codex hooks should be allowed without a plugin marker")
 	}
@@ -691,11 +814,9 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	claudeSettingsPath := filepath.Join(t.TempDir(), "claude", "settings.json")
 	codexConfigPath := filepath.Join(t.TempDir(), "codex.toml")
 	piAgentDir := filepath.Join(t.TempDir(), "pi-agent")
-	openCodeConfigDir := filepath.Join(t.TempDir(), "opencode")
 	t.Setenv("PAXM_CLAUDE_SETTINGS", claudeSettingsPath)
 	t.Setenv("PAXM_CODEX_CONFIG", codexConfigPath)
 	t.Setenv("PAXM_PI_AGENT_DIR", piAgentDir)
-	t.Setenv("PAXM_OPENCODE_CONFIG_DIR", openCodeConfigDir)
 
 	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\nall\n")
 	var stdout bytes.Buffer
@@ -715,7 +836,7 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	if code := Main([]string{"--config", configPath, "uninstall", "--yes"}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("uninstall failed with code %d: %s", code, stderr.String())
 	}
-	for _, name := range []string{"Codex", "Claude Code", "Pi", "OpenCode"} {
+	for _, name := range []string{"Codex", "Claude Code", "Pi"} {
 		if !strings.Contains(stdout.String(), "uninstalled "+name+" passive integration") {
 			t.Fatalf("uninstall output missing %s: %s", name, stdout.String())
 		}
@@ -730,7 +851,7 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 			t.Fatalf("agent %s should be disabled: %#v", name, agent)
 		}
 	}
-	for _, target := range []string{"codex", "claude", "pi", "opencode"} {
+	for _, target := range []string{"codex", "claude", "pi"} {
 		for _, event := range installedHookEvents() {
 			path := filepath.Join(hooksDir, target+"-"+event.ConfigEvent)
 			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -749,9 +870,6 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(piAgentDir, "extensions", "paxm-hook")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Pi extension still exists, stat err: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(openCodeConfigDir, "plugins", "paxm.ts")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("OpenCode plugin still exists, stat err: %v", err)
 	}
 	if _, err := os.Stat(hooksDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("shared hook state directory still exists, stat err: %v", err)
@@ -820,7 +938,7 @@ func TestInternalCodexUserInputHookEmitsNativeContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hookSourceAllowed(loaded, facade.HookEvent{Target: "codex", Event: "user_input"}) {
+	if !hookSourceAllowed(loaded, capture.Event{Target: "codex", Event: "user_input"}) {
 		t.Fatalf("plugin-owned Codex hook source was unexpectedly rejected: owner=%q env=%q", loaded.Agents["codex"].Integration.Owner, os.Getenv("PAXM_INTEGRATION_OWNER"))
 	}
 
@@ -1001,7 +1119,7 @@ func TestDecodeClaudePostToolUseFailureCapturesInputAndError(t *testing.T) {
 }
 
 func TestDedupeHookMessagesRemovesWrappedToolDuplicates(t *testing.T) {
-	messages := dedupeHookMessages([]facade.HookMessage{{Role: "tool_call", Text: "Read README.md"}, {Role: "tool_call", Text: "Read README.md"}, {Role: "tool_result", Text: "contents"}})
+	messages := dedupeHookMessages([]capture.Message{{Role: "tool_call", Text: "Read README.md"}, {Role: "tool_call", Text: "Read README.md"}, {Role: "tool_result", Text: "contents"}})
 	if len(messages) != 2 {
 		t.Fatalf("messages = %#v", messages)
 	}
@@ -1040,90 +1158,41 @@ func TestCodexTranscriptToolMessagesReadsCurrentTurnAndExcludesReasoning(t *test
 	}
 }
 
-func TestHookCleanupWorkerSchedulesWithoutBlockingAndDrainsOnClose(t *testing.T) {
-	cleanupStarted := make(chan struct{})
-	releaseCleanup := make(chan struct{})
-	cleanupFinished := make(chan struct{})
-	worker := newHookCleanupWorker(func(context.Context) {
-		close(cleanupStarted)
-		<-releaseCleanup
-		close(cleanupFinished)
-	})
-
-	scheduled := make(chan struct{})
-	go func() {
-		worker.Schedule()
-		close(scheduled)
-	}()
-	select {
-	case <-scheduled:
-	case <-time.After(time.Second):
-		t.Fatal("cleanup scheduling blocked the hook path")
-	}
-	select {
-	case <-cleanupStarted:
-	case <-time.After(time.Second):
-		t.Fatal("scheduled cleanup did not start")
-	}
-
-	closed := make(chan struct{})
-	go func() {
-		worker.Close()
-		close(closed)
-	}()
-	select {
-	case <-closed:
-		t.Fatal("worker closed before scheduled cleanup completed")
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(releaseCleanup)
-	select {
-	case <-closed:
-	case <-time.After(time.Second):
-		t.Fatal("worker did not close after cleanup completed")
-	}
-	select {
-	case <-cleanupFinished:
-	default:
-		t.Fatal("worker close did not drain scheduled cleanup")
-	}
-}
-
 func TestInitialUserInputRecallStateOnlyMarksFirstSessionInput(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.DefaultConfig(configPath)
 	r := runner{configPath: configPath, stderr: &bytes.Buffer{}}
 
-	first := r.markInitialUserInputRecall(cfg, facade.HookEvent{
+	first := r.markInitialUserInputRecall(cfg, capture.Event{
 		Target: "codex",
 		Event:  "user_input",
 		Metadata: map[string]string{
 			"session_id": "session-a",
 		},
 	})
-	if first.Metadata[facade.HookRecallPhaseMetadataKey] != facade.HookRecallPhaseInitial {
+	if first.Metadata[capture.RecallPhaseMetadataKey] != capture.RecallPhaseInitial {
 		t.Fatalf("first user_input should use initial recall: %#v", first.Metadata)
 	}
 
-	second := r.markInitialUserInputRecall(cfg, facade.HookEvent{
+	second := r.markInitialUserInputRecall(cfg, capture.Event{
 		Target: "codex",
 		Event:  "user_input",
 		Metadata: map[string]string{
 			"session_id": "session-a",
 		},
 	})
-	if second.Metadata[facade.HookRecallPhaseMetadataKey] != "" {
+	if second.Metadata[capture.RecallPhaseMetadataKey] != "" {
 		t.Fatalf("second user_input should stay strict: %#v", second.Metadata)
 	}
 
-	nextSession := r.markInitialUserInputRecall(cfg, facade.HookEvent{
+	nextSession := r.markInitialUserInputRecall(cfg, capture.Event{
 		Target: "codex",
 		Event:  "user_input",
 		Metadata: map[string]string{
 			"session_id": "session-b",
 		},
 	})
-	if nextSession.Metadata[facade.HookRecallPhaseMetadataKey] != facade.HookRecallPhaseInitial {
+	if nextSession.Metadata[capture.RecallPhaseMetadataKey] != capture.RecallPhaseInitial {
 		t.Fatalf("new session should use initial recall: %#v", nextSession.Metadata)
 	}
 }
@@ -1715,11 +1784,10 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 				"zed":    {Type: "zep"},
 			},
 			Agents: map[string]config.AgentConfig{
-				"other":    {Enabled: true},
-				"pi":       {Enabled: true},
-				"opencode": {Enabled: true},
-				"codex":    {Enabled: true},
-				"claude":   {Enabled: true},
+				"other":  {Enabled: true},
+				"pi":     {Enabled: true},
+				"codex":  {Enabled: true},
+				"claude": {Enabled: true},
 			},
 		}
 		if got, want := providerOptionIDs(cfg), []string{"sqlite", "zed", "mem", "rpc", "custom"}; !reflect.DeepEqual(got, want) {
@@ -1729,7 +1797,6 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 			{ID: "codex", Label: "Codex"},
 			{ID: "claude", Label: "Claude Code"},
 			{ID: "pi", Label: "Pi"},
-			{ID: "opencode", Label: "OpenCode"},
 			{ID: "other", Label: "other"},
 		}
 		if got := hookOptions(cfg); !reflect.DeepEqual(got, wantHooks) {

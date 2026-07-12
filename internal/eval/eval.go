@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pax-beehive/paxm/internal/capture"
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/facade"
 	"github.com/pax-beehive/paxm/internal/memory"
@@ -387,16 +388,16 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 	var writtenMetadata map[string]string
 	if scenario.Write != nil {
 		writeStarted := time.Now()
-		messages := make([]facade.HookMessage, 0, len(scenario.Turns)+len(scenario.Write.Messages))
+		messages := make([]capture.Message, 0, len(scenario.Turns)+len(scenario.Write.Messages))
 		if scenario.Write.IncludeHistory {
 			for _, turn := range scenario.Turns {
-				messages = append(messages, facade.HookMessage{Role: turn.Role, Text: turn.Text, Source: "eval-history:" + scenario.ID})
+				messages = append(messages, capture.Message{Role: turn.Role, Text: turn.Text, Source: "eval-history:" + scenario.ID})
 			}
 		}
 		for _, turn := range scenario.Write.Messages {
-			messages = append(messages, facade.HookMessage{Role: turn.Role, Text: turn.Text, Source: "eval:" + scenario.ID})
+			messages = append(messages, capture.Message{Role: turn.Role, Text: turn.Text, Source: "eval:" + scenario.ID})
 		}
-		item, ok, writeErr := runtime.Service.HookWriteItem(facade.HookEvent{
+		item, ok, writeErr := runtime.Capture.WriteItem(capture.Event{
 			Target:    defaultString(scenario.Write.Target, "codex"),
 			Event:     scenario.Write.Event,
 			Prompt:    scenario.Write.Prompt,
@@ -420,7 +421,7 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		}
 		var writeResult facade.IngestResult
 		for range repeats {
-			writeResult, writeErr = runtime.Service.IngestBatch(ctx, facade.IngestBatchInput{Items: []facade.IngestInput{item}})
+			writeResult, writeErr = runtime.Operator.RememberBatch(ctx, facade.IngestBatchInput{Items: []facade.IngestInput{item}})
 			if writeErr != nil {
 				break
 			}
@@ -435,7 +436,7 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 		result.AdapterContractPassed = len(result.AdapterContractErrors) == 0
 	}
 	for _, item := range scenario.Memories {
-		_, err = runtime.Service.Ingest(ctx, facade.IngestInput{ID: item.ID, Text: item.Text, Profile: profileForTier(item.Tier), Tier: item.Tier, ExpiresAt: item.ExpiresAt, Metadata: item.Metadata, Source: "eval:" + scenario.ID})
+		_, err = runtime.Tools.Remember(ctx, facade.IngestInput{ID: item.ID, Text: item.Text, Profile: profileForTier(item.Tier), Tier: item.Tier, ExpiresAt: item.ExpiresAt, Metadata: item.Metadata, Source: "eval:" + scenario.ID})
 		if err != nil {
 			result.setExecutionError(err.Error())
 			return result
@@ -451,14 +452,14 @@ func runCase(ctx context.Context, root string, scenario Case) (result CaseResult
 	var hits []memory.MemoryHit
 	recallStarted := time.Now()
 	if scenario.Recall.Mode == "active" {
-		recalled, recallErr := runtime.Service.Recall(ctx, facade.RecallInput{Query: scenario.Recall.Query, Profile: scenario.Recall.Profile, Limit: scenario.Recall.Limit, Meta: scenario.Recall.Metadata})
+		recalled, recallErr := runtime.Tools.Recall(ctx, facade.RecallInput{Query: scenario.Recall.Query, Profile: scenario.Recall.Profile, Limit: scenario.Recall.Limit, Meta: scenario.Recall.Metadata})
 		err, hits = recallErr, recalled.Hits
 	} else {
 		metadata := copyMap(scenario.Recall.Metadata)
 		if scenario.Recall.Mode == "passive_initial" {
-			metadata[facade.HookRecallPhaseMetadataKey] = facade.HookRecallPhaseInitial
+			metadata[capture.RecallPhaseMetadataKey] = capture.RecallPhaseInitial
 		}
-		hooked, hookErr := runtime.Service.RunHook(ctx, facade.HookEvent{Target: defaultString(scenario.Recall.Target, "codex"), Event: defaultString(scenario.Recall.Event, "user_input"), Prompt: scenario.Recall.Query, Query: scenario.Recall.Query, Limit: scenario.Recall.Limit, Workspace: scenario.Recall.Workspace, Metadata: metadata})
+		hooked, hookErr := runtime.Capture.Recall(ctx, capture.Event{Target: defaultString(scenario.Recall.Target, "codex"), Event: defaultString(scenario.Recall.Event, "user_input"), Prompt: scenario.Recall.Query, Query: scenario.Recall.Query, Limit: scenario.Recall.Limit, Workspace: scenario.Recall.Workspace, Metadata: metadata})
 		err = hookErr
 		if hooked.Recall != nil {
 			hits = hooked.Recall.Hits

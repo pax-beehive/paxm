@@ -123,7 +123,7 @@ func (r runner) runBackfillRun(args []string) error {
 	if err != nil {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
 	}
-	cfg, service, err := r.loadRuntime()
+	cfg, rt, err := r.loadRuntime()
 	if err != nil {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
 	}
@@ -150,7 +150,7 @@ func (r runner) runBackfillRun(args []string) error {
 	options := r.backfillRunOptions(runArgs, agent, provider, files, cutoff, interval)
 	ctx, cleanup := backfillRunContext(runArgs.maxDuration)
 	defer cleanup()
-	status, runErr := (backfill.Runner{Store: store, Service: service}).Run(ctx, options)
+	status, runErr := (backfill.Runner{Store: store, Service: rt.Operator}).Run(ctx, options)
 	return r.finishBackfillRun(runArgs, status, runErr)
 }
 

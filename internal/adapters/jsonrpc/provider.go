@@ -20,14 +20,16 @@ import (
 )
 
 const (
-	defaultTransport = "stdio"
-	defaultTimeout   = 30 * time.Second
-	methodHealth     = "paxm.health"
-	methodSearch     = "paxm.search"
-	methodPut        = "paxm.put"
-	methodPutBatch   = "paxm.putBatch"
-	methodNotFound   = -32601
-	maxStderrBytes   = 4096
+	defaultTransport   = "stdio"
+	defaultTimeout     = 30 * time.Second
+	methodHealth       = "paxm.health"
+	methodSearch       = "paxm.search"
+	methodPut          = "paxm.put"
+	methodPutBatch     = "paxm.putBatch"
+	methodDelete       = "paxm.delete"
+	methodCapabilities = "paxm.capabilities"
+	methodNotFound     = -32601
+	maxStderrBytes     = 4096
 )
 
 type Provider struct {
@@ -81,6 +83,11 @@ type putBatchParams struct {
 type refsResult struct {
 	Ref  *memory.MemoryRef  `json:"ref,omitempty"`
 	Refs []memory.MemoryRef `json:"refs,omitempty"`
+}
+
+type Capabilities struct {
+	PutBatch bool `json:"put_batch"`
+	Delete   bool `json:"delete"`
 }
 
 func New(name string, cfg config.ProviderConfig) (*Provider, error) {
@@ -177,6 +184,22 @@ func (p *Provider) Health(ctx context.Context) error {
 		return err
 	}
 	return p.call(ctx, methodHealth, map[string]any{}, nil)
+}
+
+func (p *Provider) Capabilities(ctx context.Context) (Capabilities, error) {
+	var result Capabilities
+	err := p.call(ctx, methodCapabilities, map[string]any{}, &result)
+	if isMethodNotFound(err) {
+		return Capabilities{}, nil
+	}
+	return result, err
+}
+
+func (p *Provider) Delete(ctx context.Context, ref memory.MemoryRef) error {
+	if strings.TrimSpace(ref.ID) == "" {
+		return errors.New("jsonrpc delete requires a memory ref id")
+	}
+	return p.call(ctx, methodDelete, ref, nil)
 }
 
 func (p *Provider) putBatchIndividually(ctx context.Context, items []memory.MemoryItem) ([]memory.MemoryRef, error) {

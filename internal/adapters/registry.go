@@ -39,6 +39,18 @@ func (r Registry) Register(providerType string, factory Factory) {
 	r.factories[providerType] = factory
 }
 
+func (r Registry) BuildProvider(name string, cfg config.ProviderConfig) (memory.Provider, error) {
+	factory, ok := r.factories[cfg.Type]
+	if !ok {
+		return nil, fmt.Errorf("provider %q uses unsupported type %q", name, cfg.Type)
+	}
+	provider, err := factory(name, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("provider %q: %w", name, err)
+	}
+	return provider, nil
+}
+
 func (r Registry) BuildRouter(cfg config.Config) (*memory.Router, error) {
 	var names []string
 	for name := range cfg.Providers {
@@ -52,13 +64,9 @@ func (r Registry) BuildRouter(cfg config.Config) (*memory.Router, error) {
 		if !providerCfg.Enabled {
 			continue
 		}
-		factory, ok := r.factories[providerCfg.Type]
-		if !ok {
-			return nil, fmt.Errorf("provider %q uses unsupported type %q", name, providerCfg.Type)
-		}
-		provider, err := factory(name, providerCfg)
+		provider, err := r.BuildProvider(name, providerCfg)
 		if err != nil {
-			return nil, fmt.Errorf("provider %q: %w", name, err)
+			return nil, err
 		}
 		bindings = append(bindings, memory.ProviderBinding{
 			Provider: provider,

@@ -236,53 +236,88 @@ func readCodex(records []record, cutoff, fallback time.Time) []Turn {
 }
 
 func readMessages(agent string, records []record, cutoff, fallback time.Time) []Turn {
-	var sessionID, workspace string
-	var pending *Turn
-	var turns []Turn
+	reader := messageReader{agent: agent, cutoff: cutoff, fallback: fallback}
 	for _, entry := range records {
-		if agent == "pi" && entry.Type == "session" {
-			sessionID = entry.ID
-			workspace = entry.CWD
-			continue
-		}
-		if entry.IsSidechain || (entry.Type != "user" && entry.Type != "assistant" && entry.Type != "message") {
-			continue
-		}
-		var message messagePayload
-		if json.Unmarshal(entry.Message, &message) != nil {
-			continue
-		}
-		text := extractText(message.Content)
-		if text == "" {
-			continue
-		}
-		if entry.SessionID != "" {
-			sessionID = entry.SessionID
-		}
-		if entry.CWD != "" {
-			workspace = entry.CWD
-		}
-		switch message.Role {
-		case "user":
-			if pending != nil {
-				appendTurn(&turns, *pending, cutoff)
-			}
-			pending = &Turn{Agent: agent, SessionID: sessionID, Workspace: workspace, User: text, CreatedAt: parseTime(entry.Timestamp, fallback)}
-		case "assistant":
-			if pending == nil {
-				continue
-			}
-			if pending.Assistant == "" {
-				pending.Assistant = text
-			} else {
-				pending.Assistant += "\n\n" + text
-			}
-		}
+		reader.observe(entry)
 	}
-	if pending != nil {
-		appendTurn(&turns, *pending, cutoff)
+	return reader.finish()
+}
+
+type messageReader struct {
+	agent     string
+	sessionID string
+	workspace string
+	pending   *Turn
+	turns     []Turn
+	cutoff    time.Time
+	fallback  time.Time
+}
+
+func (r *messageReader) observe(entry record) {
+	if r.observeSession(entry) {
+		return
 	}
-	return turns
+	if entry.IsSidechain || (entry.Type != "user" && entry.Type != "assistant" && entry.Type != "message") {
+		return
+	}
+	var message messagePayload
+	if json.Unmarshal(entry.Message, &message) != nil {
+		return
+	}
+	text := extractText(message.Content)
+	if text == "" {
+		return
+	}
+	r.updateContext(entry)
+	switch message.Role {
+	case "user":
+		r.startUserTurn(text, entry.Timestamp)
+	case "assistant":
+		r.appendAssistant(text)
+	}
+}
+
+func (r *messageReader) observeSession(entry record) bool {
+	if r.agent != "pi" || entry.Type != "session" {
+		return false
+	}
+	r.sessionID = entry.ID
+	r.workspace = entry.CWD
+	return true
+}
+
+func (r *messageReader) updateContext(entry record) {
+	if entry.SessionID != "" {
+		r.sessionID = entry.SessionID
+	}
+	if entry.CWD != "" {
+		r.workspace = entry.CWD
+	}
+}
+
+func (r *messageReader) startUserTurn(text, timestamp string) {
+	if r.pending != nil {
+		appendTurn(&r.turns, *r.pending, r.cutoff)
+	}
+	r.pending = &Turn{Agent: r.agent, SessionID: r.sessionID, Workspace: r.workspace, User: text, CreatedAt: parseTime(timestamp, r.fallback)}
+}
+
+func (r *messageReader) appendAssistant(text string) {
+	if r.pending == nil {
+		return
+	}
+	if r.pending.Assistant == "" {
+		r.pending.Assistant = text
+		return
+	}
+	r.pending.Assistant += "\n\n" + text
+}
+
+func (r *messageReader) finish() []Turn {
+	if r.pending != nil {
+		appendTurn(&r.turns, *r.pending, r.cutoff)
+	}
+	return r.turns
 }
 
 func extractText(raw json.RawMessage) string {

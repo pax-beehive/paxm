@@ -100,6 +100,31 @@ func TestPutBatchFallsBackWhenPluginDoesNotSupportBatch(t *testing.T) {
 	}
 }
 
+func TestProviderCapabilitiesAndDelete(t *testing.T) {
+	provider := newHelperProvider(t, "lifecycle")
+	capabilities, err := provider.Capabilities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !capabilities.PutBatch || !capabilities.Delete {
+		t.Fatalf("capabilities = %#v", capabilities)
+	}
+	if err := provider.Delete(context.Background(), memory.MemoryRef{Provider: "plugin", ID: "put-1"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProviderCapabilitiesAreOptionalForLegacyPlugins(t *testing.T) {
+	provider := newHelperProvider(t, "plugin")
+	capabilities, err := provider.Capabilities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capabilities.PutBatch || capabilities.Delete {
+		t.Fatalf("legacy capabilities = %#v", capabilities)
+	}
+}
+
 func newHelperProvider(t *testing.T, mode string) *Provider {
 	t.Helper()
 
@@ -159,6 +184,20 @@ func TestJSONRPCPluginHelper(t *testing.T) {
 			break
 		}
 		response.Result = mustRawJSON(refsResult{Refs: []memory.MemoryRef{{ID: "batch-1"}, {ID: "batch-2"}}})
+	case methodCapabilities:
+		if os.Getenv("PAXM_JSONRPC_PLUGIN_MODE") != "lifecycle" {
+			response.Result = nil
+			response.Error = &RPCError{Code: methodNotFound, Message: "method not found"}
+			break
+		}
+		response.Result = mustRawJSON(Capabilities{PutBatch: true, Delete: true})
+	case methodDelete:
+		if os.Getenv("PAXM_JSONRPC_PLUGIN_MODE") != "lifecycle" {
+			response.Result = nil
+			response.Error = &RPCError{Code: methodNotFound, Message: "method not found"}
+			break
+		}
+		response.Result = json.RawMessage(`{"deleted":true}`)
 	default:
 		response.Result = nil
 		response.Error = &RPCError{Code: methodNotFound, Message: "method not found"}
