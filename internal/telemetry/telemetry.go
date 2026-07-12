@@ -455,6 +455,10 @@ func (c *eventCursor) poll(paths []string) ([]Event, error) {
 		newEvents, err := c.readAvailable(activePath)
 		return append(events, newEvents...), err
 	}
+	return c.pollOpenFile(paths, activePath, pathInfo, events)
+}
+
+func (c *eventCursor) pollOpenFile(paths []string, activePath string, pathInfo os.FileInfo, events []Event) ([]Event, error) {
 	currentInfo, err := c.file.Stat()
 	if err != nil {
 		return nil, err

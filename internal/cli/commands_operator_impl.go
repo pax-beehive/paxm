@@ -44,73 +44,11 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	prompter := newSetupPrompter(r.stdin, r.stdout)
-	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, *force, *yes)
+	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration)
 	if err != nil || !proceed {
 		return err
 	}
-	cfg, err := setupBaseConfig(path, configExists)
-	if err != nil {
-		return err
-	}
-	selectedProviders := defaultSelections(providerOptions(cfg), cfgProviderEnabled(cfg))
-	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
-	pluginTarget := ""
-	if *integration == config.IntegrationOwnerCodexPlugin {
-		pluginTarget = "codex"
-	}
-	if *integration == config.IntegrationOwnerClaudePlugin {
-		pluginTarget = "claude"
-	}
-	previousEnabled := make(map[string]bool, len(cfg.Agents))
-	for name, agent := range cfg.Agents {
-		previousEnabled[name] = agent.Enabled
-	}
-	if pluginTarget != "" {
-		for name := range selectedHooks {
-			selectedHooks[name] = name == pluginTarget
-		}
-	}
-	if !*yes {
-		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
-		if err != nil || !proceed {
-			return err
-		}
-	}
-	if pluginTarget != "" {
-		for name := range selectedHooks {
-			selectedHooks[name] = name == pluginTarget
-		}
-	}
-	if !anySelected(selectedProviders) {
-		return errors.New("setup requires at least one memory provider")
-	}
-	applySetupSelections(&cfg, selectedProviders, selectedHooks, *yes)
-	if pluginTarget != "" {
-		for name, enabled := range previousEnabled {
-			if name == pluginTarget {
-				continue
-			}
-			agent := cfg.Agents[name]
-			agent.Enabled = enabled
-			cfg.Agents[name] = agent
-		}
-	}
-	if agent, ok := cfg.Agents["codex"]; ok {
-		if *integration == config.IntegrationOwnerPaxm || *integration == config.IntegrationOwnerCodexPlugin {
-			agent.Integration.Owner = *integration
-		}
-		cfg.Agents["codex"] = agent
-	}
-	if agent, ok := cfg.Agents["claude"]; ok && *integration == config.IntegrationOwnerClaudePlugin {
-		agent.Integration.Owner = *integration
-		cfg.Agents["claude"] = agent
-	}
-	if !*yes {
-		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
-		if err != nil || !proceed {
-			return err
-		}
-	}
+	cfg, selectedHooks := selection.cfg, selection.selectedHooks
 	zepUserResult, err := r.maybeEnsureZepUser(context.Background(), cfg)
 	if err != nil {
 		return err
@@ -130,6 +68,97 @@ func (r runner) runSetup(args []string) error {
 		fmt.Fprintf(r.stdout, "ensured Zep user: %s (%s)\n", zepUserResult.UserID, status)
 	}
 	return r.installSelectedHookIntegrations(path, cfg, selectedHooks)
+}
+
+type setupSelection struct {
+	cfg           config.Config
+	selectedHooks map[string]bool
+}
+
+func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration string) (setupSelection, bool, error) {
+	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, force, yes)
+	if err != nil || !proceed {
+		return setupSelection{}, false, err
+	}
+	cfg, err := setupBaseConfig(path, configExists)
+	if err != nil {
+		return setupSelection{}, false, err
+	}
+	selectedProviders := defaultSelections(providerOptions(cfg), cfgProviderEnabled(cfg))
+	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
+	pluginTarget := setupPluginTarget(integration)
+	previousEnabled := enabledAgents(cfg)
+	constrainPluginHooks(selectedHooks, pluginTarget)
+	if !yes {
+		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
+		if err != nil || !proceed {
+			return setupSelection{}, false, err
+		}
+	}
+	constrainPluginHooks(selectedHooks, pluginTarget)
+	if !anySelected(selectedProviders) {
+		return setupSelection{}, false, errors.New("setup requires at least one memory provider")
+	}
+	applySetupSelections(&cfg, selectedProviders, selectedHooks, yes)
+	applySetupIntegration(&cfg, integration, pluginTarget, previousEnabled)
+	if !yes {
+		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
+		if err != nil || !proceed {
+			return setupSelection{}, false, err
+		}
+	}
+	return setupSelection{cfg: cfg, selectedHooks: selectedHooks}, true, nil
+}
+
+func setupPluginTarget(integration string) string {
+	switch integration {
+	case config.IntegrationOwnerCodexPlugin:
+		return "codex"
+	case config.IntegrationOwnerClaudePlugin:
+		return "claude"
+	default:
+		return ""
+	}
+}
+
+func enabledAgents(cfg config.Config) map[string]bool {
+	result := make(map[string]bool, len(cfg.Agents))
+	for name, agent := range cfg.Agents {
+		result[name] = agent.Enabled
+	}
+	return result
+}
+
+func constrainPluginHooks(selected map[string]bool, target string) {
+	if target == "" {
+		return
+	}
+	for name := range selected {
+		selected[name] = name == target
+	}
+}
+
+func applySetupIntegration(cfg *config.Config, integration, pluginTarget string, previousEnabled map[string]bool) {
+	if pluginTarget != "" {
+		for name, enabled := range previousEnabled {
+			if name == pluginTarget {
+				continue
+			}
+			agent := cfg.Agents[name]
+			agent.Enabled = enabled
+			cfg.Agents[name] = agent
+		}
+	}
+	if agent, ok := cfg.Agents["codex"]; ok {
+		if integration == config.IntegrationOwnerPaxm || integration == config.IntegrationOwnerCodexPlugin {
+			agent.Integration.Owner = integration
+		}
+		cfg.Agents["codex"] = agent
+	}
+	if agent, ok := cfg.Agents["claude"]; ok && integration == config.IntegrationOwnerClaudePlugin {
+		agent.Integration.Owner = integration
+		cfg.Agents["claude"] = agent
+	}
 }
 
 func (r runner) confirmSetupOverwrite(path string, prompter *setupPrompter, force, yes bool) (bool, bool, error) {

@@ -173,6 +173,25 @@ type RunResult struct {
 	Dead      int
 }
 
+type deliveryClaim struct {
+	episodeID    string
+	provider     string
+	episode      Episode
+	attempts     int
+	profiles     map[string]bool
+	corruptErr   error
+	captureTimes []time.Time
+}
+
+type deliveryResult struct {
+	claim                    deliveryClaim
+	ref                      string
+	duration                 time.Duration
+	passiveWriteLatencyTotal time.Duration
+	passiveWriteSamples      int
+	err                      error
+}
+
 type DeliveryOutcome struct {
 	EpisodeID                string
 	SessionKey               string
@@ -287,97 +306,129 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	return Receipt{EventID: event.ID, Sequence: sequence}, nil
 }
 
+type episodeDraft struct {
+	eventIDs            []string
+	events              []facade.IngestInput
+	first               int64
+	last                int64
+	sourceSequences     map[int64]int
+	sourceMode          bool
+	finalSequence       int64
+	finalSequences      map[int64]bool
+	sourceSequenceCount int
+	eventHashes         []string
+	capturedAt          time.Time
+}
+
 func (q *Queue) sealSession(ctx context.Context, tx *sql.Tx, sessionKey string, complete bool) error {
+	draft, err := q.loadEpisodeDraft(ctx, tx, sessionKey)
+	if err != nil {
+		return err
+	}
+	if len(draft.events) == 0 {
+		return nil
+	}
+	episode := draft.buildEpisode(sessionKey, complete)
+	return q.persistEpisode(ctx, tx, episode, draft.eventIDs, draft.first, draft.last)
+}
+
+func (q *Queue) loadEpisodeDraft(ctx context.Context, tx *sql.Tx, sessionKey string) (episodeDraft, error) {
 	rows, err := tx.QueryContext(ctx, `
 SELECT event_id, sequence, source_sequence, final_sequence, payload_json, payload_hash, created_at FROM capture_events
 WHERE session_key = ? AND episode_id = '' ORDER BY sequence
 `, sessionKey)
 	if err != nil {
-		return err
+		return episodeDraft{}, err
 	}
 	defer rows.Close()
-	var eventIDs []string
-	var events []facade.IngestInput
-	var first, last int64
-	sourceSequences := make(map[int64]int)
-	sourceMode := false
-	var finalSequence int64
-	finalSequences := make(map[int64]bool)
-	sourceSequenceCount := 0
-	var eventHashes []string
-	var capturedAt time.Time
+	draft := episodeDraft{
+		sourceSequences: make(map[int64]int),
+		finalSequences:  make(map[int64]bool),
+	}
 	for rows.Next() {
 		var eventID, payload, payloadHash, createdAt string
 		var sequence int64
 		var sourceSequence, sourceFinal sql.NullInt64
 		if err := rows.Scan(&eventID, &sequence, &sourceSequence, &sourceFinal, &payload, &payloadHash, &createdAt); err != nil {
-			return err
+			return episodeDraft{}, err
 		}
 		if checksum([]byte(payload)) != payloadHash {
-			return fmt.Errorf("capture event %s payload checksum mismatch", eventID)
+			return episodeDraft{}, fmt.Errorf("capture event %s payload checksum mismatch", eventID)
 		}
 		item, err := unmarshalItem([]byte(payload))
 		if err != nil {
-			return err
+			return episodeDraft{}, err
 		}
 		observedAt, err := time.Parse(time.RFC3339Nano, createdAt)
 		if err != nil {
-			return err
+			return episodeDraft{}, err
 		}
-		if capturedAt.IsZero() || observedAt.Before(capturedAt) {
-			capturedAt = observedAt
+		if draft.capturedAt.IsZero() || observedAt.Before(draft.capturedAt) {
+			draft.capturedAt = observedAt
 		}
-		if first == 0 {
-			first = sequence
+		if draft.first == 0 {
+			draft.first = sequence
 		}
-		last = sequence
+		draft.last = sequence
 		if sourceSequence.Valid {
-			sourceMode = true
-			sourceSequenceCount++
-			sourceSequences[sourceSequence.Int64]++
+			draft.sourceMode = true
+			draft.sourceSequenceCount++
+			draft.sourceSequences[sourceSequence.Int64]++
 		}
 		if sourceFinal.Valid {
-			sourceMode = true
-			finalSequence = sourceFinal.Int64
-			finalSequences[sourceFinal.Int64] = true
+			draft.sourceMode = true
+			draft.finalSequence = sourceFinal.Int64
+			draft.finalSequences[sourceFinal.Int64] = true
 		}
-		eventIDs = append(eventIDs, eventID)
-		eventHashes = append(eventHashes, payloadHash)
-		events = append(events, item)
+		draft.eventIDs = append(draft.eventIDs, eventID)
+		draft.eventHashes = append(draft.eventHashes, payloadHash)
+		draft.events = append(draft.events, item)
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return episodeDraft{}, err
 	}
-	if len(events) == 0 {
-		return nil
+	return draft, nil
+}
+
+func (d episodeDraft) buildEpisode(sessionKey string, complete bool) Episode {
+	missing, integrity := d.sequenceIntegrity(complete)
+	if complete && d.sourceMode {
+		complete = len(missing) == 0 && len(integrity) == 0
+	}
+	return Episode{ID: newID("ep"), SessionKey: sessionKey, Complete: complete, Missing: missing, Integrity: integrity, Checksum: checksum([]byte(strings.Join(d.eventHashes, "\n"))), Events: d.events, CapturedAt: d.capturedAt}
+}
+
+func (d episodeDraft) sequenceIntegrity(complete bool) ([]int64, []string) {
+	if !complete || !d.sourceMode {
+		return nil, nil
 	}
 	var missing []int64
 	var integrity []string
-	if complete && sourceMode {
-		if len(finalSequences) != 1 || finalSequence <= 0 {
-			integrity = append(integrity, "invalid_final_sequence")
-		}
-		if sourceSequenceCount != len(events) {
-			integrity = append(integrity, "missing_source_sequence")
-		}
-		for sequence, count := range sourceSequences {
-			if count > 1 {
-				integrity = append(integrity, "duplicate_sequence:"+strconv.FormatInt(sequence, 10))
-			}
-			if finalSequence > 0 && sequence > finalSequence {
-				integrity = append(integrity, "sequence_after_final:"+strconv.FormatInt(sequence, 10))
-			}
-		}
-		if finalSequence > 0 {
-			for sequence := int64(1); sequence <= finalSequence; sequence++ {
-				if sourceSequences[sequence] == 0 {
-					missing = append(missing, sequence)
-				}
-			}
-		}
-		complete = len(missing) == 0 && len(integrity) == 0
+	if len(d.finalSequences) != 1 || d.finalSequence <= 0 {
+		integrity = append(integrity, "invalid_final_sequence")
 	}
-	episode := Episode{ID: newID("ep"), SessionKey: sessionKey, Complete: complete, Missing: missing, Integrity: integrity, Checksum: checksum([]byte(strings.Join(eventHashes, "\n"))), Events: events, CapturedAt: capturedAt}
+	if d.sourceSequenceCount != len(d.events) {
+		integrity = append(integrity, "missing_source_sequence")
+	}
+	for sequence, count := range d.sourceSequences {
+		if count > 1 {
+			integrity = append(integrity, "duplicate_sequence:"+strconv.FormatInt(sequence, 10))
+		}
+		if d.finalSequence > 0 && sequence > d.finalSequence {
+			integrity = append(integrity, "sequence_after_final:"+strconv.FormatInt(sequence, 10))
+		}
+	}
+	if d.finalSequence > 0 {
+		for sequence := int64(1); sequence <= d.finalSequence; sequence++ {
+			if d.sourceSequences[sequence] == 0 {
+				missing = append(missing, sequence)
+			}
+		}
+	}
+	return missing, integrity
+}
+
+func (q *Queue) persistEpisode(ctx context.Context, tx *sql.Tx, episode Episode, eventIDs []string, first, last int64) error {
 	payload, err := json.Marshal(episode)
 	if err != nil {
 		return err
@@ -385,12 +436,12 @@ WHERE session_key = ? AND episode_id = '' ORDER BY sequence
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO capture_episodes(episode_id, session_key, first_sequence, last_sequence, complete, payload_json, payload_hash, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`, episode.ID, sessionKey, first, last, complete, payload, checksum(payload), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+`, episode.ID, episode.SessionKey, first, last, episode.Complete, payload, checksum(payload), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
 	providers := make(map[string]map[string]bool)
 	if q.opts.Providers != nil {
-		for _, item := range events {
+		for _, item := range episode.Events {
 			for _, provider := range q.opts.Providers(item.Profile) {
 				if provider = strings.TrimSpace(provider); provider != "" {
 					if providers[provider] == nil {
@@ -429,6 +480,32 @@ func (q *Queue) RunOnce(ctx context.Context) (RunResult, error) {
 		q.mu.Unlock()
 		return RunResult{}, nil
 	}
+	claims, err := q.loadDeliveryClaims(ctx)
+	if err != nil {
+		q.mu.Unlock()
+		return RunResult{}, err
+	}
+	claims, result, err := q.verifyDeliveryClaims(ctx, claims)
+	if err != nil {
+		q.mu.Unlock()
+		return result, err
+	}
+	if err := q.markDelivering(ctx, claims); err != nil {
+		q.mu.Unlock()
+		return result, err
+	}
+	semaphores := q.deliverySemaphores(claims)
+	q.mu.Unlock()
+
+	outcomes := q.deliverClaims(ctx, claims, semaphores)
+	result, err = q.persistDeliveryOutcomes(ctx, outcomes, result)
+	if err != nil {
+		return result, err
+	}
+	return result, q.refreshEpisodeStates(ctx)
+}
+
+func (q *Queue) loadDeliveryClaims(ctx context.Context) ([]deliveryClaim, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	rows, err := q.db.QueryContext(ctx, `
 SELECT d.episode_id, d.provider, d.profiles_json, e.payload_json, e.payload_hash, d.attempts
@@ -446,26 +523,15 @@ WHERE d.state IN ('pending', 'retry')
 ORDER BY e.created_at LIMIT 100
 `, now)
 	if err != nil {
-		q.mu.Unlock()
-		return RunResult{}, err
+		return nil, err
 	}
-	type claim struct {
-		episodeID    string
-		provider     string
-		episode      Episode
-		attempts     int
-		profiles     map[string]bool
-		corruptErr   error
-		captureTimes []time.Time
-	}
-	var claims []claim
+	var claims []deliveryClaim
 	for rows.Next() {
-		var value claim
+		var value deliveryClaim
 		var profilesJSON, payload, payloadHash string
 		if err := rows.Scan(&value.episodeID, &value.provider, &profilesJSON, &payload, &payloadHash, &value.attempts); err != nil {
 			rows.Close()
-			q.mu.Unlock()
-			return RunResult{}, err
+			return nil, err
 		}
 		if checksum([]byte(payload)) != payloadHash {
 			value.episode = Episode{ID: value.episodeID}
@@ -492,9 +558,12 @@ ORDER BY e.created_at LIMIT 100
 		claims = append(claims, value)
 	}
 	if err := rows.Close(); err != nil {
-		q.mu.Unlock()
-		return RunResult{}, err
+		return nil, err
 	}
+	return claims, nil
+}
+
+func (q *Queue) verifyDeliveryClaims(ctx context.Context, claims []deliveryClaim) ([]deliveryClaim, RunResult, error) {
 	verified := claims[:0]
 	var result RunResult
 	for _, claim := range claims {
@@ -504,8 +573,7 @@ ORDER BY e.created_at LIMIT 100
 		}
 		if verifyErr != nil {
 			if _, err := q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'dead', attempts = attempts + 1, last_error = ? WHERE episode_id = ? AND provider = ?`, verifyErr.Error(), claim.episodeID, claim.provider); err != nil {
-				q.mu.Unlock()
-				return result, err
+				return nil, result, err
 			}
 			result.Dead++
 			if q.opts.OnDelivery != nil {
@@ -519,8 +587,7 @@ ORDER BY e.created_at LIMIT 100
 				verifyErr = fmt.Errorf("capture episode %s capture timestamp count mismatch", claim.episodeID)
 			}
 			if _, err := q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'dead', attempts = attempts + 1, last_error = ? WHERE episode_id = ? AND provider = ?`, verifyErr.Error(), claim.episodeID, claim.provider); err != nil {
-				q.mu.Unlock()
-				return result, err
+				return nil, result, err
 			}
 			result.Dead++
 			continue
@@ -539,22 +606,19 @@ ORDER BY e.created_at LIMIT 100
 		}
 		verified = append(verified, claim)
 	}
-	claims = verified
+	return verified, result, nil
+}
+
+func (q *Queue) markDelivering(ctx context.Context, claims []deliveryClaim) error {
 	for _, claim := range claims {
 		if _, err := q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'delivering', attempts = attempts + 1 WHERE episode_id = ? AND provider = ?`, claim.episodeID, claim.provider); err != nil {
-			q.mu.Unlock()
-			return RunResult{}, err
+			return err
 		}
 	}
-	type outcome struct {
-		claim                    claim
-		ref                      string
-		duration                 time.Duration
-		passiveWriteLatencyTotal time.Duration
-		passiveWriteSamples      int
-		err                      error
-	}
-	outcomes := make(chan outcome, len(claims))
+	return nil
+}
+
+func (q *Queue) deliverySemaphores(claims []deliveryClaim) map[string]chan struct{} {
 	for _, value := range claims {
 		if _, ok := q.providerSemaphores[value.provider]; ok {
 			continue
@@ -569,9 +633,13 @@ ORDER BY e.created_at LIMIT 100
 	for provider, semaphore := range q.providerSemaphores {
 		semaphores[provider] = semaphore
 	}
-	q.mu.Unlock()
+	return semaphores
+}
+
+func (q *Queue) deliverClaims(ctx context.Context, claims []deliveryClaim, semaphores map[string]chan struct{}) []deliveryResult {
+	outcomes := make(chan deliveryResult, len(claims))
 	for _, value := range claims {
-		go func(value claim) {
+		go func(value deliveryClaim) {
 			semaphore := semaphores[value.provider]
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
@@ -579,30 +647,21 @@ ORDER BY e.created_at LIMIT 100
 			ref, err := q.opts.Deliver(ctx, value.provider, value.episode)
 			completed := time.Now()
 			latencyTotal, latencySamples := passiveWriteLatency(completed, value.captureTimes)
-			outcomes <- outcome{claim: value, ref: ref, duration: completed.Sub(started), passiveWriteLatencyTotal: latencyTotal, passiveWriteSamples: latencySamples, err: err}
+			outcomes <- deliveryResult{claim: value, ref: ref, duration: completed.Sub(started), passiveWriteLatencyTotal: latencyTotal, passiveWriteSamples: latencySamples, err: err}
 		}(value)
 	}
+	results := make([]deliveryResult, 0, len(claims))
 	for range claims {
-		value := <-outcomes
+		results = append(results, <-outcomes)
+	}
+	return results
+}
+
+func (q *Queue) persistDeliveryOutcomes(ctx context.Context, outcomes []deliveryResult, result RunResult) (RunResult, error) {
+	for _, value := range outcomes {
 		q.mu.Lock()
-		if value.err == nil {
-			_, err = q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'delivered', provider_ref = ?, delivered_at = ?, lease_until = '', last_error = '' WHERE episode_id = ? AND provider = ?`, value.ref, time.Now().UTC().Format(time.RFC3339Nano), value.claim.episodeID, value.claim.provider)
-			result.Delivered++
-		} else {
-			attempt := value.claim.attempts + 1
-			if attempt >= q.opts.MaxAttempts {
-				_, err = q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'dead', next_attempt_at = '', lease_until = '', last_error = ? WHERE episode_id = ? AND provider = ?`, value.err.Error(), value.claim.episodeID, value.claim.provider)
-				result.Dead++
-			} else {
-				shift := value.claim.attempts
-				if shift > 6 {
-					shift = 6
-				}
-				backoff := q.opts.RetryMin * time.Duration(1<<shift)
-				_, err = q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'retry', next_attempt_at = ?, lease_until = '', last_error = ? WHERE episode_id = ? AND provider = ?`, time.Now().UTC().Add(backoff).Format(time.RFC3339Nano), value.err.Error(), value.claim.episodeID, value.claim.provider)
-				result.Failed++
-			}
-		}
+		var err error
+		result, err = q.persistDeliveryOutcome(ctx, value, result)
 		q.mu.Unlock()
 		if err != nil {
 			return result, err
@@ -622,14 +681,41 @@ ORDER BY e.created_at LIMIT 100
 			})
 		}
 	}
+	return result, nil
+}
+
+func (q *Queue) persistDeliveryOutcome(ctx context.Context, value deliveryResult, result RunResult) (RunResult, error) {
+	var err error
+	if value.err == nil {
+		_, err = q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'delivered', provider_ref = ?, delivered_at = ?, lease_until = '', last_error = '' WHERE episode_id = ? AND provider = ?`, value.ref, time.Now().UTC().Format(time.RFC3339Nano), value.claim.episodeID, value.claim.provider)
+		result.Delivered++
+	} else {
+		attempt := value.claim.attempts + 1
+		if attempt >= q.opts.MaxAttempts {
+			_, err = q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'dead', next_attempt_at = '', lease_until = '', last_error = ? WHERE episode_id = ? AND provider = ?`, value.err.Error(), value.claim.episodeID, value.claim.provider)
+			result.Dead++
+		} else {
+			shift := value.claim.attempts
+			if shift > 6 {
+				shift = 6
+			}
+			backoff := q.opts.RetryMin * time.Duration(1<<shift)
+			_, err = q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'retry', next_attempt_at = ?, lease_until = '', last_error = ? WHERE episode_id = ? AND provider = ?`, time.Now().UTC().Add(backoff).Format(time.RFC3339Nano), value.err.Error(), value.claim.episodeID, value.claim.provider)
+			result.Failed++
+		}
+	}
+	return result, err
+}
+
+func (q *Queue) refreshEpisodeStates(ctx context.Context) error {
 	q.mu.Lock()
-	_, err = q.db.ExecContext(ctx, `UPDATE capture_episodes SET state = CASE
+	defer q.mu.Unlock()
+	_, err := q.db.ExecContext(ctx, `UPDATE capture_episodes SET state = CASE
   WHEN EXISTS (SELECT 1 FROM capture_deliveries d WHERE d.episode_id = capture_episodes.episode_id AND d.state = 'dead') THEN 'dead'
   WHEN NOT EXISTS (SELECT 1 FROM capture_deliveries d WHERE d.episode_id = capture_episodes.episode_id AND d.state != 'delivered') THEN 'delivered'
   ELSE 'pending'
 END`)
-	q.mu.Unlock()
-	return result, err
+	return err
 }
 
 func (q *Queue) SealExpired(ctx context.Context) (int, error) {
