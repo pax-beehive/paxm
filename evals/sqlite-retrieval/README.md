@@ -15,22 +15,20 @@ near distractor so broad matching alone cannot pass.
 property, not an aggregate relevance tradeoff. Its target budget requires every
 case to pass with zero false positives.
 
-The main challenge remains a non-gating report while explicit query planning is
-implemented. Workspace isolation has graduated to a hard CI gate alongside the
-existing 100-case baseline.
+The main challenge, workspace isolation, and existing 100-case baseline are all
+hard CI quality gates.
 
-On 2026-07-12, the lightweight analyzer raised the main challenge from 8 to 24
-of 32 passing cases, with Recall@K 1.000, Precision@K 0.859, MRR 0.922, and
-false-positive rate 0.256. Identifier splitting, bounded aliases, conservative
-morphology, CJK substrings, relaxed fallback, and workspace isolation all pass.
-The remaining failures cover strict partial suppression and long-noise ranking.
-The workspace suite passes 5 of 5 with zero false positives, and the existing
-baseline passes 100 of 100.
+On 2026-07-12, the lightweight analyzer first raised the main challenge from 8
+to 24 passing cases. Explicit strict-first planning then raised it to 32 of 32,
+with Recall@K, Precision@K, and MRR all 1.000 and zero false positives. The
+workspace suite passes 5 of 5 with zero false positives, and the existing
+baseline passes 100 of 100 with the same perfect metrics.
 
 Run the challenges:
 
 ```sh
-paxm eval run --suite evals/sqlite-retrieval/suite.json --gate none
+paxm eval run --suite evals/sqlite-retrieval/suite.json --gate quality \
+  --budget evals/sqlite-retrieval/target-budget.json
 paxm eval run --suite evals/sqlite-retrieval/workspace-suite.json --gate quality \
   --budget evals/sqlite-retrieval/workspace-target-budget.json
 ```
@@ -41,8 +39,7 @@ Regenerate both suites only after intentionally changing the source matrix:
 go run ./evals/sqlite-retrieval/generate
 ```
 
-Full graduation requires all three gates. CI already enforces the baseline and
-workspace commands; the aggregate challenge remains the final target:
+CI enforces all three graduated gates:
 
 ```sh
 paxm eval run --suite evals/baseline --gate quality \

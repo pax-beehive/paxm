@@ -82,8 +82,14 @@ analyzer for camel/snake identifiers, paths, versions, error codes, CJK
 substrings, conservative morphology, and a small product alias vocabulary. It
 does not call an embedding model or perform open-ended semantic expansion.
 FTS5 remains the fast path. The rg-like text scan runs only when analysis is
-needed and FTS5 has no full match; its all-term predicate prevents partial-match
-noise from consuming the bounded ranking pool.
+needed and FTS5 cannot fill the requested top-K with full matches; its all-term
+predicate prevents partial-match noise from consuming the bounded ranking pool.
+Retrieval then makes its reasoning explicit with three internal stages: exact
+phrase, strict all-term, and relaxed partial. Only the earliest non-empty stage
+is returned. Candidate lists from FTS5 and lexical fallback are combined with
+reciprocal-rank fusion; concise evidence density and provider rank break ties
+inside the selected stage. An internal trace records branch counts and the
+selected stage without changing `memory.Provider`, facade, CLI, or MCP types.
 When a query carries `metadata.workspace`, SQLite excludes rows owned by a
 different workspace in SQL before scoring; unscoped memories remain visible as
 shared memories for compatibility with the provider contract.

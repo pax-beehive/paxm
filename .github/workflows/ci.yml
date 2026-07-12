@@ -45,8 +45,8 @@ jobs:
           sh plugins/paxm-memory/scripts/install-paxm_test.sh
       - name: Enforce 100-case provider baseline
         run: go run ./cmd/paxm eval run --suite evals/baseline --gate quality --budget evals/baseline/budget.json
-      - name: Report SQLite retrieval challenge (non-gating)
-        run: go run ./cmd/paxm eval run --suite evals/sqlite-retrieval/suite.json --gate none
+      - name: Enforce SQLite retrieval quality
+        run: go run ./cmd/paxm eval run --suite evals/sqlite-retrieval/suite.json --gate quality --budget evals/sqlite-retrieval/target-budget.json
       - name: Enforce SQLite workspace isolation
         run: go run ./cmd/paxm eval run --suite evals/sqlite-retrieval/workspace-suite.json --gate quality --budget evals/sqlite-retrieval/workspace-target-budget.json
       - name: Run 50-case adapter write contract

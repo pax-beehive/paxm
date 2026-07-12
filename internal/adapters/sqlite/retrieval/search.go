@@ -34,12 +34,45 @@ type Hit struct {
 	RawScoreKind string
 }
 
+type planStage string
+
+const (
+	stageExact   planStage = "exact_phrase"
+	stageStrict  planStage = "strict_all_terms"
+	stageRelaxed planStage = "relaxed_partial"
+)
+
+type branchTrace struct {
+	Name       string
+	Candidates int
+}
+
+type searchTrace struct {
+	Branches []branchTrace
+	Exact    int
+	Strict   int
+	Relaxed  int
+	Selected planStage
+}
+
+type planResult struct {
+	Hits  []Hit
+	Trace searchTrace
+}
+
+type plannedHit struct {
+	Hit
+	rrf     float64
+	density float64
+}
+
 func Search(ctx context.Context, db *sql.DB, request Request) ([]Hit, error) {
 	terms := analyze(request.Text)
 	if len(terms) == 0 {
 		return searchRecent(ctx, db, request)
 	}
-	return searchFTS(ctx, db, request, terms)
+	result, err := executePlan(ctx, db, request, terms)
+	return result.Hits, err
 }
 
 func searchRecent(ctx context.Context, db *sql.DB, request Request) ([]Hit, error) {
@@ -72,11 +105,11 @@ func searchRecent(ctx context.Context, db *sql.DB, request Request) ([]Hit, erro
 	return hits, nil
 }
 
-func searchFTS(ctx context.Context, db *sql.DB, request Request, terms analysis) ([]Hit, error) {
+func executePlan(ctx context.Context, db *sql.DB, request Request, terms analysis) (planResult, error) {
 	filterSQL, filterArgs := filterClause(request, "m")
 	args := append([]any{matchQuery(terms.canonicalTerms())}, filterArgs...)
 	args = append(args, candidateLimit(request.Limit))
-	hits, err := queryCandidates(ctx, db, `
+	ftsHits, err := queryCandidates(ctx, db, `
 	SELECT m.id, m.text, m.source, m.metadata_json, m.created_at, m.tier, m.expires_at, bm25(memory_fts) AS rank
 	FROM memory_fts
 	JOIN memories AS m ON m.rowid = memory_fts.rowid
@@ -85,10 +118,12 @@ func searchFTS(ctx context.Context, db *sql.DB, request Request, terms analysis)
 	LIMIT ?
 	`, true, args...)
 	if err != nil {
-		return nil, err
+		return planResult{}, err
 	}
+	trace := searchTrace{Branches: []branchTrace{{Name: "fts_or", Candidates: len(ftsHits)}}}
+	lists := [][]Hit{ftsHits}
 	queryTerms := terms.canonicalTerms()
-	if terms.needsSupplement(request.Text) && !hasEnoughExactMatches(hits, queryTerms, resultLimit(request.Limit)) {
+	if terms.needsSupplement(request.Text) && !hasEnoughPhraseMatches(ftsHits, request.Text, queryTerms, resultLimit(request.Limit)) {
 		likeSQL, likeArgs := likeClause(terms, "m")
 		likeArgs = append(likeArgs, filterArgs...)
 		likeArgs = append(likeArgs, candidateLimit(request.Limit))
@@ -98,30 +133,154 @@ func searchFTS(ctx context.Context, db *sql.DB, request Request, terms analysis)
 	WHERE (`+likeSQL+`) AND `+filterSQL+`
 	ORDER BY m.created_at DESC
 	LIMIT ?
-	`, false, likeArgs...)
+		`, false, likeArgs...)
 		if err != nil {
-			return nil, err
+			return planResult{}, err
 		}
-		hits = mergeHits(hits, likeHits)
+		trace.Branches = append(trace.Branches, branchTrace{Name: "lexical_all_terms", Candidates: len(likeHits)})
+		lists = append(lists, likeHits)
 	}
-	scored := hits[:0]
-	for _, hit := range hits {
-		hit.Score = score(queryTerms, hit.Text)
-		if hit.Score > 0 {
-			scored = append(scored, hit)
-		}
+	selected := selectStage(fuseCandidateLists(lists...), request.Text, queryTerms, &trace)
+	sortPlannedHits(selected)
+	limit := resultLimit(request.Limit)
+	if len(selected) > limit {
+		selected = selected[:limit]
 	}
-	sortHits(scored)
-	if request.Limit > 0 && len(scored) > request.Limit {
-		scored = scored[:request.Limit]
+	hits := make([]Hit, len(selected))
+	for i := range selected {
+		hits[i] = selected[i].Hit
 	}
-	return scored, nil
+	return planResult{Hits: hits, Trace: trace}, nil
 }
 
-func hasEnoughExactMatches(hits []Hit, queryTerms []string, required int) bool {
+func fuseCandidateLists(lists ...[]Hit) []plannedHit {
+	const rrfK = 60.0
+	byID := make(map[string]int)
+	result := make([]plannedHit, 0)
+	for _, list := range lists {
+		for rank, hit := range list {
+			index, ok := byID[hit.ID]
+			if !ok {
+				index = len(result)
+				byID[hit.ID] = index
+				result = append(result, plannedHit{Hit: hit})
+			} else if result[index].RawScore == nil && hit.RawScore != nil {
+				result[index].RawScore = hit.RawScore
+				result[index].RawScoreKind = hit.RawScoreKind
+			}
+			result[index].rrf += 1 / (rrfK + float64(rank+1))
+		}
+	}
+	return result
+}
+
+func selectStage(candidates []plannedHit, query string, queryTerms []string, trace *searchTrace) []plannedHit {
+	exact := make([]plannedHit, 0)
+	strict := make([]plannedHit, 0)
+	relaxed := make([]plannedHit, 0)
+	uniqueTerms := uniqueStrings(queryTerms)
+	for _, candidate := range candidates {
+		matched := matchedTermCount(uniqueTerms, candidate.Text)
+		if matched == 0 {
+			continue
+		}
+		candidate.density = evidenceDensity(matched, candidate.Text)
+		switch {
+		case containsPhrase(query, uniqueTerms, candidate.Text):
+			candidate.Score = 1
+			exact = append(exact, candidate)
+		case matched == len(uniqueTerms):
+			candidate.Score = 1
+			strict = append(strict, candidate)
+		default:
+			candidate.Score = float64(matched) / float64(len(uniqueTerms))
+			relaxed = append(relaxed, candidate)
+		}
+	}
+	trace.Exact, trace.Strict, trace.Relaxed = len(exact), len(strict), len(relaxed)
+	switch {
+	case len(exact) > 0:
+		trace.Selected = stageExact
+		return exact
+	case len(strict) > 0:
+		trace.Selected = stageStrict
+		return strict
+	default:
+		trace.Selected = stageRelaxed
+		return relaxed
+	}
+}
+
+func containsPhrase(query string, queryTerms []string, text string) bool {
+	if strings.Contains(strings.ToLower(text), strings.ToLower(strings.TrimSpace(query))) {
+		return true
+	}
+	textTerms := normalizeTerms(text)
+	return strings.Contains(" "+strings.Join(textTerms, " ")+" ", " "+strings.Join(queryTerms, " ")+" ")
+}
+
+func matchedTermCount(queryTerms []string, text string) int {
+	textTerms := normalizeTerms(text)
+	textSet := make(map[string]struct{}, len(textTerms))
+	for _, term := range textTerms {
+		textSet[term] = struct{}{}
+	}
+	lowerText := strings.ToLower(text)
+	matched := 0
+	for _, term := range queryTerms {
+		if _, ok := textSet[term]; ok || strings.Contains(lowerText, term) {
+			matched++
+		}
+	}
+	return matched
+}
+
+func evidenceDensity(matched int, text string) float64 {
+	terms := uniqueStrings(normalizeTerms(text))
+	if len(terms) == 0 {
+		return 0
+	}
+	return float64(matched) / float64(len(terms))
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func sortPlannedHits(hits []plannedHit) {
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		if hits[i].density != hits[j].density {
+			return hits[i].density > hits[j].density
+		}
+		if hits[i].rrf != hits[j].rrf {
+			return hits[i].rrf > hits[j].rrf
+		}
+		if rawGreater(hits[i].Hit, hits[j].Hit) {
+			return true
+		}
+		if rawGreater(hits[j].Hit, hits[i].Hit) {
+			return false
+		}
+		return hits[i].CreatedAt.After(hits[j].CreatedAt)
+	})
+}
+
+func hasEnoughPhraseMatches(hits []Hit, query string, queryTerms []string, required int) bool {
 	exact := 0
 	for _, hit := range hits {
-		if score(queryTerms, hit.Text) == 1 {
+		if containsPhrase(query, queryTerms, hit.Text) {
 			exact++
 			if exact >= required {
 				return true
@@ -156,21 +315,6 @@ func queryCandidates(ctx context.Context, db *sql.DB, statement string, ranked b
 		hits = append(hits, hit)
 	}
 	return hits, rows.Err()
-}
-
-func mergeHits(primary, secondary []Hit) []Hit {
-	seen := make(map[string]struct{}, len(primary)+len(secondary))
-	merged := make([]Hit, 0, len(primary)+len(secondary))
-	for _, group := range [][]Hit{primary, secondary} {
-		for _, hit := range group {
-			if _, ok := seen[hit.ID]; ok {
-				continue
-			}
-			seen[hit.ID] = struct{}{}
-			merged = append(merged, hit)
-		}
-	}
-	return merged
 }
 
 type rowScanner interface {
@@ -301,21 +445,6 @@ func score(queryTerms []string, text string) float64 {
 		return 0
 	}
 	return float64(matched) / float64(len(seenQuery))
-}
-
-func sortHits(hits []Hit) {
-	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].Score != hits[j].Score {
-			return hits[i].Score > hits[j].Score
-		}
-		if rawGreater(hits[i], hits[j]) {
-			return true
-		}
-		if rawGreater(hits[j], hits[i]) {
-			return false
-		}
-		return hits[i].CreatedAt.After(hits[j].CreatedAt)
-	})
 }
 
 func resultLimit(limit int) int {

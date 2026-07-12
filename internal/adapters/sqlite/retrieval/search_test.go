@@ -106,6 +106,63 @@ func TestSearchDoesNotLetExactHitHideExpandedHit(t *testing.T) {
 	}
 }
 
+func TestExecutePlanTraceShowsExplicitStageChoice(t *testing.T) {
+	t.Parallel()
+	db := openTestDatabase(t)
+	now := time.Now().UTC()
+	insertTestMemory(t, db, "exact", "decision: provider timeout bulkhead", "test", `{}`, now, "ltm", "")
+	insertTestMemory(t, db, "partial-a", "provider note", "test", `{}`, now.Add(time.Second), "ltm", "")
+	insertTestMemory(t, db, "partial-b", "timeout note", "test", `{}`, now.Add(2*time.Second), "ltm", "")
+
+	request := Request{Text: "provider timeout bulkhead", Limit: 5}
+	result, err := executePlan(context.Background(), db, request, analyze(request.Text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Trace.Selected != stageExact || result.Trace.Exact != 1 || result.Trace.Relaxed != 2 {
+		t.Fatalf("exact trace = %#v", result.Trace)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].ID != "exact" {
+		t.Fatalf("exact stage hits = %#v", result.Hits)
+	}
+
+	request.Text = "bulkhead provider timeout"
+	result, err = executePlan(context.Background(), db, request, analyze(request.Text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Trace.Selected != stageStrict || result.Trace.Exact != 0 || result.Trace.Strict != 1 || result.Trace.Relaxed != 2 {
+		t.Fatalf("strict trace = %#v", result.Trace)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].ID != "exact" {
+		t.Fatalf("strict stage hits = %#v", result.Hits)
+	}
+
+	request.Text = "provider timeout rollback"
+	result, err = executePlan(context.Background(), db, request, analyze(request.Text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Trace.Selected != stageRelaxed || result.Trace.Exact != 0 || result.Trace.Strict != 0 || result.Trace.Relaxed == 0 {
+		t.Fatalf("relaxed trace = %#v", result.Trace)
+	}
+}
+
+func TestFuseCandidateListsUsesReciprocalRankFusion(t *testing.T) {
+	t.Parallel()
+	first := Hit{ID: "first"}
+	shared := Hit{ID: "shared"}
+	last := Hit{ID: "last"}
+	fused := fuseCandidateLists([]Hit{first, shared}, []Hit{last, shared})
+	byID := make(map[string]plannedHit, len(fused))
+	for _, hit := range fused {
+		byID[hit.ID] = hit
+	}
+	if byID["shared"].rrf <= byID["first"].rrf || byID["shared"].rrf <= byID["last"].rrf {
+		t.Fatalf("RRF scores = shared %f, first %f, last %f", byID["shared"].rrf, byID["first"].rrf, byID["last"].rrf)
+	}
+}
+
 func TestAnalyzeSplitsIdentifiersAndCanonicalizesBoundedVocabulary(t *testing.T) {
 	t.Parallel()
 	tests := map[string][]string{
@@ -191,10 +248,10 @@ func TestLegacyLimitsAndRanking(t *testing.T) {
 	if !rawGreater(Hit{RawScore: &left}, Hit{RawScore: &right}) || rawGreater(Hit{}, Hit{RawScore: &right}) {
 		t.Fatal("rawGreater changed legacy nil or score ordering")
 	}
-	hits := []Hit{{ID: "old", Score: 1, CreatedAt: time.Unix(1, 0)}, {ID: "new", Score: 1, CreatedAt: time.Unix(2, 0)}}
-	sortHits(hits)
+	hits := []plannedHit{{Hit: Hit{ID: "old", Score: 1, CreatedAt: time.Unix(1, 0)}}, {Hit: Hit{ID: "new", Score: 1, CreatedAt: time.Unix(2, 0)}}}
+	sortPlannedHits(hits)
 	if got := strings.Join([]string{hits[0].ID, hits[1].ID}, ","); got != "new,old" {
-		t.Fatalf("sortHits() order = %s", got)
+		t.Fatalf("sortPlannedHits() order = %s", got)
 	}
 }
 
