@@ -111,6 +111,7 @@ type ProviderRoute struct {
 	Name         string
 	Required     bool
 	Weight       float64
+	Timeout      time.Duration
 	MinRelevance float64
 	MinScore     float64
 }
@@ -162,6 +163,20 @@ type ProviderError struct {
 	Required bool   `json:"required"`
 	Op       string `json:"op"`
 	Error    string `json:"error"`
+}
+
+const (
+	ProviderRecallSuccess = "success"
+	ProviderRecallError   = "error"
+	ProviderRecallTimeout = "timeout"
+)
+
+type ProviderRecall struct {
+	Provider     string `json:"provider"`
+	DurationMS   int64  `json:"duration_ms"`
+	Outcome      string `json:"outcome"`
+	TimeoutMS    int64  `json:"timeout_ms,omitempty"`
+	BulkheadBusy bool   `json:"bulkhead_busy,omitempty"`
 }
 
 type CleanupExpiredResult struct {

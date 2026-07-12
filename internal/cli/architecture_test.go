@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	paxruntime "github.com/pax-beehive/memory-adaptor/internal/runtime"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 func TestCLIHasNoFacadeDependency(t *testing.T) {
@@ -29,7 +29,7 @@ func TestCLIHasNoFacadeDependency(t *testing.T) {
 		}
 		for _, imported := range file.Imports {
 			path, _ := strconv.Unquote(imported.Path.Value)
-			if path == "github.com/pax-beehive/memory-adaptor/internal/facade" {
+			if path == "github.com/pax-beehive/paxm/internal/facade" {
 				t.Fatalf("%s imports facade; CLI must depend on tools/capture interfaces", entry.Name())
 			}
 		}

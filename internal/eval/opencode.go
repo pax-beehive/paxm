@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/opencodeplugin"
+	"github.com/pax-beehive/paxm/internal/opencodeplugin"
 )
 
 type OpenCodeCommandRunner func(context.Context, string, []string, string, ...string) ([]byte, error)

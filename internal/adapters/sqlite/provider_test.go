@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/adapters/contracttest"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/paxm/internal/adapters/contracttest"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 func TestProviderAdapterContract(t *testing.T) {

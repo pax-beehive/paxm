@@ -6,11 +6,11 @@ import (
 	"io"
 	"strings"
 
-	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	paxeval "github.com/pax-beehive/memory-adaptor/internal/eval"
-	paxruntime "github.com/pax-beehive/memory-adaptor/internal/runtime"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
+	"github.com/pax-beehive/paxm/internal/config"
+	paxeval "github.com/pax-beehive/paxm/internal/eval"
+	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 const (

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	jsonrpcadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/jsonrpc"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	jsonrpcadapter "github.com/pax-beehive/paxm/internal/adapters/jsonrpc"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 type providerStub struct {

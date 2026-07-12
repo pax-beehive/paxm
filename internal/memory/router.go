@@ -16,19 +16,24 @@ type ProviderBinding struct {
 	Write        bool
 	Required     bool
 	Weight       float64
+	Timeout      time.Duration
 	MinRelevance float64
 	MinScore     float64
+	searchSlot   chan struct{}
 }
 
 type SearchResult struct {
-	Hits           []MemoryHit     `json:"hits"`
-	ProviderErrors []ProviderError `json:"provider_errors,omitempty"`
+	Hits            []MemoryHit      `json:"hits"`
+	ProviderErrors  []ProviderError  `json:"provider_errors,omitempty"`
+	ProviderRecalls []ProviderRecall `json:"provider_recalls,omitempty"`
 }
 
 type searchResponse struct {
-	binding ProviderBinding
-	hits    []MemoryHit
-	err     error
+	binding      ProviderBinding
+	hits         []MemoryHit
+	err          error
+	duration     time.Duration
+	bulkheadBusy bool
 }
 
 type PutResult struct {
@@ -43,6 +48,7 @@ type Router struct {
 
 func NewRouter(providers []ProviderBinding) (*Router, error) {
 	byName := make(map[string]ProviderBinding, len(providers))
+	normalized := make([]ProviderBinding, 0, len(providers))
 	for _, binding := range providers {
 		if binding.Provider == nil {
 			return nil, errors.New("memory router provider is nil")
@@ -54,9 +60,11 @@ func NewRouter(providers []ProviderBinding) (*Router, error) {
 		if _, exists := byName[name]; exists {
 			return nil, fmt.Errorf("memory router provider %q is duplicated", name)
 		}
+		binding.searchSlot = make(chan struct{}, 1)
 		byName[name] = binding
+		normalized = append(normalized, binding)
 	}
-	return &Router{providers: append([]ProviderBinding(nil), providers...), byName: byName}, nil
+	return &Router{providers: normalized, byName: byName}, nil
 }
 
 func (r *Router) Search(ctx context.Context, query SearchQuery) (SearchResult, error) {
@@ -120,21 +128,40 @@ func (r *Router) readableBindings(policy SearchPolicy) ([]ProviderBinding, error
 
 func searchProviders(ctx context.Context, query SearchQuery, readable []ProviderBinding) []searchResponse {
 	responses := make(chan searchResponse, len(readable))
-	var wg sync.WaitGroup
 	for _, binding := range readable {
-		wg.Add(1)
 		go func(binding ProviderBinding) {
-			defer wg.Done()
-			hits, err := binding.Provider.Search(ctx, query)
-			responses <- searchResponse{binding: binding, hits: hits, err: err}
+			started := time.Now()
+			providerCtx := ctx
+			cancel := func() {}
+			if binding.Timeout > 0 {
+				providerCtx, cancel = context.WithTimeout(ctx, binding.Timeout)
+			}
+			defer cancel()
+			select {
+			case binding.searchSlot <- struct{}{}:
+			case <-providerCtx.Done():
+				responses <- searchResponse{binding: binding, err: providerCtx.Err(), duration: time.Since(started), bulkheadBusy: true}
+				return
+			}
+			providerResult := make(chan searchResponse, 1)
+			providerStarted := time.Now()
+			go func() {
+				defer func() { <-binding.searchSlot }()
+				hits, err := binding.Provider.Search(providerCtx, query)
+				providerResult <- searchResponse{binding: binding, hits: hits, err: err, duration: time.Since(providerStarted)}
+			}()
+			select {
+			case response := <-providerResult:
+				responses <- response
+			case <-providerCtx.Done():
+				responses <- searchResponse{binding: binding, err: providerCtx.Err(), duration: time.Since(providerStarted)}
+			}
 		}(binding)
 	}
-	wg.Wait()
-	close(responses)
 
 	collected := make([]searchResponse, 0, len(readable))
-	for response := range responses {
-		collected = append(collected, response)
+	for len(collected) < len(readable) {
+		collected = append(collected, <-responses)
 	}
 	return collected
 }
@@ -143,13 +170,29 @@ func collectSearchResponses(responses []searchResponse, policy SearchPolicy) (Se
 	var result SearchResult
 	var requiredErrs []error
 	for _, response := range responses {
+		result.ProviderRecalls = append(result.ProviderRecalls, providerRecallFromResponse(response))
 		providerErr := appendSearchResponse(&result, response, policy)
 		if providerErr != nil {
 			requiredErrs = append(requiredErrs, providerErr)
 		}
 	}
 	result.Hits = dedupeSearchHits(result.Hits)
+	sort.Slice(result.ProviderRecalls, func(i, j int) bool { return result.ProviderRecalls[i].Provider < result.ProviderRecalls[j].Provider })
 	return result, requiredErrs
+}
+
+func providerRecallFromResponse(response searchResponse) ProviderRecall {
+	outcome := ProviderRecallSuccess
+	if response.err != nil {
+		outcome = ProviderRecallError
+		if errors.Is(response.err, context.DeadlineExceeded) {
+			outcome = ProviderRecallTimeout
+		}
+	}
+	return ProviderRecall{
+		Provider: response.binding.Provider.Name(), DurationMS: response.duration.Milliseconds(), Outcome: outcome,
+		TimeoutMS: response.binding.Timeout.Milliseconds(), BulkheadBusy: response.bulkheadBusy,
+	}
 }
 
 func appendSearchResponse(result *SearchResult, response searchResponse, policy SearchPolicy) error {
@@ -383,6 +426,7 @@ func (r *Router) bindingsForRoutes(routes []ProviderRoute, op string) ([]Provide
 			return nil, fmt.Errorf("provider %q in %s policy is not enabled", route.Name, op)
 		}
 		binding.Required = route.Required
+		binding.Timeout = route.Timeout
 		if route.Weight != 0 {
 			binding.Weight = route.Weight
 		} else if binding.Weight == 0 {

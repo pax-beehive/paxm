@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
 // RecallPolicy is the passive-recall capability used by hook handling.

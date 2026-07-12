@@ -17,43 +17,45 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 const metricsVersion = 1
 
 type Event struct {
-	Time                       time.Time             `json:"time"`
-	Kind                       string                `json:"kind"`
-	Source                     string                `json:"source,omitempty"`
-	Command                    string                `json:"command,omitempty"`
-	Target                     string                `json:"target,omitempty"`
-	HookEvent                  string                `json:"hook_event,omitempty"`
-	Profile                    string                `json:"profile,omitempty"`
-	Success                    bool                  `json:"success"`
-	Skipped                    bool                  `json:"skipped,omitempty"`
-	DurationMS                 int64                 `json:"duration_ms,omitempty"`
-	ProviderDurationMS         int64                 `json:"provider_duration_ms,omitempty"`
-	PassiveWriteLatencyTotalMS int64                 `json:"passive_write_latency_total_ms,omitempty"`
-	PassiveWriteSamples        int                   `json:"passive_write_samples,omitempty"`
-	QueryHash                  string                `json:"query_hash,omitempty"`
-	QueryLength                int                   `json:"query_length,omitempty"`
-	QueryPreview               string                `json:"query_preview,omitempty"`
-	HitCount                   int                   `json:"hit_count,omitempty"`
-	InsertedCount              int                   `json:"inserted_count,omitempty"`
-	ItemCount                  int                   `json:"item_count,omitempty"`
-	RefCount                   int                   `json:"ref_count,omitempty"`
-	Flushed                    int                   `json:"flushed,omitempty"`
-	ProviderRecalls            map[string]int        `json:"provider_recalls,omitempty"`
-	ProviderWrites             map[string]int        `json:"provider_writes,omitempty"`
-	ProviderHits               map[string]int        `json:"provider_hits,omitempty"`
-	ProviderRefs               map[string]int        `json:"provider_refs,omitempty"`
-	ProviderErrorDetails       []ProviderErrorDetail `json:"provider_errors,omitempty"`
-	Error                      string                `json:"error,omitempty"`
-	EpisodeID                  string                `json:"episode_id,omitempty"`
-	SessionKey                 string                `json:"session_key,omitempty"`
-	Provider                   string                `json:"provider,omitempty"`
+	Time                       time.Time               `json:"time"`
+	Kind                       string                  `json:"kind"`
+	Source                     string                  `json:"source,omitempty"`
+	Command                    string                  `json:"command,omitempty"`
+	Target                     string                  `json:"target,omitempty"`
+	HookEvent                  string                  `json:"hook_event,omitempty"`
+	Profile                    string                  `json:"profile,omitempty"`
+	Success                    bool                    `json:"success"`
+	Skipped                    bool                    `json:"skipped,omitempty"`
+	DurationMS                 int64                   `json:"duration_ms,omitempty"`
+	ProviderDurationMS         int64                   `json:"provider_duration_ms,omitempty"`
+	PassiveWriteLatencyTotalMS int64                   `json:"passive_write_latency_total_ms,omitempty"`
+	PassiveWriteSamples        int                     `json:"passive_write_samples,omitempty"`
+	QueryHash                  string                  `json:"query_hash,omitempty"`
+	QueryLength                int                     `json:"query_length,omitempty"`
+	QueryPreview               string                  `json:"query_preview,omitempty"`
+	HitCount                   int                     `json:"hit_count,omitempty"`
+	InsertedCount              int                     `json:"inserted_count,omitempty"`
+	ItemCount                  int                     `json:"item_count,omitempty"`
+	RefCount                   int                     `json:"ref_count,omitempty"`
+	Flushed                    int                     `json:"flushed,omitempty"`
+	ProviderRecalls            map[string]int          `json:"provider_recalls,omitempty"`
+	ProviderWrites             map[string]int          `json:"provider_writes,omitempty"`
+	ProviderHits               map[string]int          `json:"provider_hits,omitempty"`
+	ProviderRefs               map[string]int          `json:"provider_refs,omitempty"`
+	ProviderErrorDetails       []ProviderErrorDetail   `json:"provider_errors,omitempty"`
+	ProviderRecallDetails      []memory.ProviderRecall `json:"provider_recall_details,omitempty"`
+	RecallTimedOut             bool                    `json:"recall_timed_out,omitempty"`
+	Error                      string                  `json:"error,omitempty"`
+	EpisodeID                  string                  `json:"episode_id,omitempty"`
+	SessionKey                 string                  `json:"session_key,omitempty"`
+	Provider                   string                  `json:"provider,omitempty"`
 }
 
 type ProviderErrorDetail struct {
@@ -83,23 +85,29 @@ type DailyMetric struct {
 }
 
 type Counter struct {
-	Events                     int   `json:"events"`
-	Successes                  int   `json:"successes,omitempty"`
-	Errors                     int   `json:"errors,omitempty"`
-	Skipped                    int   `json:"skipped,omitempty"`
-	Recalls                    int   `json:"recalls,omitempty"`
-	Hits                       int   `json:"hits,omitempty"`
-	Inserted                   int   `json:"inserted,omitempty"`
-	Writes                     int   `json:"writes,omitempty"`
-	Items                      int   `json:"items,omitempty"`
-	Refs                       int   `json:"refs,omitempty"`
-	Flushes                    int   `json:"flushes,omitempty"`
-	ProviderErrors             int   `json:"provider_errors,omitempty"`
-	DurationMS                 int64 `json:"duration_ms,omitempty"`
-	ProviderWriteSamples       int   `json:"provider_write_samples,omitempty"`
-	ProviderWriteDurationMS    int64 `json:"provider_write_duration_ms,omitempty"`
-	PassiveWriteLatencyTotalMS int64 `json:"passive_write_latency_total_ms,omitempty"`
-	PassiveWriteSamples        int   `json:"passive_write_samples,omitempty"`
+	Events                       int   `json:"events"`
+	Successes                    int   `json:"successes,omitempty"`
+	Errors                       int   `json:"errors,omitempty"`
+	Skipped                      int   `json:"skipped,omitempty"`
+	Recalls                      int   `json:"recalls,omitempty"`
+	Hits                         int   `json:"hits,omitempty"`
+	Inserted                     int   `json:"inserted,omitempty"`
+	Writes                       int   `json:"writes,omitempty"`
+	Items                        int   `json:"items,omitempty"`
+	Refs                         int   `json:"refs,omitempty"`
+	Flushes                      int   `json:"flushes,omitempty"`
+	ProviderErrors               int   `json:"provider_errors,omitempty"`
+	ProviderRecallSamples        int   `json:"provider_recall_samples,omitempty"`
+	ProviderRecallDurationMS     int64 `json:"provider_recall_duration_ms,omitempty"`
+	ProviderRecallTimeouts       int   `json:"provider_recall_timeouts,omitempty"`
+	ProviderRecallBulkheadSkips  int   `json:"provider_recall_bulkhead_skips,omitempty"`
+	RecallTimeouts               int   `json:"recall_timeouts,omitempty"`
+	ProviderRecallLatencyBuckets []int `json:"provider_recall_latency_buckets,omitempty"`
+	DurationMS                   int64 `json:"duration_ms,omitempty"`
+	ProviderWriteSamples         int   `json:"provider_write_samples,omitempty"`
+	ProviderWriteDurationMS      int64 `json:"provider_write_duration_ms,omitempty"`
+	PassiveWriteLatencyTotalMS   int64 `json:"passive_write_latency_total_ms,omitempty"`
+	PassiveWriteSamples          int   `json:"passive_write_samples,omitempty"`
 }
 
 type HistorySummary struct {
@@ -638,6 +646,19 @@ func (c *Counter) Add(other Counter) {
 	c.Refs += other.Refs
 	c.Flushes += other.Flushes
 	c.ProviderErrors += other.ProviderErrors
+	c.ProviderRecallSamples += other.ProviderRecallSamples
+	c.ProviderRecallDurationMS += other.ProviderRecallDurationMS
+	c.ProviderRecallTimeouts += other.ProviderRecallTimeouts
+	c.ProviderRecallBulkheadSkips += other.ProviderRecallBulkheadSkips
+	c.RecallTimeouts += other.RecallTimeouts
+	if len(other.ProviderRecallLatencyBuckets) > 0 {
+		if len(c.ProviderRecallLatencyBuckets) < len(other.ProviderRecallLatencyBuckets) {
+			c.ProviderRecallLatencyBuckets = append(c.ProviderRecallLatencyBuckets, make([]int, len(other.ProviderRecallLatencyBuckets)-len(c.ProviderRecallLatencyBuckets))...)
+		}
+		for i, count := range other.ProviderRecallLatencyBuckets {
+			c.ProviderRecallLatencyBuckets[i] += count
+		}
+	}
 	c.DurationMS += other.DurationMS
 	c.ProviderWriteSamples += other.ProviderWriteSamples
 	c.ProviderWriteDurationMS += other.ProviderWriteDurationMS
@@ -870,6 +891,9 @@ func counterForEvent(event Event) Counter {
 	if event.Skipped {
 		counter.Skipped = 1
 	}
+	if event.RecallTimedOut {
+		counter.RecallTimeouts = 1
+	}
 	switch event.Kind {
 	case "recall", "hook_recall":
 		if !event.Skipped {
@@ -892,53 +916,6 @@ func counterForEvent(event Event) Counter {
 		counter.Errors = len(event.ProviderErrorDetails)
 	}
 	return counter
-}
-
-func providerCountersForEvent(event Event) map[string]Counter {
-	counters := make(map[string]Counter)
-	for provider, count := range event.ProviderRecalls {
-		counter := counters[provider]
-		counter.Recalls += count
-		counters[provider] = counter
-	}
-	for provider, count := range event.ProviderWrites {
-		counter := counters[provider]
-		counter.Writes += count
-		counters[provider] = counter
-	}
-	for provider, count := range event.ProviderHits {
-		counter := counters[provider]
-		counter.Hits += count
-		counters[provider] = counter
-	}
-	for provider, count := range event.ProviderRefs {
-		counter := counters[provider]
-		counter.Refs += count
-		counters[provider] = counter
-	}
-	for _, providerErr := range event.ProviderErrorDetails {
-		counter := counters[providerErr.Provider]
-		counter.ProviderErrors++
-		counter.Errors++
-		counters[providerErr.Provider] = counter
-	}
-	if event.Kind == "hook_delivery" && event.Success && !event.Skipped && strings.TrimSpace(event.Provider) != "" {
-		counter := counters[event.Provider]
-		counter.ProviderWriteSamples++
-		counter.ProviderWriteDurationMS += event.ProviderDurationMS
-		counter.PassiveWriteLatencyTotalMS += event.PassiveWriteLatencyTotalMS
-		counter.PassiveWriteSamples += event.PassiveWriteSamples
-		counters[event.Provider] = counter
-	}
-	for provider, counter := range counters {
-		if provider == "" {
-			delete(counters, provider)
-			continue
-		}
-		counter.Events = 1
-		counters[provider] = counter
-	}
-	return counters
 }
 
 func shouldAggregateAgent(event Event) bool {

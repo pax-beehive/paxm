@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	paxeval "github.com/pax-beehive/memory-adaptor/internal/eval"
+	paxeval "github.com/pax-beehive/paxm/internal/eval"
 )
 
 type topic struct{ name, decision, value string }

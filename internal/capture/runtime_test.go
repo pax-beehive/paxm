@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/capturequeue"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
-	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/capturequeue"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 type policyStub struct{}

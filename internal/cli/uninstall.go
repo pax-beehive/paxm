@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
 func (r runner) runUninstall(args []string) error {
@@ -121,16 +121,16 @@ func uninstallTargets(agentName string) ([]string, error) {
 	if isSupportedPassiveAgent(name) {
 		return []string{name}, nil
 	}
-	return nil, fmt.Errorf("unsupported agent %q; expected codex, claude, or pi", agentName)
+	return nil, fmt.Errorf("unsupported agent %q; expected codex, claude, pi, or opencode", agentName)
 }
 
 func supportedPassiveAgents() []string {
-	return []string{"codex", "claude", "pi"}
+	return []string{"codex", "claude", "pi", "opencode"}
 }
 
 func isSupportedPassiveAgent(name string) bool {
 	switch name {
-	case "codex", "claude", "pi":
+	case "codex", "claude", "pi", "opencode":
 		return true
 	default:
 		return false
@@ -168,6 +168,10 @@ func uninstallAgentIntegration(configPath, target string) error {
 		}
 	case "pi":
 		if err := os.RemoveAll(filepath.Dir(piExtensionPath())); err != nil {
+			errs = append(errs, err)
+		}
+	case "opencode":
+		if err := os.Remove(openCodePluginPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
 	}

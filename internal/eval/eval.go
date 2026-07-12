@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/capture"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
-	paxruntime "github.com/pax-beehive/memory-adaptor/internal/runtime"
+	"github.com/pax-beehive/paxm/internal/capture"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
+	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
 )
 
 const SuiteVersion = 1

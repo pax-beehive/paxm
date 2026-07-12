@@ -18,15 +18,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/adapters"
-	jsonrpcadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/jsonrpc"
-	jsonrpcconformance "github.com/pax-beehive/memory-adaptor/internal/adapters/jsonrpc/conformance"
-	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	paxeval "github.com/pax-beehive/memory-adaptor/internal/eval"
-	paxruntime "github.com/pax-beehive/memory-adaptor/internal/runtime"
-	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/adapters"
+	jsonrpcadapter "github.com/pax-beehive/paxm/internal/adapters/jsonrpc"
+	jsonrpcconformance "github.com/pax-beehive/paxm/internal/adapters/jsonrpc/conformance"
+	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
+	"github.com/pax-beehive/paxm/internal/config"
+	paxeval "github.com/pax-beehive/paxm/internal/eval"
+	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
+	"github.com/pax-beehive/paxm/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 func (r runner) runSetup(args []string) error {
@@ -328,6 +328,11 @@ func (r runner) registerAgentIntegration(name string, installedScripts map[strin
 			return err
 		}
 		fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
+	case "opencode":
+		if err := installOpenCodeGlobalHook(openCodePluginPath(), installedScripts); err != nil {
+			return err
+		}
+		fmt.Fprintf(r.stdout, "registered OpenCode global plugin: %s\n", openCodePluginPath())
 	}
 	return nil
 }

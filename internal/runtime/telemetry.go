@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
-	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/telemetry"
 )
 
 type RecallTelemetryInput struct {
@@ -34,22 +34,24 @@ type RememberTelemetryInput struct {
 
 func RecallTelemetryEvent(cfg config.Config, input RecallTelemetryInput) telemetry.Event {
 	return telemetry.Event{
-		Time:                 time.Now().UTC(),
-		Kind:                 input.Kind,
-		Source:               input.Source,
-		Command:              sourceCommand(input.Source, input.Kind),
-		Target:               input.Target,
-		HookEvent:            input.HookEvent,
-		Profile:              EffectiveRecallProfile(cfg, input.Profile),
-		Success:              input.Err == nil,
-		Skipped:              input.Skipped,
-		DurationMS:           input.Duration.Milliseconds(),
-		HitCount:             len(input.Result.Hits),
-		InsertedCount:        insertedCount(input.Kind, input.Result.Hits),
-		ProviderRecalls:      RecallProviderRoutes(cfg, input.Profile, input.Skipped),
-		ProviderHits:         telemetry.ProviderHits(input.Result.Hits),
-		ProviderErrorDetails: telemetry.ProviderErrors(input.Result.ProviderErrors),
-		Error:                TelemetryError(input.Err),
+		Time:                  time.Now().UTC(),
+		Kind:                  input.Kind,
+		Source:                input.Source,
+		Command:               sourceCommand(input.Source, input.Kind),
+		Target:                input.Target,
+		HookEvent:             input.HookEvent,
+		Profile:               EffectiveRecallProfile(cfg, input.Profile),
+		Success:               input.Err == nil,
+		Skipped:               input.Skipped,
+		DurationMS:            input.Duration.Milliseconds(),
+		HitCount:              len(input.Result.Hits),
+		InsertedCount:         insertedCount(input.Kind, input.Result.Hits),
+		ProviderRecalls:       RecallProviderRoutes(cfg, input.Profile, input.Skipped),
+		ProviderHits:          telemetry.ProviderHits(input.Result.Hits),
+		ProviderErrorDetails:  telemetry.ProviderErrors(input.Result.ProviderErrors),
+		ProviderRecallDetails: input.Result.ProviderRecalls,
+		RecallTimedOut:        input.Result.TimedOut,
+		Error:                 TelemetryError(input.Err),
 	}
 }
 

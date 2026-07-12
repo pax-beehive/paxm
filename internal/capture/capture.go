@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 const RecallPhaseMetadataKey = "paxm_recall_phase"

@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
+	"github.com/pax-beehive/paxm/internal/facade"
 	_ "modernc.org/sqlite"
 )
 

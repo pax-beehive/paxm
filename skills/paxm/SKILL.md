@@ -21,7 +21,7 @@ paxm config doctor
 If `paxm` is missing, tell the user to install it from this repository:
 
 ```bash
-curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
 ```
 
 If `paxm config doctor` says config is missing or invalid, the user needs one interactive setup pass:

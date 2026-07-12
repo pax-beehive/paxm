@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
-	"github.com/pax-beehive/memory-adaptor/internal/capture"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	paxeval "github.com/pax-beehive/memory-adaptor/internal/eval"
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
-	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
+	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
+	"github.com/pax-beehive/paxm/internal/capture"
+	"github.com/pax-beehive/paxm/internal/config"
+	paxeval "github.com/pax-beehive/paxm/internal/eval"
+	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/telemetry"
 )
 
 func TestEvalProviderJSONRPCPublicCommand(t *testing.T) {

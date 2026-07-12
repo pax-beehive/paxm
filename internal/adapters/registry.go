@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"sort"
 
-	jsonrpcadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/jsonrpc"
-	mem0adapter "github.com/pax-beehive/memory-adaptor/internal/adapters/mem0"
-	sqliteadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/sqlite"
-	zepadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/zep"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	jsonrpcadapter "github.com/pax-beehive/paxm/internal/adapters/jsonrpc"
+	mem0adapter "github.com/pax-beehive/paxm/internal/adapters/mem0"
+	sqliteadapter "github.com/pax-beehive/paxm/internal/adapters/sqlite"
+	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 type Factory func(name string, cfg config.ProviderConfig) (memory.Provider, error)

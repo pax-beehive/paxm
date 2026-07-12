@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	sqliteadapter "github.com/pax-beehive/memory-adaptor/internal/adapters/sqlite"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	sqliteadapter "github.com/pax-beehive/paxm/internal/adapters/sqlite"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 type captureProvider struct {
@@ -22,6 +22,7 @@ type captureProvider struct {
 	tiers []memory.MemoryTier
 	hits  []memory.MemoryHit
 	items []memory.MemoryItem
+	delay time.Duration
 }
 
 func (p *captureProvider) Name() string {
@@ -29,6 +30,9 @@ func (p *captureProvider) Name() string {
 }
 
 func (p *captureProvider) Search(_ context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
+	if p.delay > 0 {
+		time.Sleep(p.delay)
+	}
 	p.query = query.Text
 	p.limit = query.Limit
 	p.meta = query.Metadata
@@ -37,6 +41,40 @@ func (p *captureProvider) Search(_ context.Context, query memory.SearchQuery) ([
 		return p.hits, nil
 	}
 	return []memory.MemoryHit{{ID: "1", Text: "hit", Score: 1}}, nil
+}
+
+func TestRunHookOverallTimeoutReturnsWithoutFailing(t *testing.T) {
+	provider := &captureProvider{delay: 250 * time.Millisecond}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Read: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(config.Config{
+		Version: 1,
+		RecallProfiles: map[string]config.RecallProfileConfig{
+			"passive": {Providers: []config.ProviderRouteConfig{{Name: "capture", Required: true, Timeout: "1s"}}},
+		},
+		Agents: map[string]config.AgentConfig{
+			"codex": {Enabled: true, Hooks: map[string]config.AgentHookConfig{
+				"user_input": {Recall: config.HookRecallConfig{Enabled: true, Profile: "passive", Timeout: "20ms"}},
+			}},
+		},
+	}, router)
+
+	started := time.Now()
+	result, err := service.RunHook(context.Background(), HookEvent{Target: "codex", Event: "user_input", Query: "memory"})
+	if err != nil {
+		t.Fatalf("passive recall timeout affected hook: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		t.Fatalf("overall passive recall timeout returned after %s", elapsed)
+	}
+	if result.Recall == nil || len(result.Recall.ProviderErrors) != 1 {
+		t.Fatalf("timeout diagnostics missing: %#v", result.Recall)
+	}
+	if !result.Recall.TimedOut {
+		t.Fatalf("overall timeout marker missing: %#v", result.Recall)
+	}
 }
 
 func TestRecallAdapterContractForwardsRequestAndPreservesProviderHit(t *testing.T) {

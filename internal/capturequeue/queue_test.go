@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/capturequeue"
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/paxm/internal/capturequeue"
+	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 func BenchmarkDurableAppend(b *testing.B) {

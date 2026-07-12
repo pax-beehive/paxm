@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
-const defaultUpdateRepo = "pax-beehive/memory-adaptor"
+const defaultUpdateRepo = "pax-beehive/paxm"
 
 type updateOptions struct {
 	repo        string

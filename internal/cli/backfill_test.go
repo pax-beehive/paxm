@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/backfill"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/backfill"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
 func TestCLIBackfillForegroundReportsProgressAndResumes(t *testing.T) {

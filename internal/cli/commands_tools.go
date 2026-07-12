@@ -8,10 +8,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/capture"
-	"github.com/pax-beehive/memory-adaptor/internal/mcp"
-	paxruntime "github.com/pax-beehive/memory-adaptor/internal/runtime"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/capture"
+	"github.com/pax-beehive/paxm/internal/mcp"
+	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 func (r runner) executeHook(event capture.Event, jsonOut, codexNative bool) error {

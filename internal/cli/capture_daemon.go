@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
 func hookQueuePath(configPath string) string {

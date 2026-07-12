@@ -1,659 +1,303 @@
+<div align="center">
+
 # paxm
 
-`paxm` is a Go CLI for giving agents a stable memory recall surface while leaving setup, API keys, hooks, and provider policy under user control.
+### One memory experience for every AI agent and every memory provider.
 
-## Install
+[![CI](https://github.com/pax-beehive/paxm/actions/workflows/ci.yml/badge.svg)](https://github.com/pax-beehive/paxm/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/pax-beehive/paxm)](https://github.com/pax-beehive/paxm/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/pax-beehive/paxm)](go.mod)
+[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-6f42c1)](https://github.com/pax-beehive/paxm/releases/latest)
 
-Install the latest release for your local OS and architecture:
+Local-first memory infrastructure for Codex, Claude Code, OpenCode, Pi, and MCP
+clients.
+Use SQLite out of the box, connect Zep or Mem0, or bring any provider behind a
+small JSON-RPC adapter.
 
-```bash
-curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | bash
+[Install](#quick-start) · [How it works](#how-it-works) · [Providers](#agents-and-providers) · [Documentation](#documentation)
+
+</div>
+
+![paxm architecture](docs/assets/paxm-architecture.png)
+
+## Why paxm
+
+Memory systems tend to optimize the memory engine and leave integration to
+everyone else. Users must wire SDKs into each agent, or remember to call MCP
+tools and skills manually. Provider authors must build a separate integration
+for every agent runtime.
+
+`paxm` removes that duplication. Agents get one consistent active and passive
+memory surface. Providers implement one adapter contract. Users keep control of
+credentials, routing policy, hooks, and where their data lives.
+
+```text
+AI agents  ->  CLI / MCP / skills / hooks  ->  paxm  ->  any memory provider
 ```
 
-The installer prints the PAX banner, detects `darwin` or `linux` plus
-`amd64` or `arm64`, downloads the matching release archive, verifies it against
-`SHA256SUMS`, and installs `paxm`.
+## What you get
 
-Useful overrides:
+- **Active memory** through CLI commands, MCP tools, and an agent skill.
+- **Passive memory** through lifecycle hooks that recall context and capture
+  durable writes without relying on the model to call a tool.
+- **Provider independence** through a common search/write contract and
+  multi-provider routing.
+- **Local-first defaults** with SQLite and no required account or API key.
+- **Failure isolation** with per-provider timeouts, an overall passive-recall
+  budget, bulkheads, and partial-result fallback.
+- **Durable passive writes** through a local queue with retry, deduplication,
+  and crash-safe state.
+- **Operational visibility** through local event logs, latency histograms,
+  provider errors, timeout counts, and `paxm history`.
+
+## What paxm is not
+
+`paxm` is not another sophisticated memory engine or a hosted memory cloud. It
+does not try to own embeddings, knowledge graphs, semantic consolidation,
+reranking research, or long-term memory intelligence.
+
+Those capabilities belong to memory providers. Paxm focuses on the integration
+and runtime layer: agent entry points, lifecycle hooks, provider routing,
+failure isolation, durable delivery, and telemetry.
+
+The built-in SQLite provider is a practical local baseline, not a claim to
+state-of-the-art memory quality. Use Zep, Mem0, or a custom adapter when you need
+more advanced retrieval and memory behavior without rebuilding every agent
+integration.
+
+## Quick start
+
+Choose the path for the agent you use. The Codex plugin is the shortest path:
+
+### Codex plugin
 
 ```bash
-# Install a specific version.
-curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_VERSION=v0.1.14 bash
-
-# Install somewhere other than the default writable bin directory.
-curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | PAXM_INSTALL_DIR="$HOME/go/bin" bash
+codex plugin marketplace add pax-beehive/paxm --ref paxm-memory-v0.1.3
+codex plugin add paxm-memory@pax-agent-nexus
+paxm setup --integration codex-plugin
 ```
 
-## Agent Skill
+Start a new Codex task and trust the Pax Agent neXus hooks when `/hooks` asks.
+The plugin installs its reviewed paxm binary, registers active-memory skills,
+and owns the passive Codex hooks. Provider credentials remain user-managed.
 
-This repo includes a bundled agent skill at [skills/paxm/SKILL.md](skills/paxm/SKILL.md).
-The skill teaches an agent to actively call `paxm recall`, `paxm remember`, and
-`paxm history` while respecting user-owned setup and provider configuration.
-Agents that support MCP can instead connect to `paxm mcp serve` for the same
-recall, remember, history, and config doctor operations through structured tool
-calls.
+### Claude Code plugin
 
-Install the CLI first, then run one interactive setup pass:
+Install the paxm CLI, then install the Claude Code plugin:
 
 ```bash
+curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
+claude plugin marketplace add pax-beehive/paxm
+claude plugin install paxm-claude@pax-memory
+paxm setup --integration claude-plugin
+```
+
+The Claude plugin includes active-memory skills, the paxm MCP server, and five
+lifecycle hooks: `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
+`PostToolUseFailure`, and `Stop`.
+
+### OpenCode, Pi, CLI, or MCP
+
+Install the latest release and run interactive setup. SQLite provides a full
+local flow without an account or API key.
+
+```bash
+curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
 paxm setup
 paxm config doctor
 ```
 
-`paxm setup` is where the user chooses memory providers and passive agent
-integrations. In a terminal, use up/down to move, space to toggle, and enter to
-confirm. Selected agents are configured one at a time for passive recall and
-passive writes. Active recall skills are installed separately by the user. The
-SQLite provider works without an API key; remote providers such as Zep or Mem0
-require the user to provide their connection details during setup.
-
-When Codex is using the bundled `paxm-memory` plugin, let the plugin own Codex's
-hooks so paxm does not register a duplicate global hook:
+Write and recall a memory:
 
 ```bash
-paxm setup --integration codex-plugin
+paxm remember --profile ltm --text "We chose SQLite for the local memory layer"
+paxm recall --query "local memory layer"
+paxm history --days 7
 ```
 
-### Codex Plugin
+Select OpenCode during setup to install a global local plugin under
+`~/.config/opencode/plugins/`. Select Pi to install its passive extension. Any
+MCP-compatible client can use `paxm mcp serve` without passive hooks.
 
-Install the pinned plugin release from the public GitHub marketplace:
+## How it works
 
-```bash
-codex plugin marketplace add pax-beehive/memory-adaptor --ref paxm-memory-v0.1.2
-codex plugin add paxm-memory@pax-agent-nexus
-codex plugin list
-```
+Agents reach paxm in two ways:
 
-If the `pax-agent-nexus` marketplace is already registered, skip the first
-command. After installation, start a new Codex task, open `/hooks`, and trust
-the Pax Agent neXus hooks when Codex asks. Then run:
+| Path | Entry points | Best for |
+| --- | --- | --- |
+| Active | CLI, MCP, skill | Deliberate recall, explicit writes, inspection |
+| Passive | Agent lifecycle hooks | Prompt-time recall and automatic turn capture |
 
-```bash
-paxm setup --integration codex-plugin
-paxm config doctor
-paxm remember --text "Codex plugin smoke test"
-paxm recall --query "Codex plugin smoke test" --limit 3
-```
+Both paths use the same facade and provider router. That keeps filtering,
+profiles, ranking, timeout policy, telemetry, and provider behavior consistent
+across every agent surface.
 
-The plugin installs the pinned `paxm` binary (`v0.1.14` by default) through the
-official release installer. It does not install provider credentials or bypass
-Codex hook trust. To pin a different CLI release, set `PAXM_VERSION` before
-running the plugin's setup skill.
+Passive writes commit to a local durable queue before provider delivery. Slow
+or unavailable downstream providers retry in the background instead of holding
+up the agent. Passive recall uses a default `800ms` overall budget and `250ms`
+per-provider budget, returns healthy partial results, and records which
+downstream timed out.
 
-To install the skill for Codex or Claude Code, ask an agent to read this
-repository, inspect `skills/paxm/SKILL.md`, and install the `paxm` skill into the
-active agent skill directory. Direct local installs look like:
+Read the detailed [architecture](docs/architecture.md) and
+[provider adapter contract](docs/provider-adapter-contract.md).
 
-```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -R skills/paxm "${CODEX_HOME:-$HOME/.codex}/skills/paxm"
+## Agents and providers
 
-mkdir -p "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
-cp -R skills/paxm "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/paxm"
-```
+### Agent surfaces
 
-## V1 Shape
+| Agent/client | Active | Passive recall | Passive write |
+| --- | :---: | :---: | :---: |
+| Codex | CLI, MCP, skill | Hook | Hook |
+| Claude Code | CLI, MCP, skill | Hook | Hook |
+| Pi | CLI, MCP, skill | Extension | Extension |
+| Any MCP client | MCP tools | — | — |
 
-```text
-Human setup:
-  paxm setup  # choose providers and passive agent integrations interactively
+### Memory providers
 
-Agent active recall:
-  paxm recall --query "what did we decide?" --limit 10 --json
+| Provider | Mode | Notes |
+| --- | --- | --- |
+| SQLite | Built in | Local-first default; no account or API key |
+| Zep | Built in | User or graph scoped |
+| Mem0 | Built in | Self-hosted REST API |
+| Custom JSON-RPC | Adapter | Bring an existing or private memory system |
 
-MCP active recall:
-  paxm mcp serve  # stdio MCP server for structured agent tool calls
+Multiple provider instances can be enabled at once. Recall and write profiles
+control routes, required/best-effort behavior, ranking weights, thresholds,
+memory tiers, and timeouts.
 
-Hook passive recall:
-  installed hook shim -> paxm __hook -> durable capture queue -> providers
+## MCP server
 
-Local history:
-  paxm history --days 7
-
-Local telemetry logs:
-  paxm logs --tail 50
-  paxm logs --follow
-
-Historical session backfill:
-  paxm backfill scan --agent codex --before 2026-07-09
-  paxm backfill run --agent codex --provider mem0-company --background
-```
-
-The CLI command layer does not talk to concrete memory providers directly. Commands call the facade, the facade calls the memory router, and the router fans out to enabled providers.
-
-```text
-cmd/paxm
-  internal/cli
-  internal/mcp           stdio MCP server and memory tools
-  internal/runtime       shared config, router, and facade loading
-  internal/facade
-  internal/memory        provider interface and multi-provider router
-  internal/adapters      provider registry
-  internal/adapters/jsonrpc
-  internal/adapters/mem0
-  internal/adapters/sqlite
-  internal/adapters/zep
-  internal/config
-  internal/telemetry   bounded event logs and metrics
-```
-
-## Quick Start
-
-Manual install from a GitHub release:
-
-```bash
-VERSION=v0.1.14
-curl -L "https://github.com/pax-beehive/memory-adaptor/releases/download/${VERSION}/paxm_${VERSION}_darwin_arm64.tar.gz" -o /tmp/paxm.tar.gz
-tar -xzf /tmp/paxm.tar.gz -C /tmp
-install /tmp/paxm_${VERSION}_darwin_arm64/paxm ~/go/bin/paxm
-paxm version
-```
-
-Future upgrades can be installed in place:
-
-```bash
-paxm update --check
-paxm update
-```
-
-Build locally:
-
-```bash
-go build -o /tmp/paxm ./cmd/paxm
-/tmp/paxm setup
-/tmp/paxm remember --profile stm --text "paxm supports hook passive recall"
-/tmp/paxm recall --query "passive recall"
-/tmp/paxm history --days 7
-/tmp/paxm logs --tail 20
-```
-
-For a project-local config during development:
-
-```bash
-/tmp/paxm --config /tmp/paxm-dev/config.yaml setup --force
-/tmp/paxm --config /tmp/paxm-dev/config.yaml remember --profile stm --text "enabled providers can read and write"
-printf '{"prompt":"enabled providers"}' | /tmp/paxm --config /tmp/paxm-dev/config.yaml recall --hook-event --json
-```
-
-## MCP Server
-
-`paxm` can run as a local stdio MCP server:
+Run paxm as a local stdio MCP server:
 
 ```bash
 paxm mcp serve
 ```
 
-MCP hosts should configure the command as `paxm` with args
-`["mcp", "serve"]`. If you use a non-default config path, pass it before the
-subcommand:
-
 ```json
 {
   "command": "paxm",
-  "args": ["--config", "/path/to/config.yaml", "mcp", "serve"]
+  "args": ["mcp", "serve"]
 }
 ```
 
-The MCP server exposes a narrow tool surface:
+The server exposes four focused tools:
 
-- `paxm_recall`: active recall through configured recall profiles.
-- `paxm_remember`: writes through configured write profiles; use `stm` for
-  short-term working memory and `ltm` for durable facts.
-- `paxm_history`: recent local telemetry summary.
-- `paxm_config_doctor`: provider health checks without returning config secrets.
+- `paxm_recall`
+- `paxm_remember`
+- `paxm_history`
+- `paxm_config_doctor`
 
-`paxm mcp serve` does not run setup, install hooks, uninstall integrations, or
-run historical backfills. Users still own provider credentials, setup, and
-passive hook installation through `paxm setup`.
+Setup, credential management, hook installation, and backfill stay outside MCP
+so an agent cannot silently take ownership of user configuration.
 
-## Config
+## Agent integrations
 
-Default config path:
+### Codex plugin
 
-```text
-~/.config/paxm/config.yaml
-```
+The Codex plugin packages the paxm setup skill, active memory skill, and native
+Codex hooks. It does not install provider credentials or bypass Codex hook
+trust. Use `paxm setup --integration codex-plugin` so only the plugin owns the
+Codex lifecycle hooks.
 
-V1 ships with a SQLite provider so the full flow works without external API keys.
-The CLI can load legacy JSON configs, but new setup writes YAML by default.
+### Claude Code plugin
 
-```yaml
-version: 1
+The Claude Code plugin is a first-class integration, not a generic setup shim.
+It packages skills, an MCP server, and five native lifecycle hooks. Its setup
+migration removes only legacy paxm-managed Claude hooks, preserves unrelated
+hooks, and records `claude-plugin` ownership.
 
-providers:
-  sqlite:
-    type: sqlite
-    enabled: true
-    path: ~/.local/share/paxm/memory.sqlite
+### Pi extension
 
-  zep:
-    type: zep
-    enabled: false
-    api_key: "plain-text-zep-api-key"
-    user_id: todd
-    search_scope: episodes
+Pi support is installed through `paxm setup`. The extension handles passive
+prompt recall and buffers visible user, assistant, and tool events into one
+turn-end memory while excluding thinking blocks.
 
-  mem0:
-    type: mem0
-    enabled: false
-    base_url: http://localhost:8888
-    api_key: "plain-text-mem0-api-key"
-    user_id: todd
+### OpenCode plugin
 
-  jsonrpc:
-    type: jsonrpc
-    enabled: false
-    transport: stdio
-    command: /opt/paxm/plugins/private-memory
-    args: ["--config", "/etc/private-memory.yaml"]
-    timeout: 30s
+OpenCode support is installed through `paxm setup` as a dependency-free global
+plugin. The plugin uses OpenCode's `chat.message` and model-message transform
+hooks for passive recall, then reads the completed session through the official
+client on `session.idle` for durable turn-end writes. Only visible user and
+assistant text is captured; reasoning and tool payloads are excluded. The
+generated plugin lives at `~/.config/opencode/plugins/paxm.ts`, or below
+`OPENCODE_CONFIG_DIR`/`XDG_CONFIG_HOME` when configured.
 
-recall_profiles:
-  default:
-    providers:
-      - name: sqlite
-        required: true
-        weight: 1
-    max_results: 3
-    thresholds:
-      min_relevance: 0.25
-      min_score: 0.25
-    ranking:
-      type: weighted_relevance
-    tiers: [stm, ltm]
+See the complete [configuration guide](docs/config.md) for generated paths,
+event mappings, profile settings, and uninstall behavior.
 
-  passive:
-    providers:
-      - name: sqlite
-        required: true
-        weight: 1
-    max_results: 2
-    thresholds:
-      min_relevance: 0.75
-      min_score: 0.75
-    ranking:
-      type: weighted_relevance
-    tiers: [ltm]
+## Reliability by default
 
-  passive_initial:
-    providers:
-      - name: sqlite
-        required: true
-        weight: 1
-    max_results: 5
-    thresholds:
-      min_relevance: 0.35
-      min_score: 0.35
-    ranking:
-      type: weighted_relevance
-    tiers: [ltm]
+- Hook acknowledgement waits only for the local queue transaction.
+- Provider delivery is resumable and retried in the background.
+- Optional provider failures do not discard healthy provider results.
+- A stuck provider is contained by its timeout and single-call bulkhead.
+- Recall provenance is stripped before passive writes to prevent memory echo.
+- Exact LTM consolidation limits duplicate accumulation.
+- Telemetry stores hashes and lengths by default, not raw recall queries.
 
-write_profiles:
-  default:
-    tier: ltm
-    providers:
-      - name: sqlite
-        required: true
-  stm:
-    tier: stm
-    expires_after: 24h
-    providers:
-      - name: sqlite
-        required: true
-  ltm:
-    tier: ltm
-    providers:
-      - name: sqlite
-        required: true
-
-agents:
-  codex:
-    enabled: true
-    active_recall:
-      enabled: true
-      profile: default
-      output: markdown
-    hooks:
-      session_start:
-        write:
-          enabled: true
-          profile: ltm
-          template: |
-            {{ .safe_text }}
-          mode: session_start
-          buffer:
-            enabled: true
-            flush_count: 10
-
-      user_input:
-        recall:
-          enabled: true
-          profile: passive
-          query_template: "{{ .prompt }}"
-          max_results: 2
-          output: markdown
-          insertion:
-            min_score: 0.8
-            max_items: 2
-            require_query_terms: true
-          initial:
-            enabled: true
-            profile: passive_initial
-            max_results: 5
-            insertion:
-              min_score: 0.35
-              max_items: 5
-        write:
-          enabled: true
-          profile: ltm
-          template: |
-            {{ .safe_text }}
-          mode: user_input
-          buffer:
-            enabled: true
-            flush_count: 10
-
-      turn_end:
-        write:
-          enabled: true
-          profile: ltm
-          template: |
-            {{ .safe_text }}
-          mode: turn_end
-          buffer:
-            enabled: true
-            flush: true
-            flush_count: 10
-
-  pi:
-    enabled: false
-    active_recall:
-      enabled: true
-      profile: default
-      output: markdown
-    hooks:
-      user_input:
-        recall:
-          enabled: false
-          profile: passive
-          query_template: "{{ .prompt }}"
-          max_results: 2
-          output: markdown
-          insertion:
-            min_score: 0.8
-            max_items: 2
-            require_query_terms: true
-          initial:
-            enabled: true
-            profile: passive_initial
-            max_results: 5
-            insertion:
-              min_score: 0.35
-              max_items: 5
-
-telemetry:
-  enabled: true
-  dir: ~/.local/state/paxm
-  events_file: events.jsonl
-  metrics_file: metrics.json
-  max_event_file_bytes: 1048576
-  max_event_files: 3
-  retention_days: 30
-  capture_query_preview: false
-  query_preview_chars: 80
-```
-
-The generated config also includes an opt-in `agents.claude` entry. It uses the
-same main lifecycle as Codex plus `tool_use` for Claude Code `PostToolUse`
-and `tool_failure` for `PostToolUseFailure`. Run `paxm setup` and select
-`claude` to install it.
-
-Multiple enabled provider instances are supported by configuration. The key
-under `providers` is an instance name, not the adapter type, so configs can have
-multiple `mem0` or `jsonrpc` instances such as `mem0_personal`, `mem0_team`, and
-`corp_memory`. Recall profiles decide which provider instances are read, how
-provider relevance is weighted, what thresholds are applied, and which memory
-tiers are searched. The default active recall profile reads both short-term
-memory (`stm`) and long-term memory (`ltm`) and returns 3 memories; pass
-`--limit N` to `paxm recall` to request more for a specific query. Passive
-recall profiles read `ltm` only. Write profiles decide which provider instances
-are written and whether the item is stored as `stm` or `ltm`; the default `stm`
-profile expires after 24 hours. Configuration rejects unknown tier names. Every
-`stm` write profile must set a positive `expires_after`, while `ltm` profiles
-must not set an expiry.
-Optional provider failures are returned as provider errors; required provider
-failures fail the command.
-
-The router requests a bounded candidate pool from each provider before applying
-thresholds, cross-provider deduplication, and the final result limit. Duplicate
-text keeps the highest-scoring hit, with deterministic tie-breaking, so provider
-response timing does not change recall output.
-
-Hook recall uses two passive profiles by default. The first `user_input` seen
-for a session can use the looser `passive_initial` profile as session warmup
-context. Later `user_input` hooks use the stricter `passive` profile to avoid
-polluting the agent context.
-
-Passive hook writes use the `ltm` write profile by default. Active agents should
-write short-lived task state to `stm` and reserve `ltm` for durable preferences,
-decisions, and recurring fixes.
-
-LTM writes without an explicit ID pass through deterministic admission before
-provider fan-out. Paxm normalizes text case and whitespace, scopes it by the
-`workspace` metadata value when present, and assigns a stable content-derived ID
-plus `paxm_fingerprint`, `paxm_occurrences`, `paxm_first_seen_at`, and
-`paxm_last_seen_at` metadata. SQLite uses that identity to consolidate exact
-repeats while preserving the first creation time and updating occurrence/seen
-metadata. STM writes and explicit IDs, including backfill IDs, are unchanged.
-This is exact consolidation, not semantic or LLM-based conflict resolution;
-remote providers receive the stable identity metadata but retain their own
-deduplication behavior. For passive `user_input` writes, the stable prompt is
-used as the identity basis while the stored text still retains the configured
-full hook evidence, so volatile session fields do not defeat consolidation.
-
-Expired memory cleanup is hook-triggered and best effort. After a successful
-hook-buffer flush or immediate hook write, the hook daemon schedules cleanup on
-a single background worker for providers that support it; SQLite deletes a
-bounded batch of expired rows. Hook responses do not wait for cleanup, but daemon
-shutdown drains already scheduled cleanup before exiting. Recall still filters
-expired items even if cleanup has not run yet.
-
-Remote provider configs may include a plain-text `api_key` field. Zep is
-supported with `type: zep` using `github.com/getzep/zep-go/v3`; configure
-exactly one of `user_id` or `graph_id`. When setup is configured for a Zep
-user graph, it ensures the configured `user_id` exists before saving the config.
-Self-hosted Mem0 is supported with `type: mem0`; configure `base_url` without a
-`/v1` prefix and scope it with at least one of `user_id`, `agent_id`, or `run_id`.
-The Mem0 adapter sends `api_key` as `X-API-Key`, matching the OSS REST server.
-Custom plugin providers are supported with `type: jsonrpc`. V1 supports stdio
-plugins: paxm invokes the configured command with a JSON-RPC 2.0 request for
-`paxm.health`, `paxm.search`, `paxm.put`, or optional `paxm.putBatch`.
-`SearchQuery` may include `tiers`; `MemoryItem` may include `tier` and
-`expires_at`.
-
-`paxm setup` is the interactive entry point for changing provider and passive
-integration choices. TTY sessions use checkbox selectors; piped input retains
-the numbered text fallback. After the agent selector, each selected agent is
-configured in stable order for passive recall profile, passive write profile,
-and write events. Setup shows a summary before saving, installs only enabled
-hook events, and does not install active recall skills. Codex hooks are
-registered in the user-level Codex config, Claude Code hooks in the user-level
-Claude settings, and Pi support as a Pi extension.
-
-`paxm history` reads local telemetry metrics and summarizes recall frequency,
-hits, hook insertions, writes, provider errors, and storage usage. It breaks
-down passive hook recall/write counts by agent, and provider recall/write counts
-by provider. Telemetry uses a bounded rolling JSONL event log plus a compact
-metrics JSON file. By default it records query length and a query hash, not raw
-query text.
-
-`paxm logs` reads the raw rolling event log across retained backups and the
-active file. It prints the most recent 50 events in a compact human-readable
-format by default. Use `--tail N` to change the initial window, `--json` for
-JSONL, and `--follow` to stream new events across active-file rotation until
-Ctrl-C. `--tail 0 --follow` starts with new events only. This local debugging
-surface is intentionally not exposed through MCP.
-
-`paxm backfill` imports local sessions created before passive integration into
-one exact provider instance. Built-in readers support Codex, Claude Code, and
-Pi. The default foreground mode prints progress, upload speed, and ETA. Add
-`--background` to start a silent detached worker, then inspect it with
-`paxm backfill status --agent AGENT --provider NAME`.
+Historical imports are also resumable:
 
 ```bash
 paxm backfill scan --agent codex --before 2026-07-09
-paxm backfill run --agent codex --provider mem0-company --rate 30/m
-paxm backfill run --agent claude --provider archive --rate 10/m --background
-paxm backfill status --agent claude --provider archive
+paxm backfill run --agent codex --provider mem0-company --background
+paxm backfill status --agent codex --provider mem0-company
 ```
 
-Setup records `agents.<name>.passive_write_started_at` the first time passive
-write is enabled for an agent. Backfill uses that as its default exclusive cutoff. Configs created
-before this field existed must pass `--before` explicitly. Only user and
-assistant text is imported; system prompts, hidden reasoning, tool calls, tool
-results, sidechains, and attachments are excluded. Long turns are split into
-bounded items while preserving source timestamps and session metadata.
+## Performance
 
-Backfill state lives under the configured telemetry state directory. A process
-lock permits only one active worker for each config, agent, and provider tuple.
-A persistent SQLite ledger skips successfully uploaded item IDs on every later
-run, so repeatedly starting the same backfill resumes instead of uploading the
-same turns again. A crash after a remote provider accepts an item but before the
-local ledger commits remains a narrow duplicate window for providers that do
-not enforce the deterministic `paxm_id` themselves.
+Benchmarks use runtime-generated temporary datasets modeled after real passive
+agent workloads; no benchmark corpus is committed to the repository.
 
-For Codex, setup writes a shim under the paxm config directory:
+On an Apple M4 reference machine:
 
-```text
-~/.config/paxm/hooks/codex-session_start
-~/.config/paxm/hooks/codex-user_input
-~/.config/paxm/hooks/codex-turn_end
-```
+| Workload | Adapter latency |
+| --- | ---: |
+| 128 KiB SQLite write | 1.84 ms |
+| 2 MiB SQLite write | 14.31 ms |
+| 10-item / 1.25 MiB batch | 12.36 ms |
+| Recall from 100,000 short memories | 0.54 ms |
+| Recall from 10,000 x 32 KiB memories | 0.61 ms |
 
-It also updates:
+See the full methodology, datasets, commands, and allocation results in
+[SQLite adapter benchmarks](docs/benchmarks.md).
 
-```text
-~/.codex/config.toml
-```
+## Evaluation
 
-The shims expect hook event JSON on stdin and call a hidden `paxm __hook`
-entrypoint. `user_input` returns recall JSON to Codex and also appends a write
-event to the SQLite-backed capture queue. `session_start` appends a write event.
-`turn_end` reads the current Codex transcript, includes tool calls/results that
-the agent actually saw, removes thinking/reasoning records, appends the final
-assistant response, and seals that session as an episode. Hooks acknowledge
-after the local queue transaction commits; provider workers deliver and retry in
-the background. Queue state survives daemon restarts. Codex may still require
-you to review and trust the new non-managed hooks with `/hooks` before they run.
-
-For Claude Code, setup writes five shims and updates the user-level settings:
-
-```text
-~/.config/paxm/hooks/claude-session_start
-~/.config/paxm/hooks/claude-user_input
-~/.config/paxm/hooks/claude-tool_use
-~/.config/paxm/hooks/claude-tool_failure
-~/.config/paxm/hooks/claude-turn_end
-~/.claude/settings.json
-```
-
-The settings update preserves existing hooks, avoids duplicate paxm entries,
-and creates `~/.claude/settings.json.paxm.bak` before the first modification.
-Claude Code `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
-`PostToolUseFailure`, and `Stop` map to paxm `session_start`, `user_input`,
-`tool_use`, `tool_failure`, and `turn_end`. Recall is returned as plain
-Markdown from `UserPromptSubmit`, which Claude Code adds to the prompt context.
-The `Stop` payload includes Claude Code's `last_assistant_message`; paxm writes
-that visible assistant text and flushes the buffered session/user/turn evidence
-without storing the rest of the raw runtime event by default.
-
-For Pi, setup writes paxm hook shims and registers a Pi extension:
-
-```text
-~/.config/paxm/hooks/pi-user_input
-~/.config/paxm/hooks/pi-turn_end
-~/.pi/agent/extensions/paxm-hook/index.ts
-```
-
-The Pi extension listens for Pi's `before_agent_start` extension event and calls
-the paxm `user_input` hook shim. It buffers visible user/assistant
-`message_end` events, correlates tool args from `tool_execution_start` with
-results from `tool_execution_end`, and excludes thinking/reasoning blocks. It
-calls `pi-turn_end` once on Pi's runtime `agent_end` event so tool subturns and
-the final assistant response become one memory. A `session_shutdown` handler
-makes one final best-effort flush. Because these Pi lifecycle events use the
-runtime event bus rather than the typed `before_agent_start` surface, Pi passive
-writes are best-effort and should be verified with `paxm history`.
-
-## Uninstall Passive Integrations
-
-Remove all paxm-managed passive agent integrations:
-
-```bash
-paxm uninstall
-```
-
-Remove only one integration, or skip confirmation for automation:
-
-```bash
-paxm uninstall --agent claude
-paxm uninstall --agent codex --yes
-```
-
-Uninstall disables the selected agent in paxm config, removes only paxm-owned
-hook entries and shims, and best-effort seals and delivers the capture queue
-first. It does
-not delete provider configuration, SQLite or remote memory data, telemetry,
-the paxm binary, settings backups, or active recall skills installed by the
-user. Repeating the command is safe.
-
-## Recall Evaluation
-
-Run the deterministic 100-case recall-quality baseline:
+The repository includes deterministic production-path evaluations:
 
 ```bash
 go run ./cmd/paxm eval run --suite evals/baseline
-go run ./cmd/paxm eval run --suite evals/baseline --json
-```
-
-Run the deterministic 50-case conversation-to-write baseline:
-
-```bash
 go run ./cmd/paxm eval run --suite evals/conversation-write
-go run ./cmd/paxm eval run --suite evals/conversation-write --json
 ```
 
-Both suites use an isolated SQLite database per case. The retrieval baseline
-reports recall@K, precision@K, mean reciprocal rank, forbidden-memory insertion
-rate, latency, and category-level results. The conversation-to-write suite also
-reports write recall, write precision, forbidden-fragment insertion rate,
-write/recall latency totals, result count, and returned recall-content size
-after running normalized hook messages through the production hook write,
-ingest, and later recall path.
+- A 100-case retrieval suite reports recall@K, precision@K, MRR, false-positive
+  rate, latency, and category-level results.
+- A 50-case conversation-to-write suite checks admission, recall, forbidden
+  fragments, metadata preservation, and adapter contract behavior.
 
-Recall context is enclosed in a versioned `<paxm-recall>` block. Passive writes
-strip complete recall blocks and discard paxm active-recall tool call/result
-pairs before rendering hook evidence. This prevents recalled memory from being
-stored again while retaining new conclusions written by the agent. Exact LTM
-consolidation remains a final fallback rather than the primary echo defense.
-Structured JSON recall adds a compatible `paxm_context` provenance field so
-interleaved tool results can be recognized without relying on adjacency.
+CI runs unit tests, vet, the retrieval report, and the adapter write contract on
+every push to `main` and every pull request.
 
-## Releases
+## Documentation
 
-Release binaries are built by GitHub Actions when a `v*` tag is pushed. The
-release workflow runs `go test ./...`, builds `paxm` for darwin, linux, and
-windows on amd64 and arm64, uploads archives, and publishes `SHA256SUMS`.
-Released binaries support `paxm update`, which downloads the current platform's
-archive from GitHub releases, verifies it against `SHA256SUMS`, and replaces the
-current executable. Use `paxm update --version vX.Y.Z` to pin a specific release
-or `paxm update --install-path PATH` to install somewhere else.
+| Guide | Contents |
+| --- | --- |
+| [Configuration](docs/config.md) | Providers, profiles, agents, hooks, telemetry |
+| [Architecture](docs/architecture.md) | Runtime modules and data flow |
+| [Provider contract](docs/provider-adapter-contract.md) | Implementing a memory adapter |
+| [Benchmarks](docs/benchmarks.md) | Passive workload datasets and results |
+| [Release guide](docs/release.md) | Builds, checksums, tags, and publishing |
+| [Roadmap](docs/roadmap.md) | Current product direction |
 
-To build the same assets locally:
+## Development
 
 ```bash
-VERSION=v0.1.0 scripts/build-release.sh
-ls dist/
+go test ./...
+go vet ./...
+go build -o /tmp/paxm ./cmd/paxm
+/tmp/paxm --config /tmp/paxm-dev/config.yaml setup --force
 ```
 
-See [docs/release.md](docs/release.md) for the release checklist.
+Releases are built for macOS and Linux on `amd64` and `arm64`. Published
+archives include `SHA256SUMS`; the installer verifies the selected archive
+before replacing the binary.

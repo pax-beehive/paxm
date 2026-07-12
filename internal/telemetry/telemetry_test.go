@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 func TestRecorderRotatesEventLogsAndKeepsMetrics(t *testing.T) {
@@ -274,6 +275,47 @@ func TestRecorderAggregatesProviderWriteAndPassiveLatencySeparately(t *testing.T
 	provider := summary.Providers[0].Counter
 	if provider.ProviderWriteSamples != 2 || provider.ProviderWriteDurationMS != 40 || provider.PassiveWriteSamples != 3 || provider.PassiveWriteLatencyTotalMS != 490 {
 		t.Fatalf("unexpected provider latency aggregates: %#v", provider)
+	}
+}
+
+func TestRecorderAggregatesProviderRecallLatencyAndIsolationOutcomes(t *testing.T) {
+	t.Parallel()
+	enabled := true
+	dir := t.TempDir()
+	recorder := NewRecorder(config.TelemetryConfig{Enabled: &enabled, Dir: dir, RetentionDays: 7}, filepath.Join(dir, "config.yaml"))
+	event := Event{
+		Time: time.Now().UTC(), Kind: "hook_recall", Success: true, RecallTimedOut: true,
+		ProviderRecalls: map[string]int{"sqlite": 1, "zep": 1},
+		ProviderRecallDetails: []memory.ProviderRecall{
+			{Provider: "sqlite", DurationMS: 12, Outcome: memory.ProviderRecallSuccess, TimeoutMS: 250},
+			{Provider: "zep", DurationMS: 250, Outcome: memory.ProviderRecallTimeout, TimeoutMS: 250, BulkheadBusy: true},
+		},
+	}
+	if err := recorder.Record(event); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := recorder.History(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers := map[string]Counter{}
+	for _, provider := range summary.Providers {
+		providers[provider.Name] = provider.Counter
+	}
+	if summary.Totals.RecallTimeouts != 1 {
+		t.Fatalf("overall recall timeouts = %d, want 1", summary.Totals.RecallTimeouts)
+	}
+	if got := providers["sqlite"]; got.ProviderRecallSamples != 1 || got.ProviderRecallDurationMS != 12 || got.ProviderRecallTimeouts != 0 {
+		t.Fatalf("sqlite recall metrics = %#v", got)
+	}
+	if got := ProviderRecallP95MS(providers["sqlite"]); got != 25 {
+		t.Fatalf("sqlite p95 bucket = %dms, want 25ms", got)
+	}
+	if got := providers["zep"]; got.ProviderRecallSamples != 1 || got.ProviderRecallDurationMS != 250 || got.ProviderRecallTimeouts != 1 || got.ProviderRecallBulkheadSkips != 1 {
+		t.Fatalf("zep recall metrics = %#v", got)
+	}
+	if got := ProviderRecallP95MS(providers["zep"]); got != 250 {
+		t.Fatalf("zep p95 bucket = %dms, want 250ms", got)
 	}
 }
 

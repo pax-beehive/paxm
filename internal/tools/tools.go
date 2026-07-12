@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 type RecallInput struct {
@@ -17,9 +17,11 @@ type RecallInput struct {
 	Meta    map[string]string `json:"meta,omitempty"`
 }
 type RecallResult struct {
-	Query          string                 `json:"query"`
-	Hits           []memory.MemoryHit     `json:"hits"`
-	ProviderErrors []memory.ProviderError `json:"provider_errors,omitempty"`
+	Query           string                  `json:"query"`
+	Hits            []memory.MemoryHit      `json:"hits"`
+	ProviderErrors  []memory.ProviderError  `json:"provider_errors,omitempty"`
+	ProviderRecalls []memory.ProviderRecall `json:"provider_recalls,omitempty"`
+	TimedOut        bool                    `json:"timed_out,omitempty"`
 }
 type RememberInput struct {
 	ID            string            `json:"id,omitempty"`
@@ -67,7 +69,11 @@ func (s *Engine) Recall(ctx context.Context, input RecallInput) (RecallResult, e
 		return RecallResult{}, err
 	}
 	value, err := s.router.SearchWithPolicy(ctx, memory.SearchQuery{Text: query, Metadata: input.Meta}, policy)
-	return RecallResult{Query: query, Hits: value.Hits, ProviderErrors: value.ProviderErrors}, err
+	result := RecallResult{Query: query, Hits: value.Hits, ProviderErrors: value.ProviderErrors, ProviderRecalls: value.ProviderRecalls}
+	if errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		result.TimedOut = true
+	}
+	return result, err
 }
 func (s *Engine) Remember(ctx context.Context, input RememberInput) (RememberResult, error) {
 	item, profile, ok := itemFromInput(input)
@@ -184,6 +190,9 @@ func routes(values []config.ProviderRouteConfig) []memory.ProviderRoute {
 	result := make([]memory.ProviderRoute, 0, len(values))
 	for _, route := range values {
 		item := memory.ProviderRoute{Name: route.Name, Required: route.Required, Weight: route.Weight}
+		if timeout, err := time.ParseDuration(route.Timeout); err == nil && timeout > 0 {
+			item.Timeout = timeout
+		}
 		if route.Thresholds != nil {
 			item.MinRelevance = route.Thresholds.MinRelevance
 			item.MinScore = route.Thresholds.MinScore

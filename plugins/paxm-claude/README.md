@@ -4,7 +4,7 @@ This plugin packages paxm skills, five Claude lifecycle hooks, and the paxm MCP
 server. Provider credentials and policy remain in the standalone paxm config.
 
 ```sh
-claude plugin marketplace add pax-beehive/memory-adaptor
+claude plugin marketplace add pax-beehive/paxm
 claude plugin install paxm-claude@pax-memory
 paxm setup --integration claude-plugin
 ```

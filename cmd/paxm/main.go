@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/pax-beehive/memory-adaptor/internal/cli"
+	"github.com/pax-beehive/paxm/internal/cli"
 )
 
 var version = "dev"

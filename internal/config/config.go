@@ -35,6 +35,8 @@ const (
 	initialRecallMinScore     = 0.35
 
 	defaultHookRecallMaxResults      = passiveRecallMaxResults
+	defaultPassiveRecallTimeout      = "800ms"
+	defaultProviderRecallTimeout     = "250ms"
 	defaultHookInsertionMinScore     = 0.8
 	defaultHookInsertionMaxItems     = passiveRecallMaxResults
 	defaultHookBufferFlushCount      = 10
@@ -98,6 +100,7 @@ type ProviderRouteConfig struct {
 	Name       string                 `json:"name" yaml:"name"`
 	Required   bool                   `json:"required" yaml:"required"`
 	Weight     float64                `json:"weight,omitempty" yaml:"weight,omitempty"`
+	Timeout    string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Thresholds *RecallThresholdConfig `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
 }
 
@@ -163,6 +166,7 @@ type HookRecallConfig struct {
 	Profile       string              `json:"profile,omitempty" yaml:"profile,omitempty"`
 	QueryTemplate string              `json:"query_template,omitempty" yaml:"query_template,omitempty"`
 	MaxResults    int                 `json:"max_results,omitempty" yaml:"max_results,omitempty"`
+	Timeout       string              `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Output        string              `json:"output,omitempty" yaml:"output,omitempty"`
 	Insertion     HookInsertionConfig `json:"insertion,omitempty" yaml:"insertion,omitempty"`
 	Initial       *HookInitialRecall  `json:"initial,omitempty" yaml:"initial,omitempty"`
@@ -173,6 +177,7 @@ type HookInitialRecall struct {
 	Profile       string              `json:"profile,omitempty" yaml:"profile,omitempty"`
 	QueryTemplate string              `json:"query_template,omitempty" yaml:"query_template,omitempty"`
 	MaxResults    int                 `json:"max_results,omitempty" yaml:"max_results,omitempty"`
+	Timeout       string              `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Insertion     HookInsertionConfig `json:"insertion,omitempty" yaml:"insertion,omitempty"`
 }
 
@@ -316,6 +321,23 @@ func DefaultConfig(configPath string) Config {
 			"ltm":     LTMWriteProfileFrom(defaultWriteRoutes),
 		},
 		Agents: map[string]AgentConfig{
+			"opencode": {
+				Enabled:      false,
+				ActiveRecall: ActiveRecallConfig{Enabled: true, Profile: "default", Output: "markdown"},
+				Hooks: map[string]AgentHookConfig{
+					"user_input": {
+						Recall: HookRecallConfig{
+							Enabled: true, Profile: "passive", QueryTemplate: "{{ .prompt }}", MaxResults: defaultHookRecallMaxResults,
+							Timeout: defaultPassiveRecallTimeout, Output: "markdown",
+							Insertion: HookInsertionConfig{MinScore: defaultHookInsertionMinScore, MaxItems: defaultHookInsertionMaxItems, RequireQueryTerms: true},
+							Initial:   defaultInitialHookRecall(),
+						},
+					},
+					"turn_end": {
+						Write: HookWriteConfig{Enabled: true, Profile: "ltm", Template: defaultHookWriteTemplate, Mode: "turn_end", Buffer: HookBufferConfig{Enabled: true, Flush: true, FlushCount: defaultHookBufferFlushCount}},
+					},
+				},
+			},
 			"claude": {
 				Enabled: false,
 				ActiveRecall: ActiveRecallConfig{
@@ -344,6 +366,7 @@ func DefaultConfig(configPath string) Config {
 							Profile:       "passive",
 							QueryTemplate: "{{ .prompt }}",
 							MaxResults:    defaultHookRecallMaxResults,
+							Timeout:       defaultPassiveRecallTimeout,
 							Output:        "markdown",
 							Insertion: HookInsertionConfig{
 								MinScore:          defaultHookInsertionMinScore,
@@ -404,6 +427,7 @@ func DefaultConfig(configPath string) Config {
 							Profile:       "passive",
 							QueryTemplate: "{{ .prompt }}",
 							MaxResults:    defaultHookRecallMaxResults,
+							Timeout:       defaultPassiveRecallTimeout,
 							Output:        "markdown",
 							Insertion: HookInsertionConfig{
 								MinScore:          defaultHookInsertionMinScore,
@@ -452,6 +476,7 @@ func DefaultConfig(configPath string) Config {
 							Profile:       "passive",
 							QueryTemplate: "{{ .prompt }}",
 							MaxResults:    defaultHookRecallMaxResults,
+							Timeout:       defaultPassiveRecallTimeout,
 							Output:        "markdown",
 							Insertion: HookInsertionConfig{
 								MinScore:          defaultHookInsertionMinScore,
@@ -562,6 +587,9 @@ func Validate(cfg Config) error {
 	if err := validateAgentOwners(cfg.Agents); err != nil {
 		return err
 	}
+	if err := validateAgentRecallTimeouts(cfg.Agents); err != nil {
+		return err
+	}
 	if err := validateRecallProfiles(cfg.RecallProfiles); err != nil {
 		return err
 	}
@@ -612,11 +640,43 @@ func validateAgentOwners(agents map[string]AgentConfig) error {
 func validateRecallProfiles(profiles map[string]RecallProfileConfig) error {
 	recallNames := sortedKeys(profiles)
 	for _, name := range recallNames {
+		for _, route := range profiles[name].Providers {
+			if err := validatePositiveDuration(route.Timeout); err != nil {
+				return fmt.Errorf("recall profile %q provider %q timeout: %w", name, route.Name, err)
+			}
+		}
 		for _, tier := range profiles[name].Tiers {
 			if _, ok := canonicalTier(tier); !ok {
 				return fmt.Errorf("recall profile %q has invalid tier %q; expected stm or ltm", name, tier)
 			}
 		}
+	}
+	return nil
+}
+
+func validateAgentRecallTimeouts(agents map[string]AgentConfig) error {
+	for name, agent := range agents {
+		for event, hook := range agent.Hooks {
+			if err := validatePositiveDuration(hook.Recall.Timeout); err != nil {
+				return fmt.Errorf("agent %q hook %q recall timeout: %w", name, event, err)
+			}
+			if hook.Recall.Initial != nil {
+				if err := validatePositiveDuration(hook.Recall.Initial.Timeout); err != nil {
+					return fmt.Errorf("agent %q hook %q initial recall timeout: %w", name, event, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validatePositiveDuration(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return errors.New("must be a positive duration")
 	}
 	return nil
 }
@@ -714,7 +774,15 @@ func normalizeProfiles(cfg *Config, renamedLegacyLocal bool) {
 		cfg.RecallProfiles = map[string]RecallProfileConfig{"default": legacyRecallProfile(cfg.Providers)}
 	}
 	for name, profile := range cfg.RecallProfiles {
-		cfg.RecallProfiles[name] = normalizeRecallProfile(profile)
+		profile = normalizeRecallProfile(profile)
+		if name == "passive" || name == "passive_initial" {
+			for i := range profile.Providers {
+				if profile.Providers[i].Timeout == "" {
+					profile.Providers[i].Timeout = defaultProviderRecallTimeout
+				}
+			}
+		}
+		cfg.RecallProfiles[name] = profile
 	}
 	if _, ok := cfg.RecallProfiles["passive"]; !ok {
 		cfg.RecallProfiles["passive"] = PassiveRecallProfileFrom(cfg.RecallProfiles["default"])
@@ -1074,6 +1142,9 @@ func normalizeHookRecall(name string, hook AgentHookConfig) AgentHookConfig {
 	if hook.Recall.Output == "" {
 		hook.Recall.Output = "markdown"
 	}
+	if hook.Recall.Enabled && hook.Recall.Timeout == "" {
+		hook.Recall.Timeout = defaultPassiveRecallTimeout
+	}
 	if hook.Recall.Initial != nil {
 		normalizeInitialHookRecall(hook.Recall.Initial, hook.Recall)
 	}
@@ -1089,6 +1160,9 @@ func normalizeInitialHookRecall(initial *HookInitialRecall, recall HookRecallCon
 	}
 	if initial.MaxResults == 0 {
 		initial.MaxResults = recall.MaxResults
+	}
+	if initial.Timeout == "" {
+		initial.Timeout = recall.Timeout
 	}
 }
 
@@ -1112,8 +1186,12 @@ func normalizeHookWrite(hook AgentHookConfig) AgentHookConfig {
 }
 
 func PassiveRecallProfileFrom(base RecallProfileConfig) RecallProfileConfig {
+	routes := append([]ProviderRouteConfig(nil), base.Providers...)
+	for i := range routes {
+		routes[i].Timeout = defaultProviderRecallTimeout
+	}
 	return RecallProfileConfig{
-		Providers:  append([]ProviderRouteConfig(nil), base.Providers...),
+		Providers:  routes,
 		MaxResults: passiveRecallMaxResults,
 		Thresholds: RecallThresholdConfig{
 			MinRelevance: passiveRecallMinRelevance,
@@ -1128,8 +1206,12 @@ func PassiveRecallProfileFrom(base RecallProfileConfig) RecallProfileConfig {
 }
 
 func PassiveInitialRecallProfileFrom(base RecallProfileConfig) RecallProfileConfig {
+	routes := append([]ProviderRouteConfig(nil), base.Providers...)
+	for i := range routes {
+		routes[i].Timeout = defaultProviderRecallTimeout
+	}
 	return RecallProfileConfig{
-		Providers:  append([]ProviderRouteConfig(nil), base.Providers...),
+		Providers:  routes,
 		MaxResults: initialRecallMaxResults,
 		Thresholds: RecallThresholdConfig{
 			MinRelevance: initialRecallMinRelevance,

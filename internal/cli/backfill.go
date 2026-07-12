@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/backfill"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/sessions"
+	"github.com/pax-beehive/paxm/internal/backfill"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/sessions"
 )
 
 type backfillStartResult struct {

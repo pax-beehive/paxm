@@ -3,7 +3,7 @@ set -euo pipefail
 export LC_ALL=C
 export LANG=C
 
-PAXM_REPO="${PAXM_REPO:-pax-beehive/memory-adaptor}"
+PAXM_REPO="${PAXM_REPO:-pax-beehive/paxm}"
 PAXM_VERSION="${PAXM_VERSION:-latest}"
 PAXM_INSTALL_DIR="${PAXM_INSTALL_DIR:-}"
 PAXM_BINARY_NAME="${PAXM_BINARY_NAME:-paxm}"

@@ -62,6 +62,7 @@ recall_profiles:
       - name: sqlite
         required: true
         weight: 1.0
+        timeout: 250ms
     max_results: 2
     thresholds:
       min_relevance: 0.75
@@ -76,6 +77,7 @@ recall_profiles:
       - name: sqlite
         required: true
         weight: 1.0
+        timeout: 250ms
     max_results: 5
     thresholds:
       min_relevance: 0.35
@@ -128,6 +130,7 @@ agents:
           profile: passive
           query_template: "{{ .prompt }}"
           max_results: 2
+          timeout: 800ms
           output: markdown
           insertion:
             min_score: 0.8
@@ -404,6 +407,13 @@ Threshold fields:
 - `min_relevance`: provider-normalized relevance threshold before merge.
 - `min_score`: final score threshold after weight and ranking boosts.
 
+Recall timeout fields:
+
+- A provider route `timeout` limits that downstream independently. Passive
+  profiles default to `250ms`, so one slow provider cannot delay healthy hits.
+- A hook recall `timeout` limits the complete passive recall operation. It
+  defaults to `800ms` and returns any partial hits collected before the budget.
+
 Example provider-specific passive recall thresholds:
 
 ```yaml
@@ -413,9 +423,11 @@ recall_profiles:
       - name: sqlite
         required: true
         weight: 1
+        timeout: 250ms
       - name: mem0_team
         required: false
         weight: 1
+        timeout: 250ms
         thresholds:
           min_relevance: 0.45
           min_score: 0.45
@@ -480,6 +492,17 @@ It also tries one final flush on `session_shutdown`. Pi's lifecycle events use
 the runtime event bus, so treat them as best-effort rather than a hard delivery
 guarantee.
 
+`agents.opencode.hooks.user_input.recall` controls passive recall from
+OpenCode's `chat.message` plugin hook. The generated plugin runs the bounded
+paxm recall shim, then injects admitted hits only into the current model-message
+transform. It does not modify the user message stored by OpenCode.
+
+`agents.opencode.hooks.turn_end.write` controls durable passive writes from
+OpenCode's `session.idle` event. The plugin reads the completed turn through the
+official OpenCode client, keeps visible user and assistant text, and excludes
+reasoning and tool parts before sending the episode to paxm. Repeated idle
+events for the same final assistant message are deduplicated in the plugin.
+
 `agents.<name>.integration.owner` records which installation surface owns the
 agent lifecycle hooks. An empty value preserves the original paxm-managed
 behavior. For Codex plugin installations, run:
@@ -534,7 +557,8 @@ receives admitted recall hits as Markdown context from the synchronous
 `UserPromptSubmit` hook.
 
 For Pi, the paxm `turn_end` hook maps to Pi's runtime `agent_end` event and
-receives the complete buffered run from the generated extension.
+receives the complete buffered run from the generated extension. For OpenCode,
+it maps to `session.idle` and receives the last completed user/assistant turn.
 
 Hook write fields:
 
@@ -609,12 +633,14 @@ storage cleanup runs.
 ## Setup And Uninstall
 
 In a TTY, multi-select prompts use up/down, space, and enter. After selecting
-agents, setup configures each one in the fixed order Codex, Claude Code, and Pi.
+agents, setup configures each one in the fixed order Codex, Claude Code, Pi, and
+OpenCode.
 Per-agent setup controls only passive recall, passive write, profiles, and write
 events. Non-TTY input retains the numbered selector for scripts and tests.
 
 `paxm uninstall` removes every built-in passive integration. Pass
-`--agent codex`, `--agent claude`, or `--agent pi` to remove one. The command
+`--agent codex`, `--agent claude`, `--agent pi`, or `--agent opencode` to remove
+one. The command
 preserves hook details in paxm config while setting the selected agent's
 `enabled` field to false, so a later setup can reuse the previous choices.
 Provider config, memory data, telemetry, active skills, the binary, and `.paxm.bak`
@@ -655,7 +681,12 @@ Files:
 - Agent metrics aggregate passive hook recall and write counts by hook target,
   such as `codex`.
 - Provider metrics aggregate recall calls, write calls, hits, refs, and provider
-  errors by provider name.
+  errors by provider name. Recall telemetry also records each provider's
+  duration, configured timeout, outcome, and bulkhead state. Aggregates expose
+  average and histogram-based p95 recall latency, timeout count, and bulkhead
+  skip count.
+- Passive hook events set `recall_timed_out` when the overall recall budget is
+  reached, independently of per-provider timeout outcomes.
 
 Bounds:
 

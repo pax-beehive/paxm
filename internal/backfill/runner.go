@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/pax-beehive/memory-adaptor/internal/sessions"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/sessions"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 const maxItemBytes = 24 * 1024

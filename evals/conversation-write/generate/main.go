@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	paxeval "github.com/pax-beehive/memory-adaptor/internal/eval"
+	paxeval "github.com/pax-beehive/paxm/internal/eval"
 )
 
 type topic struct {

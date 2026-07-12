@@ -88,6 +88,9 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	if !reflect.DeepEqual(passive.Tiers, []string{"ltm"}) {
 		t.Fatalf("passive recall should read LTM only: %#v", passive)
 	}
+	if len(passive.Providers) != 1 || passive.Providers[0].Timeout != "250ms" {
+		t.Fatalf("passive providers should have a tight timeout: %#v", passive.Providers)
+	}
 	initialProfile := cfg.RecallProfiles["passive_initial"]
 	if initialProfile.MaxResults != 5 || initialProfile.Thresholds.MinRelevance != 0.35 || initialProfile.Thresholds.MinScore != 0.35 {
 		t.Fatalf("unexpected initial passive profile: %#v", initialProfile)
@@ -96,7 +99,7 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 		t.Fatalf("initial passive recall should read LTM only: %#v", initialProfile)
 	}
 	hook := cfg.Agents["codex"].Hooks["user_input"].Recall
-	if hook.Profile != "passive" || hook.MaxResults != 2 {
+	if hook.Profile != "passive" || hook.MaxResults != 2 || hook.Timeout != "800ms" {
 		t.Fatalf("user_input hook should use passive profile: %#v", hook)
 	}
 	if hook.Insertion.MinScore != 0.8 || hook.Insertion.MaxItems != 2 || !hook.Insertion.RequireQueryTerms {
@@ -147,6 +150,14 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	}
 	if !piTurnEnd.Enabled || piTurnEnd.Profile != "ltm" || piTurnEnd.Mode != "turn_end" || !piTurnEnd.Buffer.Flush {
 		t.Fatalf("pi turn_end should default to best-effort buffered write: %#v", piTurnEnd)
+	}
+	openCode := cfg.Agents["opencode"]
+	if openCode.Enabled || !openCode.Hooks["user_input"].Recall.Enabled {
+		t.Fatalf("OpenCode passive recall should be opt-in and available: %#v", openCode)
+	}
+	openCodeTurnEnd := openCode.Hooks["turn_end"].Write
+	if !openCodeTurnEnd.Enabled || openCodeTurnEnd.Profile != "ltm" || openCodeTurnEnd.Mode != "turn_end" || !openCodeTurnEnd.Buffer.Flush {
+		t.Fatalf("OpenCode turn_end should default to durable buffered write: %#v", openCodeTurnEnd)
 	}
 	if stm := cfg.WriteProfiles["stm"]; stm.Tier != "stm" || stm.ExpiresAfter != defaultSTMExpiresAfter {
 		t.Fatalf("stm write profile should be short-term: %#v", stm)

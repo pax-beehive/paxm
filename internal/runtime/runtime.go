@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/pax-beehive/memory-adaptor/internal/adapters"
-	"github.com/pax-beehive/memory-adaptor/internal/capture"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
-	"github.com/pax-beehive/memory-adaptor/internal/operator"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/adapters"
+	"github.com/pax-beehive/paxm/internal/capture"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/operator"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 type Runtime struct {

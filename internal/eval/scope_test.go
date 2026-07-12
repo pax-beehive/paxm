@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 type deletingEvalProvider struct{ deleted []string }

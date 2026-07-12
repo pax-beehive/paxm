@@ -10,9 +10,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 const (
@@ -155,7 +155,13 @@ func (s *Service) RunHook(ctx context.Context, event HookEvent) (HookResult, err
 	if limit == 0 {
 		limit = recallCfg.MaxResults
 	}
-	recall, err := s.Recall(ctx, RecallInput{
+	recallCtx := ctx
+	cancel := func() {}
+	if timeout, parseErr := time.ParseDuration(recallCfg.Timeout); parseErr == nil && timeout > 0 {
+		recallCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+	recall, err := s.Recall(recallCtx, RecallInput{
 		Query:   query,
 		Profile: recallCfg.Profile,
 		Limit:   limit,
@@ -164,6 +170,10 @@ func (s *Service) RunHook(ctx context.Context, event HookEvent) (HookResult, err
 	recall.Hits = filterHookInsertionHits(recall.Hits, query, recallCfg.Insertion)
 	result.Query = recall.Query
 	result.Recall = &recall
+	if errors.Is(err, context.DeadlineExceeded) && errors.Is(recallCtx.Err(), context.DeadlineExceeded) {
+		result.Recall.TimedOut = true
+		return result, nil
+	}
 	return result, err
 }
 
@@ -180,6 +190,9 @@ func effectiveHookRecallConfig(recall config.HookRecallConfig, event HookEvent) 
 	}
 	if initial.MaxResults != 0 {
 		recall.MaxResults = initial.MaxResults
+	}
+	if initial.Timeout != "" {
+		recall.Timeout = initial.Timeout
 	}
 	if initial.Insertion != (config.HookInsertionConfig{}) {
 		recall.Insertion = initial.Insertion

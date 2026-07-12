@@ -2,10 +2,11 @@
 
 `paxm` binary releases are built from git tags.
 
-The current v0.1 plugin distribution is paired with binary `v0.1.14` and plugin
-`v0.1.2`. The plugin installer pins that binary version by default because it
-uses `paxm setup --integration codex-plugin` and requires Codex-native
-`UserPromptSubmit` output for passive recall.
+The current v0.1 distributions pair binary `v0.1.19` with Codex plugin
+`v0.1.3` and Claude Code plugin `v0.1.18`. The Codex plugin installer pins that
+binary version by default because it uses `paxm setup --integration
+codex-plugin` and requires Codex-native `UserPromptSubmit` output for passive
+recall.
 
 ## Automated Release
 
@@ -60,7 +61,7 @@ install.sh
 
 Each archive contains the `paxm` binary and the project README.
 `install.sh` is uploaded as a release asset so users can install with
-`curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh | bash`.
+`curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash`.
 
 ## Versioning
 
@@ -84,7 +85,7 @@ For Windows assets, use `unzip` instead of `tar`.
 Smoke test the installer against the release:
 
 ```bash
-curl -fsSL https://github.com/pax-beehive/memory-adaptor/releases/latest/download/install.sh -o /tmp/paxm-install.sh
+curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh -o /tmp/paxm-install.sh
 PAXM_INSTALL_DIR=/tmp/paxm-install-smoke bash /tmp/paxm-install.sh
 /tmp/paxm-install-smoke/paxm version
 ```

@@ -1,4 +1,4 @@
-module github.com/pax-beehive/memory-adaptor
+module github.com/pax-beehive/paxm
 
 go 1.25.0
 

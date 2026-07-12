@@ -11,7 +11,7 @@ import (
 	zepclient "github.com/getzep/zep-go/v3/client"
 	"github.com/getzep/zep-go/v3/core"
 	"github.com/getzep/zep-go/v3/option"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
 type EnsureUserResult struct {

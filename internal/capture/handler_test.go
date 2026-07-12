@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
 type recallStub struct{ calls int }

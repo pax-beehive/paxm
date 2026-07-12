@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
+	"github.com/pax-beehive/paxm/internal/config"
 )
 
 const (

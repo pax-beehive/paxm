@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/telemetry"
 )
 
 func TestServiceConfigurationAndObservationSurfaces(t *testing.T) {

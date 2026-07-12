@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	paxeval "github.com/pax-beehive/memory-adaptor/internal/eval"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	paxeval "github.com/pax-beehive/paxm/internal/eval"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 type pattern struct {

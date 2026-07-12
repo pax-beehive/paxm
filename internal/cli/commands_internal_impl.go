@@ -20,12 +20,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pax-beehive/memory-adaptor/internal/capture"
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
-	paxruntime "github.com/pax-beehive/memory-adaptor/internal/runtime"
-	"github.com/pax-beehive/memory-adaptor/internal/telemetry"
-	"github.com/pax-beehive/memory-adaptor/internal/tools"
+	"github.com/pax-beehive/paxm/internal/capture"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/memory"
+	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
+	"github.com/pax-beehive/paxm/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 func (r runner) writeHookResult(result capture.Result, jsonOut, codexNative bool) error {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pax-beehive/memory-adaptor/internal/config"
-	"github.com/pax-beehive/memory-adaptor/internal/facade"
-	"github.com/pax-beehive/memory-adaptor/internal/memory"
+	"github.com/pax-beehive/paxm/internal/config"
+	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
 )
 
 func TestServerServesMemoryToolsOverStdio(t *testing.T) {
@@ -26,6 +26,8 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"paxm_remember","arguments":{"text":"paxm mcp mode remembers provider fan-out","metadata":{"topic":"mcp"}}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"paxm_recall","arguments":{"query":"mcp provider fan-out","limit":3}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"paxm_history","arguments":{"days":7}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"paxm_config_doctor","arguments":{}}}`,
 	}, "\n") + "\n"
 
 	var stdout bytes.Buffer
@@ -44,7 +46,7 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	}
 
 	responses := decodeResponses(t, stdout.String())
-	if len(responses) != 4 {
+	if len(responses) != 6 {
 		t.Fatalf("expected 4 responses, got %d: %s", len(responses), stdout.String())
 	}
 	assertNoRPCError(t, responses)
@@ -59,7 +61,7 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 		Tools []toolDefinition `json:"tools"`
 	}
 	decodeResult(t, responses[1], &listResult)
-	if got := toolNames(listResult.Tools); strings.Join(got, ",") != "paxm_recall,paxm_remember" {
+	if got := toolNames(listResult.Tools); strings.Join(got, ",") != "paxm_recall,paxm_remember,paxm_history,paxm_config_doctor" {
 		t.Fatalf("unexpected tools: %#v", got)
 	}
 
@@ -86,6 +88,18 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	context, ok := structured["paxm_context"].(map[string]any)
 	if !ok || context["kind"] != "recall" || context["mode"] != "active" {
 		t.Fatalf("recall structured content omitted provenance: %#v", structured)
+	}
+
+	var historyResult toolResult
+	decodeResult(t, responses[4], &historyResult)
+	if historyResult.IsError || !strings.Contains(historyResult.Content[0].Text, `"recalls"`) || !strings.Contains(historyResult.Content[0].Text, `"writes"`) {
+		t.Fatalf("unexpected history result: %#v", historyResult)
+	}
+
+	var doctorResult toolResult
+	decodeResult(t, responses[5], &doctorResult)
+	if doctorResult.IsError || !strings.Contains(doctorResult.Content[0].Text, `"provider": "sqlite"`) {
+		t.Fatalf("unexpected doctor result: %#v", doctorResult)
 	}
 
 }
@@ -133,7 +147,8 @@ func TestServerRejectsInvalidToolArguments(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"paxm_recall","arguments":{"query":"x","extra":true}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"paxm_recall","arguments":{"query":"x","limit":0}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"paxm_recall","arguments":{"query":"   "}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"paxm_remember","arguments":{"text":""}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"paxm_history","arguments":{"days":0}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"paxm_remember","arguments":{"text":""}}}`,
 	}, "\n") + "\n"
 
 	var stdout bytes.Buffer
@@ -146,7 +161,7 @@ func TestServerRejectsInvalidToolArguments(t *testing.T) {
 	}
 	responses := decodeResponses(t, stdout.String())
 	assertNoRPCError(t, responses)
-	if len(responses) != 4 {
+	if len(responses) != 5 {
 		t.Fatalf("expected 4 responses, got %d: %s", len(responses), stdout.String())
 	}
 	for _, response := range responses {
@@ -161,6 +176,7 @@ func TestServerRejectsInvalidToolArguments(t *testing.T) {
 		"unknown field",
 		"limit must be at least 1",
 		"query is required",
+		"days must be at least 1",
 		"text is required",
 	} {
 		if !strings.Contains(output, expected) {

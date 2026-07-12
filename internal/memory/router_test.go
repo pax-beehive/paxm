@@ -76,6 +76,22 @@ type cleanupProvider struct {
 	limits  []int
 }
 
+type blockingSearchProvider struct {
+	calls   chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingSearchProvider) Name() string { return "blocked" }
+func (p *blockingSearchProvider) Search(context.Context, SearchQuery) ([]MemoryHit, error) {
+	p.calls <- struct{}{}
+	<-p.release
+	return nil, nil
+}
+func (p *blockingSearchProvider) Put(context.Context, MemoryItem) (MemoryRef, error) {
+	return MemoryRef{}, nil
+}
+func (p *blockingSearchProvider) Health(context.Context) error { return nil }
+
 func (p *cleanupProvider) CleanupExpired(_ context.Context, limit int) (int, error) {
 	p.limits = append(p.limits, limit)
 	if p.err != nil {
@@ -144,6 +160,91 @@ func TestRouterIgnoresOptionalProviderErrors(t *testing.T) {
 	}
 	if len(result.ProviderErrors) != 1 || result.ProviderErrors[0].Provider != "optional" {
 		t.Fatalf("expected optional provider error, got %#v", result.ProviderErrors)
+	}
+}
+
+func TestRouterReturnsPartialResultsWhenOptionalProviderTimesOut(t *testing.T) {
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "fast", hits: []MemoryHit{{ID: "fast", Text: "memory", Relevance: 1}}}, Read: true},
+		{Provider: fakeProvider{name: "slow", searchDelay: 250 * time.Millisecond}, Read: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{Providers: []ProviderRoute{
+		{Name: "fast", Timeout: 20 * time.Millisecond},
+		{Name: "slow", Timeout: 20 * time.Millisecond},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		t.Fatalf("optional provider blocked recall for %s", elapsed)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].ID != "fast" {
+		t.Fatalf("partial hits = %#v, want fast hit", result.Hits)
+	}
+	if len(result.ProviderErrors) != 1 || result.ProviderErrors[0].Provider != "slow" {
+		t.Fatalf("provider errors = %#v, want slow timeout", result.ProviderErrors)
+	}
+	if len(result.ProviderRecalls) != 2 {
+		t.Fatalf("provider recall timings = %#v, want two samples", result.ProviderRecalls)
+	}
+	byProvider := map[string]ProviderRecall{}
+	for _, recall := range result.ProviderRecalls {
+		byProvider[recall.Provider] = recall
+	}
+	if byProvider["fast"].Outcome != ProviderRecallSuccess || byProvider["slow"].Outcome != ProviderRecallTimeout {
+		t.Fatalf("provider recall outcomes = %#v", byProvider)
+	}
+	if byProvider["slow"].TimeoutMS != 20 || byProvider["slow"].DurationMS < 10 {
+		t.Fatalf("slow provider timing = %#v", byProvider["slow"])
+	}
+}
+
+func TestRouterFailsFastWhenRequiredProviderTimesOut(t *testing.T) {
+	router, err := NewRouter([]ProviderBinding{{Provider: fakeProvider{name: "slow", searchDelay: 250 * time.Millisecond}, Read: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{Providers: []ProviderRoute{{Name: "slow", Required: true, Timeout: 20 * time.Millisecond}}})
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("required provider timeout error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		t.Fatalf("required provider timeout returned after %s", elapsed)
+	}
+	if len(result.ProviderErrors) != 1 || !result.ProviderErrors[0].Required {
+		t.Fatalf("provider errors = %#v", result.ProviderErrors)
+	}
+}
+
+func TestRouterBulkheadPreventsRepeatedCallsToStuckProvider(t *testing.T) {
+	provider := &blockingSearchProvider{calls: make(chan struct{}, 2), release: make(chan struct{})}
+	defer close(provider.release)
+	router, err := NewRouter([]ProviderBinding{{Provider: provider, Read: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := SearchPolicy{Providers: []ProviderRoute{{Name: "blocked", Timeout: 20 * time.Millisecond}}}
+	var second SearchResult
+	for i := range 2 {
+		result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			second = result
+		}
+	}
+	if got := len(provider.calls); got != 1 {
+		t.Fatalf("stuck provider calls = %d, want 1", got)
+	}
+	if len(second.ProviderRecalls) != 1 || !second.ProviderRecalls[0].BulkheadBusy || second.ProviderRecalls[0].Outcome != ProviderRecallTimeout {
+		t.Fatalf("bulkhead timing missing: %#v", second.ProviderRecalls)
 	}
 }
 
