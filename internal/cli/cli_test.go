@@ -87,7 +87,7 @@ func TestEvalRunLoCoMoUsesAgentArms(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	exit := MainWithDependencies([]string{"--config", configPath, "eval", "run", "locomo", "--dataset", datasetPath, "--agent", "opencode", "--provider", "sqlite", "--max-questions", "1", "--manifest-dir", filepath.Join(dir, "runs"), "--run-id", "agent-cli-test", "--json"}, nil, &stdout, &stderr, Dependencies{AgentExecutor: cliAgentExecutor{}})
+	exit := MainWithDependencies([]string{"--config", configPath, "eval", "run", "locomo", "--dataset", datasetPath, "--agent", "opencode", "--model", "test/model", "--provider", "sqlite", "--max-questions", "1", "--manifest-dir", filepath.Join(dir, "runs"), "--run-id", "agent-cli-test", "--json"}, nil, &stdout, &stderr, Dependencies{AgentExecutor: cliAgentExecutor{}})
 	if exit != 0 {
 		t.Fatalf("exit = %d, stderr = %s", exit, stderr.String())
 	}

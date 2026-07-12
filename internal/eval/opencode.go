@@ -10,9 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pax-beehive/memory-adaptor/internal/opencodeplugin"
 )
 
 type OpenCodeCommandRunner func(context.Context, string, []string, string, ...string) ([]byte, error)
@@ -42,6 +43,11 @@ func (e OpenCodeExecutor) Execute(ctx context.Context, request AgentRequest) (Ag
 		"OPENCODE_DISABLE_CLAUDE_CODE=true",
 		"OPENCODE_DISABLE_LSP_DOWNLOAD=true",
 		"OPENCODE_CLIENT=paxm-eval",
+		"PAXM_BINARY=" + e.PaxmBinary,
+		"PAXM_CONFIG=" + request.PaxmConfigPath,
+		"PAXM_OPENCODE_RECALL_MARKER=" + filepath.Join(configDir, "recall-used"),
+		"PAXM_OPENCODE_RECALL=" + boolEnv(request.RecallEnabled),
+		"PAXM_OPENCODE_WRITE=" + boolEnv(request.WriteEnabled),
 	})
 	args := []string{"run", "--format", "json", "--title", "paxm-eval-" + request.QuestionID, "--dir", request.Workspace}
 	if strings.TrimSpace(e.Model) != "" {
@@ -61,6 +67,7 @@ func (e OpenCodeExecutor) Execute(ctx context.Context, request AgentRequest) (Ag
 	started := time.Now()
 	output, err := runner(commandCtx, request.Workspace, env, e.Binary, args...)
 	response, parseErr := parseOpenCodeOutput(output)
+	response.Model = strings.TrimSpace(e.Model)
 	response.DurationMS = time.Since(started).Milliseconds()
 	if bytes.Contains(output, []byte("paxm_recall")) || bytes.Contains(output, []byte("paxm-paxm_recall")) {
 		response.RecallUsed = true
@@ -78,6 +85,11 @@ func (e OpenCodeExecutor) Execute(ctx context.Context, request AgentRequest) (Ag
 		return response, parseErr
 	}
 	return response, nil
+}
+
+func (e OpenCodeExecutor) FlushWrites(ctx context.Context, configPath string) error {
+	_, err := runOpenCodeCommand(ctx, filepath.Dir(configPath), os.Environ(), e.PaxmBinary, "--config", configPath, "__hook-control", "--shutdown")
+	return err
 }
 
 func prepareOpenCodeConfig(configDir string, request AgentRequest, paxmBinary string) error {
@@ -104,70 +116,21 @@ func prepareOpenCodeConfig(configDir string, request AgentRequest, paxmBinary st
 	if err := os.WriteFile(filepath.Join(configDir, "opencode.json"), append(data, '\n'), 0o600); err != nil {
 		return err
 	}
-	if request.Arm != AgentArmPassive {
+	if !request.RecallEnabled && !request.WriteEnabled {
 		return nil
 	}
 	pluginDir := filepath.Join(configDir, "plugins")
 	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		return err
 	}
-	plugin := openCodePassivePlugin(paxmBinary, request.PaxmConfigPath)
-	return os.WriteFile(filepath.Join(pluginDir, "paxm-eval.js"), []byte(plugin), 0o600)
+	return os.WriteFile(filepath.Join(pluginDir, "paxm.js"), []byte(opencodeplugin.Source), 0o600)
 }
 
-func openCodePassivePlugin(paxmBinary, configPath string) string {
-	return `import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
-
-const paxmBinary = ` + strconv.Quote(paxmBinary) + `;
-const paxmConfig = ` + strconv.Quote(configPath) + `;
-const pending = new Map();
-
-function textOf(parts) {
-  return (parts ?? []).filter((part) => part?.type === "text" && !part.synthetic && !part.ignored)
-    .map((part) => typeof part.text === "string" ? part.text.trim() : "").filter(Boolean).join("\n\n").trim();
-}
-
-function recall(prompt, sessionID, workspace) {
-	const marker = "Question:";
-	const markerIndex = prompt.lastIndexOf(marker);
-	const query = markerIndex >= 0 ? prompt.slice(markerIndex + marker.length).trim() : prompt;
-	const payload = {schema_version:"paxm.opencode.user_input.v1",target:"opencode",event:"user_input",agent:"opencode",session_id:sessionID,workspace,prompt:query,source:"paxm-eval"};
-  const result = spawnSync(paxmBinary, ["--config", paxmConfig, "__hook", "--target", "opencode", "--event", "user_input", "--json"], {input:JSON.stringify(payload)+"\n",encoding:"utf8",timeout:5000,maxBuffer:1024*1024});
-  if (result.error || result.status !== 0) return "";
-  try {
-    const value = JSON.parse(result.stdout ?? "");
-    const hits = value?.recall?.hits ?? [];
-    if (!Array.isArray(hits) || hits.length === 0) return "";
-    const lines = hits.map((hit) => String(hit?.text ?? "").trim()).filter(Boolean);
-    return lines.length ? '<paxm-recall version="1" mode="passive">\nRelevant memory recalled by paxm:\n' + lines.join("\n\n---\n\n") + '\n</paxm-recall>' : "";
-  } catch { return ""; }
-}
-
-export const PaxmEvalPlugin = async ({directory, worktree}) => ({
-  "chat.message": async (input, output) => {
-    const prompt = textOf(output.parts);
-    if (!prompt) return;
-    const value = recall(prompt, input.sessionID, worktree || directory);
-		if (value) {
-			pending.set(input.sessionID, value);
-			try { writeFileSync(new URL("../recall-used", import.meta.url), "1"); } catch {}
-		}
-  },
-  "experimental.chat.messages.transform": async (_input, output) => {
-    for (let index = output.messages.length - 1; index >= 0; index--) {
-      const message = output.messages[index];
-      if (message?.info?.role !== "user") continue;
-      const value = pending.get(String(message.info.sessionID ?? ""));
-      if (!value) return;
-      pending.delete(String(message.info.sessionID ?? ""));
-      const part = message.parts.find((candidate) => candidate?.type === "text" && !candidate.synthetic && !candidate.ignored);
-      if (part && typeof part.text === "string") part.text += "\n\n" + value;
-      return;
-    }
-  }
-});
-`
+func boolEnv(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
 }
 
 func runOpenCodeCommand(ctx context.Context, dir string, env []string, binary string, args ...string) ([]byte, error) {

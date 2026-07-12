@@ -22,7 +22,7 @@ func TestOpenCodeExecutorBuildsPassivePluginAndParsesJSONStream(t *testing.T) {
 	}
 	response, err := executor.Execute(context.Background(), AgentRequest{
 		AgentName: "opencode", Arm: AgentArmPassive, QuestionID: "q1", Prompt: "question",
-		Workspace: dir, PaxmConfigPath: filepath.Join(dir, "paxm", "config.yaml"),
+		Workspace: dir, PaxmConfigPath: filepath.Join(dir, "paxm", "config.yaml"), RecallEnabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,12 +41,15 @@ func TestOpenCodeExecutorBuildsPassivePluginAndParsesJSONStream(t *testing.T) {
 	if !strings.Contains(string(configData), `"*": false`) {
 		t.Fatalf("OpenCode config did not disable all built-in tools: %s", configData)
 	}
-	plugin, err := os.ReadFile(filepath.Join(configDir, "plugins", "paxm-eval.js"))
+	plugin, err := os.ReadFile(filepath.Join(configDir, "plugins", "paxm.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(plugin), "/bin/paxm") || !strings.Contains(string(plugin), "__hook") {
+	if !strings.Contains(string(plugin), "PAXM_BINARY") || !strings.Contains(string(plugin), "session.idle") || !strings.Contains(string(plugin), "__hook") {
 		t.Fatalf("plugin = %s", plugin)
+	}
+	if envValue(capturedEnv, "PAXM_BINARY") != "/bin/paxm" || envValue(capturedEnv, "PAXM_OPENCODE_RECALL") != "1" {
+		t.Fatalf("plugin environment = %#v", capturedEnv)
 	}
 }
 

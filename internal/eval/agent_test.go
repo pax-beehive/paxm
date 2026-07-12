@@ -63,7 +63,7 @@ func TestLoCoMoAgentRunnerMeasuresMemoryLiftAcrossArms(t *testing.T) {
 		t.Fatal(err)
 	}
 	for event, hook := range loaded.Agents["opencode"].Hooks {
-		if hook.Write.Enabled {
+		if hook.Write.Enabled != (event == "turn_end") {
 			t.Fatalf("eval config left %s passive write enabled", event)
 		}
 	}

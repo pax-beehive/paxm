@@ -173,7 +173,7 @@ paxm [--config PATH] backfill scan --agent AGENT [--before TIME]
 paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]
 paxm [--config PATH] backfill status --agent AGENT --provider NAME
 paxm eval run [--suite PATH] [--gate quality|adapter|none] [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]
-paxm eval run locomo --dataset PATH --agent NAME --provider NAME (--max-questions N | --all) [--arms control,passive,active] [--json] [--output RESULT.json]
+paxm eval run locomo --dataset PATH --agent NAME --model PROVIDER/MODEL --provider NAME (--max-questions N | --all) [--arms control,passive,active] [--json] [--output RESULT.json]
 paxm eval retrieval locomo --dataset PATH --provider NAME [--limit N] [--settle DURATION] [--keep-memory] [--json] [--output RESULT.json]
 paxm eval cleanup (--run RUN_ID | --stale) [--manifest-dir PATH]
 paxm [--config PATH] mcp serve

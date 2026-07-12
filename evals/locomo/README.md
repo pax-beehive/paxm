@@ -15,6 +15,13 @@ includes per-arm accuracy, mean F1, exact match, model tokens and cost, recall
 usage, and passive/active lift over control. This score is intentionally not
 presented as the official LoCoMo LLM-judge accuracy.
 
+Before scoring each conversation, paxm also runs a write canary through the
+same production OpenCode plugin (`session.idle` -> `turn_end` -> paxm capture
+queue -> provider), flushes the queue, and verifies that the canary is
+searchable. LoCoMo fixtures are then bulk-seeded directly so setup does not add
+hundreds of paid agent calls. The plugin source is shared with the production
+integration rather than copied into the eval harness.
+
 Download `locomo10.json` from the
 [official SNAP Research repository](https://github.com/snap-research/locomo/tree/main/data),
 then run:
@@ -23,12 +30,14 @@ then run:
 paxm --config ~/.config/paxm/config.yaml eval run locomo \
   --dataset /path/to/locomo10.json \
   --agent opencode \
+  --model deepseek/deepseek-v4-flash \
   --provider sqlite \
   --max-questions 10 \
   --output locomo-opencode-sqlite.json
 ```
 
-Agent evaluation makes paid model calls. The CLI requires either
+Agent evaluation makes paid model calls. The CLI requires an explicit
+`--model PROVIDER/MODEL` so results are reproducible, plus either
 `--max-questions N` or the explicit `--all` acknowledgement. Use `--arms` to
 select a subset, for example `--arms control,active`.
 
@@ -52,7 +61,7 @@ capability.
 Use a settle duration for asynchronously indexed providers:
 
 ```bash
-paxm eval run locomo --dataset locomo10.json --agent opencode \
+paxm eval run locomo --dataset locomo10.json --agent opencode --model PROVIDER/MODEL \
   --provider zep --max-questions 10 --settle 10s
 ```
 

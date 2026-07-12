@@ -177,6 +177,8 @@ func (r runner) run(args []string) error {
 		return r.runInternalHook(args[1:])
 	case "__hook-daemon":
 		return r.runHookDaemon(args[1:])
+	case "__hook-control":
+		return r.runHookControl(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -855,6 +857,9 @@ func (r runner) runLoCoMoAgentEval(args []string) error {
 	if strings.TrimSpace(*datasetPath) == "" || strings.TrimSpace(*agentName) == "" {
 		return errors.New("LoCoMo agent evaluation requires --dataset PATH and --agent NAME")
 	}
+	if strings.TrimSpace(*model) == "" {
+		return errors.New("LoCoMo agent evaluation requires --model PROVIDER/MODEL so runs are reproducible")
+	}
 	if *maxQuestions <= 0 && !*allQuestions {
 		return errors.New("LoCoMo agent evaluation makes paid model calls; choose --max-questions N or explicitly pass --all")
 	}
@@ -961,7 +966,8 @@ func findOpenCodeBinary(explicit string) (string, error) {
 }
 
 func writeLoCoMoAgentReport(w io.Writer, result paxeval.LoCoMoAgentResult) {
-	fmt.Fprintf(w, "paxm eval: %s  agent=%s  provider=%s\n", result.Benchmark, result.Agent, result.Provider)
+	fmt.Fprintf(w, "paxm eval: %s  agent=%s  provider=%s  model=%s\n", result.Benchmark, result.Agent, result.Provider, result.Model)
+	fmt.Fprintf(w, "  agent write canary: %t\n", result.WriteCanary)
 	fmt.Fprintf(w, "  questions: %d  trials: %d  duration: %s\n", result.QuestionCount, result.TrialCount, time.Duration(result.DurationMS)*time.Millisecond)
 	for _, summary := range result.Summaries {
 		fmt.Fprintf(w, "  %-7s accuracy %.1f%%  mean-f1 %.3f  exact %.1f%%  recall-used %d/%d  useful %.1f%%  errors %d  tokens %d/%d  cost $%.4f\n",
@@ -1303,6 +1309,16 @@ func hookSourceAllowed(cfg config.Config, event facade.HookEvent) bool {
 		return source == owner
 	}
 	return source == "" || source == config.IntegrationOwnerPaxm
+}
+
+func (r runner) runHookControl(args []string) error {
+	fs := flag.NewFlagSet("__hook-control", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+	shutdown := fs.Bool("shutdown", false, "flush and stop the hook daemon")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return flushExistingHookBuffer(r.configFile(), *shutdown)
 }
 
 func (r runner) runHookDaemon(args []string) error {

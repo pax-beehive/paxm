@@ -33,6 +33,8 @@ type AgentRequest struct {
 	Prompt         string
 	Workspace      string
 	PaxmConfigPath string
+	RecallEnabled  bool
+	WriteEnabled   bool
 }
 
 type AgentResponse struct {
@@ -43,10 +45,15 @@ type AgentResponse struct {
 	Cost         float64 `json:"cost,omitempty"`
 	DurationMS   int64   `json:"duration_ms"`
 	RecallUsed   bool    `json:"recall_used,omitempty"`
+	Model        string  `json:"model,omitempty"`
 }
 
 type AgentExecutor interface {
 	Execute(context.Context, AgentRequest) (AgentResponse, error)
+}
+
+type AgentWriteFlusher interface {
+	FlushWrites(context.Context, string) error
 }
 
 type LoCoMoAgentOptions struct {
@@ -104,6 +111,8 @@ type LoCoMoAgentResult struct {
 	DatasetVersion string            `json:"dataset_version"`
 	Agent          string            `json:"agent"`
 	Provider       string            `json:"provider"`
+	Model          string            `json:"model,omitempty"`
+	WriteCanary    bool              `json:"write_canary"`
 	QuestionCount  int               `json:"question_count"`
 	TrialCount     int               `json:"trial_count"`
 	PassiveLift    float64           `json:"passive_lift,omitempty"`
@@ -147,6 +156,12 @@ func (r LoCoMoAgentRunner) Run(ctx context.Context, dataset LoCoMoDataset, opts 
 		result.Trials = append(result.Trials, trials...)
 		if runErr != nil {
 			err = errors.Join(err, runErr)
+		}
+		if len(trials) > 0 && result.Model == "" {
+			result.Model = trials[0].Response.Model
+		}
+		if _, ok := r.Agent.(AgentWriteFlusher); ok && runErr == nil {
+			result.WriteCanary = true
 		}
 	}
 	result.DurationMS = time.Since(started).Milliseconds()
@@ -199,6 +214,24 @@ func (r LoCoMoAgentRunner) runAgentConversation(ctx context.Context, conversatio
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		return failedAgentTrials(conversation.ID, questions, opts.Arms, err), err
 	}
+	canary := "PAXM_EVAL_WRITE_" + sanitizeScopeID(runID)
+	if flusher, ok := r.Agent.(AgentWriteFlusher); ok {
+		_, canaryErr := r.Agent.Execute(ctx, AgentRequest{AgentName: opts.AgentName, Arm: AgentArmControl, QuestionID: "write-canary", Workspace: workspace, PaxmConfigPath: configPath, WriteEnabled: true, Prompt: "Remember this exact token for later: " + canary + ". Reply with exactly STORED."})
+		if canaryErr == nil {
+			canaryErr = flusher.FlushWrites(ctx, configPath)
+		}
+		if canaryErr == nil {
+			var ref memory.MemoryRef
+			ref, canaryErr = waitForAgentWrite(ctx, provider, canary, 10*time.Second)
+			if canaryErr == nil {
+				canaryErr = scope.RecordRefs([]memory.MemoryRef{ref})
+			}
+		}
+		if canaryErr != nil {
+			_ = scope.SetStatus(EvalStatusFailed, canaryErr)
+			return failedAgentTrials(conversation.ID, questions, opts.Arms, canaryErr), fmt.Errorf("agent write canary: %w", canaryErr)
+		}
+	}
 	for index, question := range questions {
 		reference := loCoMoAnswer(question.Answer)
 		questionID := fmt.Sprintf("%s-q%04d", conversation.ID, index+1)
@@ -206,6 +239,7 @@ func (r LoCoMoAgentRunner) runAgentConversation(ctx context.Context, conversatio
 			request := AgentRequest{
 				AgentName: opts.AgentName, Arm: arm, QuestionID: questionID, Question: question.Question,
 				Prompt: agentQuestionPrompt(question.Question, arm), Workspace: workspace, PaxmConfigPath: configPath,
+				RecallEnabled: arm == AgentArmPassive,
 			}
 			response, executeErr := r.Agent.Execute(ctx, request)
 			trial := AgentTrial{ConversationID: conversation.ID, QuestionID: questionID, Question: question.Question, Reference: reference, Category: question.Category, Arm: arm, Response: response}
@@ -231,11 +265,41 @@ func prepareAgentEvalConfig(cfg *config.Config, configPath, agentName string) {
 	for event, hook := range template.Hooks {
 		hook.Write.Enabled = false
 		hook.Write.Buffer.Enabled = false
+		if event == "turn_end" {
+			hook.Write.Enabled = true
+			hook.Write.Buffer.Enabled = true
+			hook.Write.Buffer.Flush = true
+		}
 		template.Hooks[event] = hook
 	}
 	cfg.Agents = map[string]config.AgentConfig{agentName: template}
 	cfg.Telemetry.Dir = filepath.Join(filepath.Dir(configPath), "state")
 	cfg.CaptureQueue.Path = filepath.Join(filepath.Dir(configPath), "capture.sqlite")
+}
+
+func waitForAgentWrite(ctx context.Context, provider memory.Provider, canary string, timeout time.Duration) (memory.MemoryRef, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		hits, err := provider.Search(ctx, memory.SearchQuery{Text: canary, Limit: 10})
+		if err == nil {
+			for _, hit := range hits {
+				if strings.Contains(hit.Text, canary) {
+					return memory.MemoryRef{Provider: provider.Name(), ID: hit.ID}, nil
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return memory.MemoryRef{}, err
+			}
+			return memory.MemoryRef{}, errors.New("canary was not persisted by the agent hook")
+		}
+		select {
+		case <-ctx.Done():
+			return memory.MemoryRef{}, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func agentQuestionPrompt(question string, arm AgentArm) string {
