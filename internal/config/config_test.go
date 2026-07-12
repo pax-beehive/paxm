@@ -180,6 +180,27 @@ func TestDefaultProviderRecallTimeoutUsesCloudBudget(t *testing.T) {
 	}
 }
 
+func TestNormalizeMigratesLegacyPassiveTimeoutDefaults(t *testing.T) {
+	cfg := Config{
+		Version:   1,
+		Providers: map[string]ProviderConfig{"cloud": {Type: "mem0-cloud", Enabled: true}},
+		RecallProfiles: map[string]RecallProfileConfig{
+			"passive": {Providers: []ProviderRouteConfig{{Name: "cloud", Timeout: "250ms"}}},
+		},
+		Agents: map[string]AgentConfig{"opencode": {Enabled: true, Hooks: map[string]AgentHookConfig{
+			"user_input": {Recall: HookRecallConfig{Enabled: true, Profile: "passive", Timeout: "800ms"}},
+		}}},
+	}
+	normalized := Normalize(cfg)
+	if got := normalized.RecallProfiles["passive"].Providers[0].Timeout; got != "800ms" {
+		t.Fatalf("cloud route timeout = %q", got)
+	}
+	recall := normalized.Agents["opencode"].Hooks["user_input"].Recall
+	if recall.Timeout != "" || recall.TimeoutExtra != "100ms" {
+		t.Fatalf("normalized recall = %#v", recall)
+	}
+}
+
 func TestValidateAcceptsKnownIntegrationOwners(t *testing.T) {
 	t.Parallel()
 

@@ -799,8 +799,10 @@ func normalizeProfiles(cfg *Config, renamedLegacyLocal bool) {
 		profile = normalizeRecallProfile(profile)
 		if name == "passive" || name == "passive_initial" {
 			for i := range profile.Providers {
-				if profile.Providers[i].Timeout == "" {
-					profile.Providers[i].Timeout = defaultProviderRecallTimeout
+				route := &profile.Providers[i]
+				providerType := cfg.Providers[route.Name].Type
+				if route.Timeout == "" || (providerType == "mem0-cloud" && route.Timeout == defaultProviderRecallTimeout) {
+					route.Timeout = DefaultProviderRecallTimeout(providerType)
 				}
 			}
 		}
@@ -1182,6 +1184,10 @@ func normalizeHookRecall(name string, hook AgentHookConfig) AgentHookConfig {
 		hook.Recall.Output = "markdown"
 	}
 	if hook.Recall.Enabled && hook.Recall.Timeout == "" && hook.Recall.TimeoutExtra == "" {
+		hook.Recall.TimeoutExtra = defaultPassiveRecallTimeoutExtra
+	}
+	if hook.Recall.Timeout == defaultPassiveRecallTimeout && hook.Recall.TimeoutExtra == "" {
+		hook.Recall.Timeout = ""
 		hook.Recall.TimeoutExtra = defaultPassiveRecallTimeoutExtra
 	}
 	if hook.Recall.Initial != nil {
