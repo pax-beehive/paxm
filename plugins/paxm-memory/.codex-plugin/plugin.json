@@ -1,6 +1,6 @@
 {
   "name": "paxm-memory",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Install and use Pax Agent neXus as Codex's local-first agent memory layer.",
   "author": {
     "name": "PAX",

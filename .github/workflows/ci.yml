@@ -39,6 +39,10 @@ jobs:
         run: scripts/check-production-coverage.sh coverage.out 75
       - name: Vet
         run: go vet ./...
+      - name: Validate Codex plugin scripts
+        run: |
+          sh -n plugins/paxm-memory/scripts/*.sh plugins/paxm-memory/hooks/*.sh
+          sh plugins/paxm-memory/scripts/install-paxm_test.sh
       - name: Report 100-case provider benchmark (non-gating)
         run: go run ./cmd/paxm eval run --suite evals/baseline --gate none
       - name: Run 50-case adapter write contract

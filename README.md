@@ -72,14 +72,16 @@ Choose the path for the agent you use. The Codex plugin is the shortest path:
 ### Codex plugin
 
 ```bash
-codex plugin marketplace add pax-beehive/paxm --ref paxm-memory-v0.1.3
+codex plugin marketplace add pax-beehive/paxm --ref paxm-memory-v0.1.4
 codex plugin add paxm-memory@pax-agent-nexus
 paxm setup --integration codex-plugin
 ```
 
 Start a new Codex task and trust the Pax Agent neXus hooks when `/hooks` asks.
-The plugin installs its reviewed paxm binary, registers active-memory skills,
-and owns the passive Codex hooks. Provider credentials remain user-managed.
+The plugin installs the latest published paxm binary, registers active-memory
+skills, and owns the passive Codex hooks. Set `PAXM_VERSION` before installation
+when a reproducible version or rollback is required. Provider credentials
+remain user-managed.
 
 ### Claude Code plugin
 
