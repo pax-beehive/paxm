@@ -47,3 +47,22 @@ func TestRecallEnvelopeEscapesNestedMarkers(t *testing.T) {
 		t.Fatalf("wrapped=%q", wrapped)
 	}
 }
+
+func TestEngineValidationSurfacesDoNotRequireRouter(t *testing.T) {
+	engine := New(config.DefaultConfig("config.yaml"), nil)
+	if _, err := engine.Recall(context.Background(), RecallInput{}); err == nil {
+		t.Fatal("empty recall query was accepted")
+	}
+	if _, err := engine.Remember(context.Background(), RememberInput{}); err == nil {
+		t.Fatal("empty remember text was accepted")
+	}
+	if _, err := engine.RememberBatchToProvider(context.Background(), "", RememberBatchInput{}); err == nil {
+		t.Fatal("empty provider was accepted")
+	}
+	if result, err := engine.RememberBatch(context.Background(), RememberBatchInput{}); err != nil || len(result.Refs) != 0 {
+		t.Fatalf("empty batch = %#v, err=%v", result, err)
+	}
+	if _, err := engine.PutPolicy("missing"); err == nil {
+		t.Fatal("missing write profile was accepted")
+	}
+}
