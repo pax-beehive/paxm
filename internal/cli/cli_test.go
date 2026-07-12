@@ -1281,7 +1281,7 @@ func TestCLISetupInteractiveJSONRPCProvider(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("4\n1\n/opt/paxm/plugins/corp-memory\n--config /etc/corp-memory.yaml\n15s\n1\n2\nnone\n")
+	setupInput := strings.NewReader("5\n1\n/opt/paxm/plugins/corp-memory\n--config /etc/corp-memory.yaml\n15s\n1\n2\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -1310,6 +1310,25 @@ func TestCLISetupInteractiveJSONRPCProvider(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "installed hook shim") {
 		t.Fatalf("setup installed hook despite none selection: %s", stdout.String())
+	}
+}
+
+func TestCLISetupInteractiveMem0CloudProvider(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	setupInput := strings.NewReader("4\n\ncloud-key\n1\ntoddzheng\n1\n2\nnone\n")
+	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloud := cfg.Providers["mem0_cloud"]
+	if !cloud.Enabled || cloud.Type != "mem0-cloud" || cloud.APIKey != "cloud-key" || cloud.BaseURL != config.DefaultMem0CloudBaseURL() || cloud.UserID != "toddzheng" {
+		t.Fatalf("unexpected mem0 cloud config: %#v", cloud)
 	}
 }
 
@@ -1779,6 +1798,7 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 			Providers: map[string]config.ProviderConfig{
 				"custom": {Type: "custom"},
 				"mem":    {Type: "mem0"},
+				"cloud":  {Type: "mem0-cloud"},
 				"rpc":    {Type: "jsonrpc"},
 				"sqlite": {Type: "sqlite"},
 				"zed":    {Type: "zep"},
@@ -1790,7 +1810,7 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 				"claude": {Enabled: true},
 			},
 		}
-		if got, want := providerOptionIDs(cfg), []string{"sqlite", "zed", "mem", "rpc", "custom"}; !reflect.DeepEqual(got, want) {
+		if got, want := providerOptionIDs(cfg), []string{"sqlite", "zed", "mem", "cloud", "rpc", "custom"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("providerOptionIDs() = %#v, want %#v", got, want)
 		}
 		wantHooks := []setupOption{
@@ -1815,7 +1835,8 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 			{name: "sqlite default", providerName: "sqlite", provider: config.ProviderConfig{Type: "sqlite"}, wantLabel: "SQLite", wantPriority: 0},
 			{name: "named zep", providerName: "team", provider: config.ProviderConfig{Type: "zep"}, wantLabel: "team (Zep)", wantPriority: 1},
 			{name: "named mem0", providerName: "company", provider: config.ProviderConfig{Type: "mem0"}, wantLabel: "company (Mem0)", wantPriority: 2},
-			{name: "jsonrpc default", providerName: "jsonrpc", provider: config.ProviderConfig{Type: "jsonrpc"}, wantLabel: "JSON-RPC", wantPriority: 3},
+			{name: "mem0 cloud default", providerName: "mem0_cloud", provider: config.ProviderConfig{Type: "mem0-cloud"}, wantLabel: "Mem0 Cloud", wantPriority: 3},
+			{name: "jsonrpc default", providerName: "jsonrpc", provider: config.ProviderConfig{Type: "jsonrpc"}, wantLabel: "JSON-RPC", wantPriority: 4},
 			{name: "unknown", providerName: "other", provider: config.ProviderConfig{Type: "other"}, wantLabel: "other", wantPriority: 100},
 		}
 		for _, tt := range tests {

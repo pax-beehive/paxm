@@ -1170,8 +1170,10 @@ func providerOptionPriority(providerType string) int {
 		return 1
 	case "mem0":
 		return 2
-	case "jsonrpc":
+	case "mem0-cloud":
 		return 3
+	case "jsonrpc":
+		return 4
 	default:
 		return 100
 	}
@@ -1184,7 +1186,7 @@ func promptProviderInstance(reader *bufio.Reader, writer io.Writer, cfg *config.
 		return promptSQLiteProvider(reader, writer, cfg, providerName)
 	case "zep":
 		return promptZepProvider(reader, writer, cfg, providerName)
-	case "mem0":
+	case "mem0", "mem0-cloud":
 		return promptMem0Provider(reader, writer, cfg, providerName)
 	case "jsonrpc":
 		return promptJSONRPCProvider(reader, writer, cfg, providerName)
@@ -1262,8 +1264,12 @@ func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Confi
 func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
 	mem0 := cfg.Providers[providerName]
 	label := providerPromptLabel(providerName, mem0)
+	defaultBaseURL := config.DefaultMem0BaseURL()
+	if mem0.Type == "mem0-cloud" {
+		defaultBaseURL = config.DefaultMem0CloudBaseURL()
+	}
 	var err error
-	mem0.BaseURL, err = promptString(reader, writer, label+" base URL", firstNonEmpty(mem0.BaseURL, config.DefaultMem0BaseURL()))
+	mem0.BaseURL, err = promptString(reader, writer, label+" base URL", firstNonEmpty(mem0.BaseURL, defaultBaseURL))
 	if err != nil {
 		return err
 	}
@@ -1273,6 +1279,9 @@ func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Conf
 	mem0.APIKey, err = promptString(reader, writer, label+" API key (blank if auth is disabled)", mem0.APIKey)
 	if err != nil {
 		return err
+	}
+	if mem0.Type == "mem0-cloud" && strings.TrimSpace(mem0.APIKey) == "" {
+		return errors.New("mem0 cloud setup requires an API key")
 	}
 	target, err := promptSingleSelect(reader, writer, label+" memory target", []setupOption{
 		{ID: "user", Label: "user_id"},
@@ -1368,6 +1377,11 @@ func providerPromptLabel(providerName string, provider config.ProviderConfig) st
 			return "Mem0"
 		}
 		return providerName + " (Mem0)"
+	case "mem0-cloud":
+		if providerName == "mem0_cloud" {
+			return "Mem0 Cloud"
+		}
+		return providerName + " (Mem0 Cloud)"
 	case "jsonrpc":
 		if providerName == "jsonrpc" {
 			return "JSON-RPC"

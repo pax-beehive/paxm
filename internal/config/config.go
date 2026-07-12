@@ -18,6 +18,7 @@ var ErrConfigMissing = errors.New("paxm config is missing")
 const (
 	defaultConfigVersion       = 1
 	defaultMem0BaseURL         = "http://localhost:8888"
+	defaultMem0CloudBaseURL    = "https://api.mem0.ai"
 	defaultJSONRPCTransport    = "stdio"
 	defaultJSONRPCTimeout      = "30s"
 	defaultProviderRouteWeight = 1
@@ -303,6 +304,11 @@ func DefaultConfig(configPath string) Config {
 				Type:    "mem0",
 				Enabled: false,
 				BaseURL: defaultMem0BaseURL,
+			},
+			"mem0_cloud": {
+				Type:    "mem0-cloud",
+				Enabled: false,
+				BaseURL: defaultMem0CloudBaseURL,
 			},
 			"jsonrpc": {
 				Type:      "jsonrpc",
@@ -893,6 +899,9 @@ func normalizeProviderConfig(provider ProviderConfig) ProviderConfig {
 	if provider.BaseURL == "" && provider.Type == "mem0" {
 		provider.BaseURL = defaultMem0BaseURL
 	}
+	if provider.BaseURL == "" && provider.Type == "mem0-cloud" {
+		provider.BaseURL = defaultMem0CloudBaseURL
+	}
 	if provider.Transport == "" && provider.Type == "jsonrpc" {
 		provider.Transport = defaultJSONRPCTransport
 	}
@@ -1026,6 +1035,10 @@ func normalizeProviderRoute(route ProviderRouteConfig) ProviderRouteConfig {
 
 func DefaultMem0BaseURL() string {
 	return defaultMem0BaseURL
+}
+
+func DefaultMem0CloudBaseURL() string {
+	return defaultMem0CloudBaseURL
 }
 
 func DefaultSTMExpiresAfter() string {
