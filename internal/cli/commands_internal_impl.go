@@ -177,29 +177,46 @@ func (r runner) runHookDaemon(args []string) error {
 		return err
 	}
 	defer releaseLock()
-	queuePath := hookQueuePath(r.configFile())
-	if strings.TrimSpace(cfg.CaptureQueue.Path) != "" {
-		queuePath = cfg.CaptureQueue.Path
-	}
-	captureRuntime, err := capture.Open(capture.OpenOptions{Config: cfg, QueuePath: queuePath, Policy: rt.Capture, Operator: rt.Operator, Record: func(event telemetry.Event) { r.recordTelemetry(cfg, event) }})
+	captureRuntime, err := r.openHookCaptureRuntime(cfg, rt)
 	if err != nil {
 		return err
 	}
 	defer captureRuntime.Close()
-	if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
-		return err
-	}
-	_ = os.Remove(*socket)
-	listener, err := net.Listen("unix", *socket)
+	listener, cleanup, err := openHookListener(*socket)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = listener.Close()
-		_ = os.Remove(*socket)
-	}()
+	defer cleanup()
+	return r.serveHookDaemon(listener, captureRuntime, *idleTimeout)
+}
 
-	deadline := time.NewTimer(*idleTimeout)
+func (r runner) openHookCaptureRuntime(cfg config.Config, rt *paxruntime.Runtime) (*capture.Runtime, error) {
+	queuePath := hookQueuePath(r.configFile())
+	if strings.TrimSpace(cfg.CaptureQueue.Path) != "" {
+		queuePath = cfg.CaptureQueue.Path
+	}
+	return capture.Open(capture.OpenOptions{Config: cfg, QueuePath: queuePath, Policy: rt.Capture, Operator: rt.Operator, Record: func(event telemetry.Event) { r.recordTelemetry(cfg, event) }})
+}
+
+func openHookListener(socket string) (net.Listener, func(), error) {
+	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+		return nil, nil, err
+	}
+	_ = os.Remove(socket)
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		_ = listener.Close()
+		_ = os.Remove(socket)
+	}
+	return listener, cleanup, nil
+}
+
+func (r runner) serveHookDaemon(listener net.Listener, captureRuntime *capture.Runtime, idleTimeout time.Duration) error {
+
+	deadline := time.NewTimer(idleTimeout)
 	defer deadline.Stop()
 	for {
 		type acceptResult struct {
@@ -232,7 +249,7 @@ func (r runner) runHookDaemon(args []string) error {
 				default:
 				}
 			}
-			deadline.Reset(*idleTimeout)
+			deadline.Reset(idleTimeout)
 			_ = flushed
 		}
 	}
@@ -467,6 +484,11 @@ func enrichHookEventFromRaw(event *capture.Event, raw []byte) {
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return
 	}
+	enrichHookFields(event, object)
+	enrichHookMessages(event, object)
+}
+
+func enrichHookFields(event *capture.Event, object map[string]any) {
 	if event.Workspace == "" {
 		for _, key := range []string{"workspace", "cwd", "current_dir"} {
 			if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
@@ -491,6 +513,9 @@ func enrichHookEventFromRaw(event *capture.Event, raw []byte) {
 			}
 		}
 	}
+}
+
+func enrichHookMessages(event *capture.Event, object map[string]any) {
 	if len(event.Messages) == 0 {
 		event.Messages = hookMessagesFromRaw(object["messages"])
 	}

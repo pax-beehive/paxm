@@ -468,30 +468,27 @@ func (c *eventCursor) pollOpenFile(paths []string, activePath string, pathInfo o
 		return nil, err
 	}
 	if os.SameFile(currentInfo, pathInfo) {
-		if pathInfo.Size() >= offset {
-			return events, nil
-		}
-		if _, err := c.file.Seek(0, io.SeekStart); err != nil {
-			return nil, err
-		}
-		c.pending = nil
-		newEvents, err := c.readAvailable(activePath)
-		return append(events, newEvents...), err
+		return c.pollSameFile(activePath, pathInfo, offset, events)
 	}
+	return c.pollRotatedFiles(paths, currentInfo, events)
+}
 
-	currentIndex := -1
-	for index, path := range paths {
-		info, err := os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if os.SameFile(currentInfo, info) {
-			currentIndex = index
-			break
-		}
+func (c *eventCursor) pollSameFile(activePath string, pathInfo os.FileInfo, offset int64, events []Event) ([]Event, error) {
+	if pathInfo.Size() >= offset {
+		return events, nil
+	}
+	if _, err := c.file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	c.pending = nil
+	newEvents, err := c.readAvailable(activePath)
+	return append(events, newEvents...), err
+}
+
+func (c *eventCursor) pollRotatedFiles(paths []string, currentInfo os.FileInfo, events []Event) ([]Event, error) {
+	currentIndex, err := c.findCurrentPath(paths, currentInfo)
+	if err != nil {
+		return nil, err
 	}
 	c.close()
 	if currentIndex < 0 {
@@ -520,6 +517,24 @@ func (c *eventCursor) pollOpenFile(paths []string, activePath string, pathInfo o
 		events = append(events, fileEvents...)
 	}
 	return events, nil
+}
+
+func (c *eventCursor) findCurrentPath(paths []string, currentInfo os.FileInfo) (int, error) {
+	currentIndex := -1
+	for index, path := range paths {
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return -1, err
+		}
+		if os.SameFile(currentInfo, info) {
+			currentIndex = index
+			break
+		}
+	}
+	return currentIndex, nil
 }
 
 func (c *eventCursor) readAvailable(path string) ([]Event, error) {

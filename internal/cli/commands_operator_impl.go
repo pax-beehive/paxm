@@ -251,61 +251,83 @@ func (r runner) installSelectedHookIntegrations(path string, cfg config.Config, 
 		if !selectedHooks[name] {
 			continue
 		}
-		if name == "codex" && strings.EqualFold(cfg.Agents[name].Integration.Owner, config.IntegrationOwnerCodexPlugin) {
-			// Remove legacy paxm-managed Codex registrations before handing
-			// ownership to the plugin. Plugin hooks are discovered and trusted by
-			// Codex itself; paxm must not register a second copy.
-			marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "codex-")
-			if err := removeCodexGlobalHooks(codexConfigPath(), marker); err != nil {
-				return err
-			}
-			if err := removeAgentHookShims(path, name); err != nil {
-				return err
-			}
-			fmt.Fprintln(r.stdout, "Codex hooks are owned by the paxm-memory plugin")
+		if handled, err := r.reconcilePluginOwnership(path, cfg, name); err != nil {
+			return err
+		} else if handled {
 			continue
 		}
-		if name == "claude" && strings.EqualFold(cfg.Agents[name].Integration.Owner, config.IntegrationOwnerClaudePlugin) {
-			marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "claude-")
-			if err := removeClaudeGlobalHooks(claudeSettingsPath(), marker); err != nil {
-				return err
-			}
-			if err := removeAgentHookShims(path, name); err != nil {
-				return err
-			}
-			fmt.Fprintln(r.stdout, "Claude hooks are owned by the paxm-claude plugin")
-			continue
-		}
-		if err := removeLegacyHookShim(path, name); err != nil {
+		if err := r.installAgentHookIntegration(path, cfg.Agents[name], name); err != nil {
 			return err
 		}
-		if err := uninstallAgentIntegration(path, name); err != nil {
-			return fmt.Errorf("reset %s integration: %w", name, err)
+	}
+	return nil
+}
+
+func (r runner) reconcilePluginOwnership(path string, cfg config.Config, name string) (bool, error) {
+	agent, ok := cfg.Agents[name]
+	if !ok {
+		return false, nil
+	}
+	owner := strings.ToLower(agent.Integration.Owner)
+	switch {
+	case name == "codex" && owner == config.IntegrationOwnerCodexPlugin:
+		marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "codex-")
+		if err := removeCodexGlobalHooks(codexConfigPath(), marker); err != nil {
+			return true, err
 		}
-		installedScripts := make(map[string]string)
-		for _, event := range hookInstallEventsForAgent(cfg.Agents[name]) {
-			scriptPath, err := installHookShim(path, name, event.ConfigEvent)
-			if err != nil {
-				return err
-			}
-			installedScripts[event.ConfigEvent] = scriptPath
-			fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+		if err := removeAgentHookShims(path, name); err != nil {
+			return true, err
 		}
-		if name == "codex" {
-			fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
+		fmt.Fprintln(r.stdout, "Codex hooks are owned by the paxm-memory plugin")
+		return true, nil
+	case name == "claude" && owner == config.IntegrationOwnerClaudePlugin:
+		marker := filepath.Join(filepath.Dir(config.ExpandPath(path)), "hooks", "claude-")
+		if err := removeClaudeGlobalHooks(claudeSettingsPath(), marker); err != nil {
+			return true, err
 		}
-		if name == "claude" {
-			if err := installClaudeGlobalHooks(claudeSettingsPath(), installedScripts); err != nil {
-				return err
-			}
-			fmt.Fprintf(r.stdout, "registered Claude Code global hook: %s\n", claudeSettingsPath())
+		if err := removeAgentHookShims(path, name); err != nil {
+			return true, err
 		}
-		if name == "pi" {
-			if err := installPiGlobalHook(piExtensionPath(), installedScripts); err != nil {
-				return err
-			}
-			fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
+		fmt.Fprintln(r.stdout, "Claude hooks are owned by the paxm-claude plugin")
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func (r runner) installAgentHookIntegration(path string, agent config.AgentConfig, name string) error {
+	if err := removeLegacyHookShim(path, name); err != nil {
+		return err
+	}
+	if err := uninstallAgentIntegration(path, name); err != nil {
+		return fmt.Errorf("reset %s integration: %w", name, err)
+	}
+	installedScripts := make(map[string]string)
+	for _, event := range hookInstallEventsForAgent(agent) {
+		scriptPath, err := installHookShim(path, name, event.ConfigEvent)
+		if err != nil {
+			return err
 		}
+		installedScripts[event.ConfigEvent] = scriptPath
+		fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
+	}
+	return r.registerAgentIntegration(name, installedScripts)
+}
+
+func (r runner) registerAgentIntegration(name string, installedScripts map[string]string) error {
+	switch name {
+	case "codex":
+		fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
+	case "claude":
+		if err := installClaudeGlobalHooks(claudeSettingsPath(), installedScripts); err != nil {
+			return err
+		}
+		fmt.Fprintf(r.stdout, "registered Claude Code global hook: %s\n", claudeSettingsPath())
+	case "pi":
+		if err := installPiGlobalHook(piExtensionPath(), installedScripts); err != nil {
+			return err
+		}
+		fmt.Fprintf(r.stdout, "registered Pi agent extension: %s\n", piExtensionPath())
 	}
 	return nil
 }
@@ -340,31 +362,49 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		return config.Config{}, err
 	}
 	cfg = config.Normalize(cfg)
-	for name, provider := range defaultCfg.Providers {
+	mergeDefaultProviders(&cfg, defaultCfg)
+	mergeDefaultRecallProfiles(&cfg, defaultCfg)
+	mergeDefaultWriteProfiles(&cfg, defaultCfg)
+	cfg.Telemetry = mergeTelemetryDefaults(cfg.Telemetry, defaultCfg.Telemetry)
+	mergeDefaultAgents(&cfg, defaultCfg)
+	return cfg, nil
+}
+
+func mergeDefaultProviders(cfg *config.Config, defaults config.Config) {
+	for name, provider := range defaults.Providers {
 		if _, ok := cfg.Providers[name]; !ok {
 			cfg.Providers[name] = provider
 		}
 	}
-	for name, profile := range defaultCfg.RecallProfiles {
+}
+
+func mergeDefaultRecallProfiles(cfg *config.Config, defaults config.Config) {
+	for name, profile := range defaults.RecallProfiles {
 		if existing, ok := cfg.RecallProfiles[name]; ok {
 			cfg.RecallProfiles[name] = mergeRecallProfileDefaults(name, existing, profile)
-		} else {
-			if name == "passive" {
-				cfg.RecallProfiles[name] = config.PassiveRecallProfileFrom(cfg.RecallProfiles["default"])
-			} else if name == "passive_initial" {
-				cfg.RecallProfiles[name] = config.PassiveInitialRecallProfileFrom(cfg.RecallProfiles["default"])
-			} else {
-				cfg.RecallProfiles[name] = profile
-			}
+			continue
+		}
+		switch name {
+		case "passive":
+			cfg.RecallProfiles[name] = config.PassiveRecallProfileFrom(cfg.RecallProfiles["default"])
+		case "passive_initial":
+			cfg.RecallProfiles[name] = config.PassiveInitialRecallProfileFrom(cfg.RecallProfiles["default"])
+		default:
+			cfg.RecallProfiles[name] = profile
 		}
 	}
-	for name, profile := range defaultCfg.WriteProfiles {
+}
+
+func mergeDefaultWriteProfiles(cfg *config.Config, defaults config.Config) {
+	for name, profile := range defaults.WriteProfiles {
 		if _, ok := cfg.WriteProfiles[name]; !ok {
 			cfg.WriteProfiles[name] = profile
 		}
 	}
-	cfg.Telemetry = mergeTelemetryDefaults(cfg.Telemetry, defaultCfg.Telemetry)
-	for name, agent := range defaultCfg.Agents {
+}
+
+func mergeDefaultAgents(cfg *config.Config, defaults config.Config) {
+	for name, agent := range defaults.Agents {
 		existing, ok := cfg.Agents[name]
 		if !ok {
 			cfg.Agents[name] = agent
@@ -373,17 +413,20 @@ func setupBaseConfig(path string, useExisting bool) (config.Config, error) {
 		if existing.Hooks == nil {
 			existing.Hooks = make(map[string]config.AgentHookConfig)
 		}
-		for eventName, eventCfg := range agent.Hooks {
-			existingHook, ok := existing.Hooks[eventName]
-			if !ok {
-				existing.Hooks[eventName] = eventCfg
-				continue
-			}
-			existing.Hooks[eventName] = mergeHookDefaults(existingHook, eventCfg)
-		}
+		mergeDefaultAgentHooks(&existing, agent)
 		cfg.Agents[name] = existing
 	}
-	return cfg, nil
+}
+
+func mergeDefaultAgentHooks(existing *config.AgentConfig, defaults config.AgentConfig) {
+	for eventName, eventCfg := range defaults.Hooks {
+		existingHook, ok := existing.Hooks[eventName]
+		if !ok {
+			existing.Hooks[eventName] = eventCfg
+			continue
+		}
+		existing.Hooks[eventName] = mergeHookDefaults(existingHook, eventCfg)
+	}
 }
 
 func mergeRecallProfileDefaults(name string, current, defaults config.RecallProfileConfig) config.RecallProfileConfig {

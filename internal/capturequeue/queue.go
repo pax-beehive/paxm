@@ -439,19 +439,33 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `, episode.ID, episode.SessionKey, first, last, episode.Complete, payload, checksum(payload), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
+	if err := q.persistEpisodeRoutes(ctx, tx, episode.ID, q.episodeProviderRoutes(episode.Events)); err != nil {
+		return err
+	}
+	return linkEpisodeEvents(ctx, tx, episode.ID, eventIDs)
+}
+
+func (q *Queue) episodeProviderRoutes(events []facade.IngestInput) map[string]map[string]bool {
 	providers := make(map[string]map[string]bool)
-	if q.opts.Providers != nil {
-		for _, item := range episode.Events {
-			for _, provider := range q.opts.Providers(item.Profile) {
-				if provider = strings.TrimSpace(provider); provider != "" {
-					if providers[provider] == nil {
-						providers[provider] = make(map[string]bool)
-					}
-					providers[provider][item.Profile] = true
-				}
+	if q.opts.Providers == nil {
+		return providers
+	}
+	for _, item := range events {
+		for _, provider := range q.opts.Providers(item.Profile) {
+			provider = strings.TrimSpace(provider)
+			if provider == "" {
+				continue
 			}
+			if providers[provider] == nil {
+				providers[provider] = make(map[string]bool)
+			}
+			providers[provider][item.Profile] = true
 		}
 	}
+	return providers
+}
+
+func (q *Queue) persistEpisodeRoutes(ctx context.Context, tx *sql.Tx, episodeID string, providers map[string]map[string]bool) error {
 	for provider, profiles := range providers {
 		profileNames := make([]string, 0, len(profiles))
 		for profile := range profiles {
@@ -462,12 +476,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO capture_deliveries(episode_id, provider, profiles_json) VALUES (?, ?, ?)`, episode.ID, provider, profilesJSON); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO capture_deliveries(episode_id, provider, profiles_json) VALUES (?, ?, ?)`, episodeID, provider, profilesJSON); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func linkEpisodeEvents(ctx context.Context, tx *sql.Tx, episodeID string, eventIDs []string) error {
 	for _, eventID := range eventIDs {
-		if _, err := tx.ExecContext(ctx, `UPDATE capture_events SET episode_id = ? WHERE event_id = ?`, episode.ID, eventID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE capture_events SET episode_id = ? WHERE event_id = ?`, episodeID, eventID); err != nil {
 			return err
 		}
 	}
@@ -567,46 +585,66 @@ func (q *Queue) verifyDeliveryClaims(ctx context.Context, claims []deliveryClaim
 	verified := claims[:0]
 	var result RunResult
 	for _, claim := range claims {
-		verifyErr := claim.corruptErr
-		if verifyErr == nil {
-			verifyErr = q.verifyEpisode(ctx, claim.episode)
+		verifiedClaim, claimResult, keep, err := q.verifyDeliveryClaim(ctx, claim)
+		if err != nil {
+			return nil, result, err
 		}
-		if verifyErr != nil {
-			if _, err := q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'dead', attempts = attempts + 1, last_error = ? WHERE episode_id = ? AND provider = ?`, verifyErr.Error(), claim.episodeID, claim.provider); err != nil {
-				return nil, result, err
-			}
-			result.Dead++
-			if q.opts.OnDelivery != nil {
-				q.opts.OnDelivery(DeliveryOutcome{EpisodeID: claim.episodeID, SessionKey: claim.episode.SessionKey, Provider: claim.provider, Attempt: claim.attempts + 1, Err: verifyErr, Dead: true})
-			}
-			continue
+		result.Dead += claimResult.Dead
+		if keep {
+			verified = append(verified, verifiedClaim)
 		}
-		claim.captureTimes, verifyErr = q.episodeCaptureTimes(ctx, claim.episodeID)
-		if verifyErr != nil || len(claim.captureTimes) != len(claim.episode.Events) {
-			if verifyErr == nil {
-				verifyErr = fmt.Errorf("capture episode %s capture timestamp count mismatch", claim.episodeID)
-			}
-			if _, err := q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'dead', attempts = attempts + 1, last_error = ? WHERE episode_id = ? AND provider = ?`, verifyErr.Error(), claim.episodeID, claim.provider); err != nil {
-				return nil, result, err
-			}
-			result.Dead++
-			continue
-		}
-		if len(claim.profiles) > 0 {
-			filtered := claim.episode.Events[:0]
-			filteredTimes := claim.captureTimes[:0]
-			for index, item := range claim.episode.Events {
-				if claim.profiles[item.Profile] {
-					filtered = append(filtered, item)
-					filteredTimes = append(filteredTimes, claim.captureTimes[index])
-				}
-			}
-			claim.episode.Events = filtered
-			claim.captureTimes = filteredTimes
-		}
-		verified = append(verified, claim)
 	}
 	return verified, result, nil
+}
+
+func (q *Queue) verifyDeliveryClaim(ctx context.Context, claim deliveryClaim) (deliveryClaim, RunResult, bool, error) {
+	verifyErr := claim.corruptErr
+	if verifyErr == nil {
+		verifyErr = q.verifyEpisode(ctx, claim.episode)
+	}
+	if verifyErr != nil {
+		if err := q.quarantineDelivery(ctx, claim, verifyErr); err != nil {
+			return deliveryClaim{}, RunResult{}, false, err
+		}
+		if q.opts.OnDelivery != nil {
+			q.opts.OnDelivery(DeliveryOutcome{EpisodeID: claim.episodeID, SessionKey: claim.episode.SessionKey, Provider: claim.provider, Attempt: claim.attempts + 1, Err: verifyErr, Dead: true})
+		}
+		return deliveryClaim{}, RunResult{Dead: 1}, false, nil
+	}
+
+	claim.captureTimes, verifyErr = q.episodeCaptureTimes(ctx, claim.episodeID)
+	if verifyErr == nil && len(claim.captureTimes) != len(claim.episode.Events) {
+		verifyErr = fmt.Errorf("capture episode %s capture timestamp count mismatch", claim.episodeID)
+	}
+	if verifyErr != nil {
+		if err := q.quarantineDelivery(ctx, claim, verifyErr); err != nil {
+			return deliveryClaim{}, RunResult{}, false, err
+		}
+		return deliveryClaim{}, RunResult{Dead: 1}, false, nil
+	}
+	filterDeliveryClaim(&claim)
+	return claim, RunResult{}, true, nil
+}
+
+func (q *Queue) quarantineDelivery(ctx context.Context, claim deliveryClaim, reason error) error {
+	_, err := q.db.ExecContext(ctx, `UPDATE capture_deliveries SET state = 'dead', attempts = attempts + 1, last_error = ? WHERE episode_id = ? AND provider = ?`, reason.Error(), claim.episodeID, claim.provider)
+	return err
+}
+
+func filterDeliveryClaim(claim *deliveryClaim) {
+	if len(claim.profiles) == 0 {
+		return
+	}
+	filtered := claim.episode.Events[:0]
+	filteredTimes := claim.captureTimes[:0]
+	for index, item := range claim.episode.Events {
+		if claim.profiles[item.Profile] {
+			filtered = append(filtered, item)
+			filteredTimes = append(filteredTimes, claim.captureTimes[index])
+		}
+	}
+	claim.episode.Events = filtered
+	claim.captureTimes = filteredTimes
 }
 
 func (q *Queue) markDelivering(ctx context.Context, claims []deliveryClaim) error {

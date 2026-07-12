@@ -30,29 +30,38 @@ func (r runner) runUninstall(args []string) error {
 		return err
 	}
 	if !*yes {
-		fmt.Fprintf(r.stdout, "Passive integrations to remove: %s\n", strings.Join(agentDisplayNames(targets), ", "))
-		prompter := newSetupPrompter(r.stdin, r.stdout)
-		confirmed, err := prompter.confirm("Continue uninstall?", false)
-		if err != nil {
-			if errors.Is(err, errPromptCancelled) {
-				fmt.Fprintln(r.stdout, "uninstall cancelled")
-				return nil
-			}
+		confirmed, err := r.confirmUninstall(targets)
+		if err != nil || !confirmed {
 			return err
 		}
-		if !confirmed {
-			fmt.Fprintln(r.stdout, "uninstall cancelled")
-			return nil
-		}
 	}
+	return r.applyUninstall(r.configFile(), *agentName, targets)
+}
 
-	configPath := r.configFile()
+func (r runner) confirmUninstall(targets []string) (bool, error) {
+	fmt.Fprintf(r.stdout, "Passive integrations to remove: %s\n", strings.Join(agentDisplayNames(targets), ", "))
+	prompter := newSetupPrompter(r.stdin, r.stdout)
+	confirmed, err := prompter.confirm("Continue uninstall?", false)
+	if err != nil {
+		if errors.Is(err, errPromptCancelled) {
+			fmt.Fprintln(r.stdout, "uninstall cancelled")
+			return false, nil
+		}
+		return false, err
+	}
+	if !confirmed {
+		fmt.Fprintln(r.stdout, "uninstall cancelled")
+	}
+	return confirmed, nil
+}
+
+func (r runner) applyUninstall(configPath, agentName string, targets []string) error {
 	cfg, loadErr := config.Load(configPath)
 	hasConfig := loadErr == nil
 	if loadErr != nil && !errors.Is(loadErr, config.ErrConfigMissing) {
 		return loadErr
 	}
-	if err := flushExistingHookBuffer(configPath, *agentName == ""); err != nil {
+	if err := flushExistingHookBuffer(configPath, agentName == ""); err != nil {
 		fmt.Fprintf(r.stderr, "paxm hook buffer flush skipped: %s\n", err)
 	}
 	if hasConfig {
@@ -77,7 +86,7 @@ func (r runner) runUninstall(args []string) error {
 		}
 		fmt.Fprintf(r.stdout, "uninstalled %s passive integration\n", agentDisplayName(target))
 	}
-	if *agentName == "" {
+	if agentName == "" {
 		if err := removeSharedHookState(configPath); err != nil {
 			cleanupErrors = append(cleanupErrors, err)
 		}
