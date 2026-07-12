@@ -2,11 +2,10 @@
 
 `paxm` binary releases are built from git tags.
 
-The current v0.1 distributions pair binary `v0.1.19` with Codex plugin
-`v0.1.3` and Claude Code plugin `v0.1.18`. The Codex plugin installer pins that
-binary version by default because it uses `paxm setup --integration
-codex-plugin` and requires Codex-native `UserPromptSubmit` output for passive
-recall.
+The current v0.1 distributions pair binary `v0.1.20` with Codex plugin
+`v0.1.4` and Claude Code plugin `v0.1.18`. The Codex plugin installer resolves
+the latest GitHub binary release by default. Operators can set
+`PAXM_VERSION` to request a reproducible install or rollback.
 
 ## Automated Release
 

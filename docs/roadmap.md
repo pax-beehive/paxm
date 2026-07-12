@@ -121,25 +121,26 @@ v0.1 acceptance checks:
   observable through paxm history;
 - full Go tests, `go vet`, and plugin validation pass.
 
-### v0.1 Distribution Pairing
+### Current v0.1 Distribution Pairing
 
-The first public-compatible pairing is:
+The current pairing is:
 
 ```text
-paxm binary: v0.1.13
-plugin:     v0.1.1
+paxm binary: v0.1.20
+plugin:     v0.1.4
 marketplace: pax-agent-nexus
 ```
 
-The plugin installer pins `PAXM_VERSION` to `v0.1.13` by default. This binary
-adds the Codex-native `UserPromptSubmit` output required for passive recall;
-`v0.1.12` emitted paxm's internal hook result and Codex rejected it. A user may
-override the version explicitly when testing a compatible build.
+The plugin installer follows the latest GitHub binary release by default so
+plugin installs receive compatible binary fixes without a source update. An
+operator may set `PAXM_VERSION` explicitly for reproducible installs, staged
+upgrades, or rollback. Binary releases remain gated by the full test and
+release-asset workflow before they become `latest`.
 
 The repo-scoped marketplace lives at
 `.agents/plugins/marketplace.json` and points at `./plugins/paxm-memory`. The
 release path is PR review first, then merge, binary release/tag publication, and
-plugin installation from the pinned repository source. An official curated
+plugin installation from the tagged repository source. An official curated
 directory submission is deferred until clean-machine and real Codex task tests
 show that installation, hook trust, upgrade, disable, and rollback are reliable.
 

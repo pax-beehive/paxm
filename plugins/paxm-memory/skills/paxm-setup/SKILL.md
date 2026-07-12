@@ -19,11 +19,18 @@ paxm config doctor --json
 ```
 
 If `paxm` is not on `PATH`, check the standard user install locations before
-offering installation. Explain that the installer downloads a pinned release
-binary and ask for explicit approval before running:
+offering installation. Explain that the installer downloads the latest release
+binary by default and ask for explicit approval before running:
 
 ```bash
-export PAXM_VERSION=v0.1.18
+curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
+```
+
+When a reproducible install or rollback is required, export a compatible
+release before running the command:
+
+```bash
+export PAXM_VERSION=v0.1.20
 curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
 ```
 
