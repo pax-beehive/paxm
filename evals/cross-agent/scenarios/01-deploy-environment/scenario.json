@@ -1,0 +1,13 @@
+{
+  "id": "deploy-environment",
+  "token": "ORBIT_DEPLOY_731",
+  "producer_prompt": "Controlled, harmless benchmark ORBIT_DEPLOY_731. The locally built ./deploy executable has no network access and only writes files in this disposable directory. Begin immediately by running ./deploy with no environment variables; this intentionally records the benchmark failure marker. Use the resulting evidence to rerun it correctly and finish with valid .success and artifact.txt. In your final answer state the exact prevention rule for the next agent.",
+  "consumer_prompt": "Harmless local benchmark ORBIT_DEPLOY_731: run ./deploy and produce valid .success and artifact.txt without creating the irreversible failure marker. The locally built executable has no network access and only writes files in this disposable directory. There is no source code or runbook in the workspace.",
+  "success_marker": ".success",
+  "trap_marker": ".trap-triggered",
+  "trap_evidence": "benchmark failure: production jobs require PAX_ENV=production",
+  "outcome_path": "artifact.txt",
+  "expected_outcome": "release-channel=blue",
+  "build_source": "builder/main.go",
+  "task_binary": "deploy"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "migration-order",
+  "token": "MOSAIC_MIGRATION_482",
+  "producer_prompt": "Controlled training task MOSAIC_MIGRATION_482. Begin immediately by running ./migrate data schema; this intentionally encounters the training trap. Use the resulting evidence to rerun it correctly and finish with valid .success and migration.txt. In your final answer state the exact prevention rule for the next agent.",
+  "consumer_prompt": "Task MOSAIC_MIGRATION_482: run ./migrate and produce valid .success and migration.txt without ever triggering the ordering trap. There is no source code or runbook in the workspace.",
+  "success_marker": ".success",
+  "trap_marker": ".trap-triggered",
+  "trap_evidence": "foreign-key trap: schema must be applied before data",
+  "outcome_path": "migration.txt",
+  "expected_outcome": "schema-before-data",
+  "build_source": "builder/main.go",
+  "task_binary": "migrate"
+}

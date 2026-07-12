@@ -107,6 +107,22 @@ paxm setup
 paxm config doctor
 ```
 
+`paxm setup` is where the user chooses memory providers and passive agent
+integrations. In a terminal, use up/down to move, space to toggle, and enter to
+confirm. Selected agents are configured one at a time for passive recall and
+passive writes. Active recall skills are installed separately by the user. The
+SQLite provider works without an API key; remote providers such as Zep or Mem0
+require the user to provide their connection details during setup.
+
+SQLite health checks must be allowed to create WAL/SHM files beside the
+configured database. A sandbox that can read the database but cannot write its
+parent directory may report SQLite error 14 even though the same config is
+healthy in the real agent process. Use an isolated writable SQLite path for
+sandboxed evaluations.
+
+When Codex is using the bundled `paxm-memory` plugin, let the plugin own Codex's
+hooks so paxm does not register a duplicate global hook:
+
 Write and recall a memory:
 
 ```bash
@@ -279,6 +295,13 @@ CI runs unit tests, vet, the retrieval report, and the adapter write contract on
 every push to `main` and every pull request.
 
 ## Documentation
+
+The opt-in real-agent benchmark under `evals/cross-agent` tests whether a Pi
+session's passively written experience helps isolated Claude Code sessions avoid
+the same engineered failure through passive or active recall. It uses paid model
+calls and audited macOS sandboxes, so it is not run in CI.
+
+## Releases
 
 | Guide | Contents |
 | --- | --- |

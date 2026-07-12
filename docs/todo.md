@@ -12,6 +12,10 @@ covering production hook writes, visible conversation and tool content,
 reasoning suppression, metadata preservation, recall-echo suppression, and
 later recall.
 
+The opt-in `evals/cross-agent` tracer measures Pi-to-Claude incident transfer
+across control, passive-initial, and active recall arms with isolated workspaces
+and a scenario-local SQLite provider as the only shared channel.
+
 ## Codex Plugin Distribution
 
 Build a lightweight Codex plugin as the user-facing distribution layer for
