@@ -69,6 +69,14 @@ Current provider adapters:
   contract with JSON-RPC 2.0 methods while paxm keeps routing, thresholds, and
   ranking in core.
 
+SQLite retrieval is a deep module under `internal/adapters/sqlite/retrieval`.
+It owns lexical analysis, candidate SQL, scoring, and result ordering behind one
+`Search` operation using retrieval-local request and hit types. The SQLite
+provider maps those types to the shared memory contract; the router, facade,
+tools, CLI, and MCP do not depend on retrieval plans or FTS details. This seam
+keeps future retrieval changes local and allows the module to move without
+changing agent-facing interfaces.
+
 ## Recall Profiles
 
 A recall profile is the policy boundary for reads. It chooses:
