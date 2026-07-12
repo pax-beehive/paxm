@@ -3,8 +3,6 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
-	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -313,58 +311,11 @@ func TestProviderHealthNameAndHelperTables(t *testing.T) {
 		}
 	})
 
-	t.Run("terms and scores", func(t *testing.T) {
-		tests := []struct {
-			name  string
-			query []string
-			text  string
-			want  float64
-		}{
-			{name: "empty query", text: "anything", want: 0.1},
-			{name: "empty text", query: []string{"paxm"}, want: 0},
-			{name: "exact phrase", query: []string{"passive", "recall"}, text: "before passive recall after", want: 1},
-			{name: "unique term ratio", query: []string{"paxm", "paxm", "memory"}, text: "paxm only", want: 0.5},
-			{name: "no terms match", query: []string{"zep"}, text: "sqlite memory", want: 0},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				if got := scoreMemory(tt.query, tt.text); got != tt.want {
-					t.Fatalf("scoreMemory() = %v, want %v", got, tt.want)
-				}
-			})
-		}
-		if got, want := normalizeTerms("PAXM, memory! 召回"), []string{"paxm", "memory", "召回"}; !reflect.DeepEqual(got, want) {
-			t.Fatalf("normalizeTerms() = %#v, want %#v", got, want)
-		}
-	})
-
-	t.Run("limits raw score and ids", func(t *testing.T) {
-		limitTests := []struct {
-			limit         int
-			wantProvider  int
-			wantCandidate int
-		}{
-			{limit: 0, wantProvider: 50, wantCandidate: 50},
-			{limit: 3, wantProvider: 3, wantCandidate: 50},
-			{limit: 20, wantProvider: 20, wantCandidate: 100},
-		}
-		for _, tt := range limitTests {
-			t.Run(strings.Join([]string{"limit", strconv.Itoa(tt.limit)}, "-"), func(t *testing.T) {
-				if got := providerLimit(tt.limit); got != tt.wantProvider {
-					t.Fatalf("providerLimit() = %d, want %d", got, tt.wantProvider)
-				}
-				if got := candidateLimit(tt.limit); got != tt.wantCandidate {
-					t.Fatalf("candidateLimit() = %d, want %d", got, tt.wantCandidate)
-				}
-			})
-		}
-		leftScore := 0.7
-		rightScore := 0.6
-		if !rawGreater(memory.MemoryHit{RawScore: &leftScore}, memory.MemoryHit{RawScore: &rightScore}) {
-			t.Fatal("rawGreater should compare raw scores")
-		}
-		if rawGreater(memory.MemoryHit{}, memory.MemoryHit{RawScore: &rightScore}) {
-			t.Fatal("rawGreater should be false when a raw score is missing")
+	t.Run("cleanup limit and ids", func(t *testing.T) {
+		for limit, want := range map[int]int{-1: 500, 0: 500, 1: 1, 501: 500} {
+			if got := cleanupLimit(limit); got != want {
+				t.Fatalf("cleanupLimit(%d) = %d, want %d", limit, got, want)
+			}
 		}
 		if id := newID(); strings.TrimSpace(id) == "" {
 			t.Fatal("newID returned an empty id")

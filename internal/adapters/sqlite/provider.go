@@ -11,13 +11,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
+	"github.com/pax-beehive/paxm/internal/adapters/sqlite/retrieval"
 	"github.com/pax-beehive/paxm/internal/memory"
 	_ "modernc.org/sqlite"
 )
@@ -52,11 +51,29 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 	if err != nil {
 		return nil, err
 	}
-	terms := normalizeTerms(query.Text)
-	if len(terms) == 0 {
-		return p.searchRecent(ctx, db, query)
+	tiers := memory.NormalizeTiers(query.Tiers)
+	request := retrieval.Request{Text: query.Text, Limit: query.Limit, Tiers: make([]string, len(tiers))}
+	for i, tier := range tiers {
+		request.Tiers[i] = string(tier)
 	}
-	return p.searchFTS(ctx, db, query, terms)
+	hits, err := retrieval.Search(ctx, db, request)
+	if err != nil {
+		return nil, err
+	}
+	if len(hits) == 0 {
+		return nil, nil
+	}
+	result := make([]memory.MemoryHit, len(hits))
+	for i, hit := range hits {
+		result[i] = memory.MemoryHit{
+			ID: hit.ID, Text: hit.Text, Source: hit.Source, Provider: p.name,
+			Metadata: hit.Metadata, CreatedAt: hit.CreatedAt,
+			Tier: memory.NormalizeTier(memory.MemoryTier(hit.Tier)), ExpiresAt: hit.ExpiresAt,
+			Score: hit.Score, Relevance: hit.Score,
+			RawScore: hit.RawScore, RawScoreKind: hit.RawScoreKind,
+		}
+	}
+	return result, nil
 }
 
 func (p *Provider) Put(ctx context.Context, item memory.MemoryItem) (memory.MemoryRef, error) {
@@ -416,135 +433,6 @@ func ensureColumn(ctx context.Context, db *sql.DB, name, definition string) erro
 	return err
 }
 
-func (p *Provider) searchRecent(ctx context.Context, db *sql.DB, query memory.SearchQuery) ([]memory.MemoryHit, error) {
-	filterSQL, filterArgs := searchFilterClause(query, "m")
-	args := append(filterArgs, providerLimit(query.Limit))
-	rows, err := db.QueryContext(ctx, `
-	SELECT m.id, m.text, m.source, m.metadata_json, m.created_at, m.tier, m.expires_at
-	FROM memories AS m
-	WHERE `+filterSQL+`
-		ORDER BY m.created_at DESC
-	LIMIT ?
-	`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var hits []memory.MemoryHit
-	for rows.Next() {
-		hit, err := scanHit(rows, p.name, nil)
-		if err != nil {
-			return nil, err
-		}
-		hit.Relevance = 0.1
-		hit.Score = 0.1
-		hits = append(hits, hit)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return hits, nil
-}
-
-func (p *Provider) searchFTS(ctx context.Context, db *sql.DB, query memory.SearchQuery, terms []string) ([]memory.MemoryHit, error) {
-	filterSQL, filterArgs := searchFilterClause(query, "m")
-	args := append([]any{ftsMatchQuery(terms)}, filterArgs...)
-	args = append(args, candidateLimit(query.Limit))
-	rows, err := db.QueryContext(ctx, `
-	SELECT m.id, m.text, m.source, m.metadata_json, m.created_at, m.tier, m.expires_at, bm25(memory_fts) AS rank
-	FROM memory_fts
-	JOIN memories AS m ON m.rowid = memory_fts.rowid
-	WHERE memory_fts MATCH ? AND `+filterSQL+`
-	ORDER BY rank ASC, m.created_at DESC
-	LIMIT ?
-	`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var hits []memory.MemoryHit
-	for rows.Next() {
-		var rank sql.NullFloat64
-		hit, err := scanHit(rows, p.name, &rank)
-		if err != nil {
-			return nil, err
-		}
-		if rank.Valid {
-			rawScore := -rank.Float64
-			hit.RawScore = &rawScore
-			hit.RawScoreKind = "sqlite_fts_bm25_negated"
-		}
-		score := scoreMemory(terms, hit.Text)
-		if score == 0 {
-			continue
-		}
-		hit.Relevance = score
-		hit.Score = score
-		hits = append(hits, hit)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].Score == hits[j].Score {
-			if rawGreater(hits[i], hits[j]) {
-				return true
-			}
-			if rawGreater(hits[j], hits[i]) {
-				return false
-			}
-			return hits[i].CreatedAt.After(hits[j].CreatedAt)
-		}
-		return hits[i].Score > hits[j].Score
-	})
-	if query.Limit > 0 && len(hits) > query.Limit {
-		hits = hits[:query.Limit]
-	}
-	return hits, nil
-}
-
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanHit(rows rowScanner, provider string, rank *sql.NullFloat64) (memory.MemoryHit, error) {
-	var hit memory.MemoryHit
-	var metadataJSON string
-	var createdAt string
-	var tier string
-	var expiresAt string
-	dest := []any{&hit.ID, &hit.Text, &hit.Source, &metadataJSON, &createdAt, &tier, &expiresAt}
-	if rank != nil {
-		dest = append(dest, rank)
-	}
-	if err := rows.Scan(dest...); err != nil {
-		return memory.MemoryHit{}, err
-	}
-	metadata, err := decodeMetadata(metadataJSON)
-	if err != nil {
-		return memory.MemoryHit{}, err
-	}
-	created, err := time.Parse(time.RFC3339Nano, createdAt)
-	if err != nil {
-		return memory.MemoryHit{}, fmt.Errorf("sqlite memory %q created_at: %w", hit.ID, err)
-	}
-	hit.Provider = provider
-	hit.Metadata = metadata
-	hit.CreatedAt = created
-	hit.Tier = memory.NormalizeTier(memory.MemoryTier(tier))
-	if strings.TrimSpace(expiresAt) != "" {
-		expires, err := time.Parse(time.RFC3339Nano, expiresAt)
-		if err != nil {
-			return memory.MemoryHit{}, fmt.Errorf("sqlite memory %q expires_at: %w", hit.ID, err)
-		}
-		hit.ExpiresAt = &expires
-	}
-	return hit, nil
-}
-
 func encodeMetadata(metadata map[string]string) (string, error) {
 	if metadata == nil {
 		return "{}", nil
@@ -567,115 +455,11 @@ func decodeMetadata(value string) (map[string]string, error) {
 	return metadata, nil
 }
 
-func searchFilterClause(query memory.SearchQuery, alias string) (string, []any) {
-	prefix := ""
-	if alias != "" {
-		prefix = alias + "."
-	}
-	clauses := []string{"(" + prefix + "expires_at = '' OR " + prefix + "expires_at > ?)"}
-	args := []any{time.Now().UTC().Format(time.RFC3339Nano)}
-	tiers := memory.NormalizeTiers(query.Tiers)
-	if len(tiers) > 0 {
-		placeholders := make([]string, 0, len(tiers))
-		for _, tier := range tiers {
-			placeholders = append(placeholders, "?")
-			args = append(args, string(tier))
-		}
-		clauses = append(clauses, prefix+"tier IN ("+strings.Join(placeholders, ", ")+")")
-	}
-	return strings.Join(clauses, " AND "), args
-}
-
-func ftsMatchQuery(terms []string) string {
-	unique := make([]string, 0, len(terms))
-	seen := make(map[string]struct{}, len(terms))
-	for _, term := range terms {
-		if _, ok := seen[term]; ok {
-			continue
-		}
-		seen[term] = struct{}{}
-		unique = append(unique, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
-	}
-	return strings.Join(unique, " OR ")
-}
-
-func normalizeTerms(text string) []string {
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	terms := fields[:0]
-	for _, field := range fields {
-		field = strings.TrimSpace(field)
-		if field != "" {
-			terms = append(terms, field)
-		}
-	}
-	return terms
-}
-
-func scoreMemory(queryTerms []string, text string) float64 {
-	if len(queryTerms) == 0 {
-		return 0.1
-	}
-	textTerms := normalizeTerms(text)
-	if len(textTerms) == 0 {
-		return 0
-	}
-	normalizedText := " " + strings.Join(textTerms, " ") + " "
-	phrase := " " + strings.Join(queryTerms, " ") + " "
-	if strings.Contains(normalizedText, phrase) {
-		return 1
-	}
-	textSet := make(map[string]struct{}, len(textTerms))
-	for _, term := range textTerms {
-		textSet[term] = struct{}{}
-	}
-	seenQuery := make(map[string]struct{}, len(queryTerms))
-	matched := 0
-	for _, term := range queryTerms {
-		if _, seen := seenQuery[term]; seen {
-			continue
-		}
-		seenQuery[term] = struct{}{}
-		if _, ok := textSet[term]; ok {
-			matched++
-		}
-	}
-	if matched == 0 {
-		return 0
-	}
-	return float64(matched) / float64(len(seenQuery))
-}
-
-func providerLimit(limit int) int {
-	if limit > 0 {
-		return limit
-	}
-	return 50
-}
-
 func cleanupLimit(limit int) int {
 	if limit <= 0 || limit > 500 {
 		return 500
 	}
 	return limit
-}
-
-func candidateLimit(limit int) int {
-	if limit <= 0 {
-		return 50
-	}
-	if limit*5 > 50 {
-		return limit * 5
-	}
-	return 50
-}
-
-func rawGreater(left, right memory.MemoryHit) bool {
-	if left.RawScore == nil || right.RawScore == nil {
-		return false
-	}
-	return *left.RawScore > *right.RawScore
 }
 
 func newID() string {
