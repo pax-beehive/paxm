@@ -150,7 +150,7 @@ func executePlan(ctx context.Context, db *sql.DB, request Request, terms analysi
 	for i := range selected {
 		hits[i] = selected[i].Hit
 	}
-	return planResult{Hits: hits, Trace: trace}, nil
+	return planResult{Hits: excerptHits(request.Text, hits), Trace: trace}, nil
 }
 
 func fuseCandidateLists(lists ...[]Hit) []plannedHit {

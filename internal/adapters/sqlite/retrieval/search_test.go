@@ -40,6 +40,54 @@ func TestSearchOwnsSQLiteRecallBehavior(t *testing.T) {
 	}
 }
 
+func TestSearchExtractsLongQueryFocusedRecallContext(t *testing.T) {
+	t.Parallel()
+	db := openTestDatabase(t)
+	lines := []string{"[9 June 2023]"}
+	for i := 0; i < 30; i++ {
+		lines = append(lines, "Caroline: my current group of friends is supportive")
+	}
+	lines = append(lines, "Caroline: we have known each other for 4 years")
+	for i := 0; i < 30; i++ {
+		lines = append(lines, "Caroline: my current group of friends is supportive")
+	}
+	original := strings.Join(lines, "\n")
+	insertTestMemory(t, db, "session", original, "locomo", `{}`, time.Now().UTC(), "ltm", "")
+
+	hits, err := Search(context.Background(), db, Request{Text: "How long has Caroline had her current group of friends for?", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("Search() hits = %#v", hits)
+	}
+	if !strings.Contains(hits[0].Text, "[9 June 2023]") || !strings.Contains(hits[0].Text, "4 years") {
+		t.Fatalf("excerpt lost temporal context: %q", hits[0].Text)
+	}
+	if len(hits[0].Text) >= len(original) || hits[0].Metadata["sqlite_excerpted"] != "true" {
+		t.Fatalf("long result was not excerpted: %#v", hits[0])
+	}
+}
+
+func TestSearchExtractsLongUnspacedCJKRecallContext(t *testing.T) {
+	t.Parallel()
+	db := openTestDatabase(t)
+	target := "部署区域是美国西部二区"
+	original := strings.Repeat("背景资料", 300) + target + strings.Repeat("历史记录", 300)
+	insertTestMemory(t, db, "cjk", original, "test", `{}`, time.Now().UTC(), "ltm", "")
+
+	hits, err := Search(context.Background(), db, Request{Text: "部署区域", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, target) {
+		t.Fatalf("CJK excerpt lost target: %#v", hits)
+	}
+	if len(hits[0].Text) >= len(original) {
+		t.Fatalf("long CJK result was not excerpted: %d >= %d", len(hits[0].Text), len(original))
+	}
+}
+
 func TestSearchUsesLightweightAnalyzerForLexicalCandidates(t *testing.T) {
 	t.Parallel()
 	db := openTestDatabase(t)
