@@ -137,6 +137,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 			continue
 		}
 		rawScore := result.Score
+		relevance := min(1, max(0, result.Score))
 		metadata := map[string]string{
 			"openviking_uri":   uri,
 			"openviking_level": strconv.Itoa(result.Level),
@@ -151,7 +152,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 			metadata["openviking_overview"] = result.Overview
 		}
 		hits = append(hits, memory.MemoryHit{
-			Provider: p.name, ID: uri, Text: content, Relevance: result.Score, Score: result.Score,
+			Provider: p.name, ID: uri, Text: content, Relevance: relevance, Score: relevance,
 			RawScore: &rawScore, RawScoreKind: "openviking_score", Source: "openviking", Metadata: metadata, Tier: memory.TierLTM,
 		})
 		if len(hits) >= limit {

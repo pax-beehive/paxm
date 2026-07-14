@@ -122,6 +122,30 @@ func TestSearchMapsOpenVikingMemories(t *testing.T) {
 	}
 }
 
+func TestSearchClampsNativeScoreForRouter(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`{"status":"ok","result":{"memories":[{"uri":"viking://user/memories/events/high.md","level":2,"score":1.4,"abstract":"high native score"}]}}`))
+	}))
+	defer server.Close()
+
+	provider, err := New("openviking", config.ProviderConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Relevance != 1 || hits[0].Score != 1 {
+		t.Fatalf("normalized hit = %#v", hits)
+	}
+	if hits[0].RawScore == nil || *hits[0].RawScore != 1.4 {
+		t.Fatalf("raw score = %#v", hits[0].RawScore)
+	}
+}
+
 func TestHealthChecksSelfHostedServer(t *testing.T) {
 	t.Parallel()
 
