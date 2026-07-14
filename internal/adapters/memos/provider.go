@@ -148,7 +148,11 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 	if err := p.doJSON(ctx, http.MethodPost, path, payload, &out); err != nil {
 		return nil, err
 	}
-	return p.hits(out, limit), nil
+	hits := p.hits(out, limit)
+	for i := range hits {
+		hits[i] = memory.ApplyHitAttribution(hits[i])
+	}
+	return hits, nil
 }
 
 func (p *Provider) cloudSearchRequest(query string, limit int) map[string]any {

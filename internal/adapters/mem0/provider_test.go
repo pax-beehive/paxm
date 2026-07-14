@@ -41,6 +41,22 @@ func TestProviderAdapterContract(t *testing.T) {
 	})
 }
 
+func TestMem0MetadataIncludesStructuredAttribution(t *testing.T) {
+	metadata := toMem0Metadata(memory.MemoryItem{
+		Text:   "remember",
+		Origin: memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"},
+		Scope:  memory.MemoryScope{Type: "team", ID: "pax"},
+	})
+	for key, want := range map[string]string{
+		memory.MetadataUserID: "todd", memory.MetadataAgentID: "codex", memory.MetadataSessionID: "session-7",
+		memory.MetadataTurnID: "turn-42", memory.MetadataScopeType: "team", memory.MetadataScopeID: "pax",
+	} {
+		if metadata[key] != want {
+			t.Fatalf("metadata[%q] = %#v, want %q", key, metadata[key], want)
+		}
+	}
+}
+
 type httpDoerFunc func(*http.Request) (*http.Response, error)
 
 func (f httpDoerFunc) Do(request *http.Request) (*http.Response, error) {
@@ -154,7 +170,7 @@ func TestSearchMapsMem0Results(t *testing.T) {
 					"memory": "YAML config is the paxm default",
 					"score": 0.82,
 					"user_id": "user-1",
-					"metadata": {"project": "paxm"},
+					"metadata": {"project":"paxm","paxm_user_id":"todd","paxm_agent_id":"codex","paxm_session_id":"session-7","paxm_turn_id":"turn-42","paxm_scope_type":"team","paxm_scope_id":"pax"},
 					"created_at": "2026-07-09T01:02:03Z",
 					"score_details": {"semantic": 0.82}
 				}
@@ -199,6 +215,9 @@ func TestSearchMapsMem0Results(t *testing.T) {
 	}
 	if hit.CreatedAt.IsZero() {
 		t.Fatalf("created_at was not parsed: %#v", hit)
+	}
+	if hit.Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) || hit.Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
+		t.Fatalf("attribution was not restored: %#v", hit)
 	}
 }
 

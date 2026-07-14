@@ -151,7 +151,8 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 			score = normalize(*item.Score)
 			kind = "mem0_cloud_score"
 		}
-		hits = append(hits, memory.MemoryHit{Provider: p.name, ID: item.ID, Text: item.Memory, Source: "mem0-cloud", Relevance: score, Score: score, RawScore: item.Score, RawScoreKind: kind, Metadata: stringMetadata(item.Metadata), CreatedAt: parseTime(item.CreatedAt)})
+		hit := memory.MemoryHit{Provider: p.name, ID: item.ID, Text: item.Memory, Source: "mem0-cloud", Relevance: score, Score: score, RawScore: item.Score, RawScoreKind: kind, Metadata: stringMetadata(item.Metadata), CreatedAt: parseTime(item.CreatedAt)}
+		hits = append(hits, memory.ApplyHitAttribution(hit))
 	}
 	return hits, nil
 }
@@ -374,6 +375,7 @@ func (p *Provider) doJSON(ctx context.Context, method, path string, payload, out
 }
 
 func itemMetadata(item memory.MemoryItem) map[string]any {
+	item = memory.PrepareProviderItem(item)
 	metadata := make(map[string]any, len(item.Metadata)+5)
 	add(metadata, "paxm_id", item.ID)
 	add(metadata, "paxm_source", item.Source)

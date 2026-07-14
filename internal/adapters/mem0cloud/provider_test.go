@@ -13,6 +13,22 @@ import (
 	"github.com/pax-beehive/paxm/internal/memory"
 )
 
+func TestCloudMetadataIncludesStructuredAttribution(t *testing.T) {
+	metadata := itemMetadata(memory.MemoryItem{
+		Text:   "remember",
+		Origin: memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"},
+		Scope:  memory.MemoryScope{Type: "team", ID: "pax"},
+	})
+	for key, want := range map[string]string{
+		memory.MetadataUserID: "todd", memory.MetadataAgentID: "codex", memory.MetadataSessionID: "session-7",
+		memory.MetadataTurnID: "turn-42", memory.MetadataScopeType: "team", memory.MetadataScopeID: "pax",
+	} {
+		if metadata[key] != want {
+			t.Fatalf("metadata[%q] = %#v, want %q", key, metadata[key], want)
+		}
+	}
+}
+
 func TestCloudLifecycle(t *testing.T) {
 	t.Parallel()
 	var add addRequest
@@ -44,7 +60,7 @@ func TestCloudLifecycle(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"mem-1","memory":"prefers explicit search","metadata":{"paxm_write_id":"write-1"}}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v3/memories/search/":
-			_, _ = w.Write([]byte(`{"results":[{"id":"mem-1","memory":"prefers explicit search","score":0.91,"metadata":{"project":"paxm"}}]}`))
+			_, _ = w.Write([]byte(`{"results":[{"id":"mem-1","memory":"prefers explicit search","score":0.91,"metadata":{"project":"paxm","paxm_user_id":"todd","paxm_agent_id":"codex","paxm_session_id":"session-7","paxm_turn_id":"turn-42","paxm_scope_type":"team","paxm_scope_id":"pax"}}]}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/v1/memories/mem-1":
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -62,6 +78,13 @@ func TestCloudLifecycle(t *testing.T) {
 	contracttest.Run(t, provider, contracttest.Expectation{Name: "cloud", Item: memory.MemoryItem{ID: "local-1", Text: "prefers explicit search"}, Query: memory.SearchQuery{Text: "search", Limit: 5}, RefID: "mem-1", HitID: "mem-1", HitText: "prefers explicit search"})
 	if add.RunID != "eval-1" || add.Metadata["paxm_write_id"] != "write-1" {
 		t.Fatalf("add request = %#v", add)
+	}
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "search", Limit: 1})
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("search hits = %#v err=%v", hits, err)
+	}
+	if hits[0].Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) || hits[0].Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
+		t.Fatalf("attribution was not restored: %#v", hits[0])
 	}
 	if err := provider.Delete(context.Background(), memory.MemoryRef{Provider: "cloud", ID: "mem-1"}); err != nil {
 		t.Fatal(err)

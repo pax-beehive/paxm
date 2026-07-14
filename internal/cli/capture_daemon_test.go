@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -165,6 +167,64 @@ func TestCaptureQueueShutdownSealsWithoutWaitingForProvider(t *testing.T) {
 	}
 	if stats.PendingDeliveries != 1 {
 		t.Fatalf("sealed episode was not retained for the next daemon: %#v", stats)
+	}
+}
+
+func TestSessionStartBufferUsesDaemonLifecycle(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "paxm-hook-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	configPath := filepath.Join(root, "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	provider := cfg.Providers["sqlite"]
+	provider.Path = filepath.Join(root, "memory.sqlite")
+	cfg.Providers["sqlite"] = provider
+	cfg.CaptureQueue.Path = filepath.Join(root, "capture.sqlite")
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var daemonErrors bytes.Buffer
+	r := runner{configPath: configPath, stdout: io.Discard, stderr: &daemonErrors}
+	done := make(chan error, 1)
+	go func() { done <- r.runHookDaemon([]string{"--idle-timeout", "5s"}) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for pathDoesNotExist(hookSocketPath(configPath)) {
+		select {
+		case err := <-done:
+			t.Fatalf("hook daemon stopped before ready: %v stderr=%s", err, daemonErrors.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("hook daemon socket did not become ready: %s", daemonErrors.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	event := capture.Event{
+		Target: "codex", Event: "session_start", Workspace: "/workspace",
+		Metadata: map[string]string{"session_id": "session-7"},
+		Raw:      json.RawMessage(`{"session_id":"session-7","cwd":"/workspace"}`),
+	}
+	response, err := r.sendHookToBuffer(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !response.OK || !response.Buffered {
+		t.Fatalf("buffer response = %#v", response)
+	}
+	if err := flushExistingHookBuffer(configPath, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("hook daemon did not stop")
 	}
 }
 

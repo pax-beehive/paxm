@@ -41,6 +41,19 @@ are `stm` or `ltm`.
 | | `created_at` | RFC 3339 string | optional |
 | | `tier` | `stm` or `ltm` | optional |
 | | `expires_at` | RFC 3339 string | optional |
+| | `origin` | `MemoryOrigin` object | optional trusted write attribution |
+| | `scope` | `MemoryScope` object | optional write visibility boundary |
+| | `provenance` | legacy `Provenance` object | optional compatibility input |
+| `MemoryOrigin` | `user_id` | string | optional originating user |
+| | `agent_id` | string | optional originating agent |
+| | `session_id` | string | optional originating agent session |
+| | `turn_id` | string | optional originating turn |
+| `MemoryScope` | `type` | string | optional scope kind, such as `personal` or `team` |
+| | `id` | string | required when `type` is present |
+| `Provenance` | `user_id` | string | legacy; use `origin.user_id` |
+| | `agent_id` | string | legacy; use `origin.agent_id` |
+| | `scope_type` | string | legacy; use `scope.type` |
+| | `scope_id` | string | legacy; use `scope.id` |
 | `MemoryRef` | `id` | string | required, stable and non-empty |
 | | `provider` | string | optional; paxm replaces it with configured name |
 | `SearchQuery` | `text` | string | required |
@@ -58,6 +71,26 @@ are `stm` or `ltm`.
 | | `expires_at` | RFC 3339 string | optional |
 | | `raw_score` | number | optional backend-native score |
 | | `raw_score_kind` | string | required when `raw_score` is present |
+| | `origin` | `MemoryOrigin` object | required when attribution is advertised and known |
+| | `scope` | `MemoryScope` object | required when attribution is advertised and known |
+| | `provenance` | legacy `Provenance` object | optional compatibility output |
+
+### Origin, scope, and trust
+
+`origin` answers "where did this memory come from?" `scope` answers "which
+visibility boundary was assigned when it was written?" They are deliberately
+separate: changing or omitting an origin must not silently change access.
+
+The `session_id` in `origin` is the agent/runtime session that produced the
+memory. It is not a provider ingestion session, Mem0 `run_id`, OpenViking
+session, conversation ID, process ID, or JSON-RPC request ID. A plugin may map
+those native identifiers internally, but must return the original paxm value.
+
+Paxm supplies write attribution from trusted runtime configuration. Plugins
+must store it as data, not treat it as authentication. Search authorization
+must be evaluated separately by the configured paxm/provider policy; this
+protocol does not turn attribution into an ACL. Values copied from model output
+or caller-controlled search metadata are not trusted identity.
 
 ### `paxm.health`
 
@@ -66,8 +99,9 @@ Params are `{}`. Any successful JSON-RPC result means the provider is healthy.
 ### `paxm.put`
 
 Params are one `MemoryItem`. Important fields are `id`, `text`, `metadata`,
-`source`, `created_at`, `tier`, and `expires_at`. Unknown fields should be
-ignored for forward compatibility. The result must contain a stable ref:
+`source`, `created_at`, `tier`, `expires_at`, `origin`, and `scope`. Unknown
+fields should be ignored for forward compatibility. The result must contain a
+stable ref:
 
 ```json
 {"ref":{"id":"memory-123"}}
@@ -93,11 +127,19 @@ Metadata filters must not be silently discarded.
 `paxm.capabilities` takes `{}` and returns:
 
 ```json
-{"put_batch":true,"delete":true}
+{"put_batch":true,"delete":true,"attribution":true}
 ```
 
 The method is optional for legacy providers. `-32601` means no optional
 capabilities are advertised.
+
+`attribution:true` means the provider persists `origin` and `scope` on
+`paxm.put` and `paxm.putBatch`, then returns the same values on matching
+`paxm.search` hits. It is a fidelity promise, not an authorization claim. Do
+not advertise it if the backend drops, rewrites, synthesizes, or cannot attach
+attribution to individual hits. Legacy providers that omit the field continue
+to work; paxm treats their attribution fidelity as unknown and skips the
+attribution conformance check.
 
 ### `paxm.putBatch`
 
@@ -123,8 +165,21 @@ paxm eval provider jsonrpc --command ./my-provider --arg value --json
 
 Required checks cover health, write acknowledgement, stable ref IDs, and
 faithful search mapping. Advertised batch and delete capabilities are also
-exercised. Ranking quality, consolidation, latency, and result counts are not
-adapter conformance requirements.
+exercised. When `attribution:true`, the kit writes distinct user, agent,
+session, turn, and scope values and requires an exact round-trip. Ranking
+quality, consolidation, latency, and result counts are not adapter conformance
+requirements.
+
+## Compatibility summary
+
+- Existing v1 plugins remain valid because every new field is optional and
+  implementations must ignore unknown fields.
+- Existing `provenance` is accepted as a fallback, but cannot carry session or
+  turn identity.
+- New plugins should implement `origin` and `scope`, then advertise
+  `attribution:true` only after the conformance command passes.
+- Returning no attribution is safer than inventing attribution from a
+  provider-native session or run identifier.
 
 See [`examples/jsonrpc-provider`](../examples/jsonrpc-provider) for a complete
 Go implementation.

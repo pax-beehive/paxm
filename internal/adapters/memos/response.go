@@ -171,6 +171,7 @@ func firstTime(item map[string]any, keys ...string) time.Time {
 }
 
 func itemMetadata(item memory.MemoryItem) map[string]any {
+	item = memory.PrepareProviderItem(item)
 	result := make(map[string]any, len(item.Metadata)+4)
 	for key, value := range item.Metadata {
 		result[key] = value

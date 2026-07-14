@@ -120,6 +120,9 @@ func TestSearchMapsOpenVikingMemories(t *testing.T) {
 	if hit.Source != "openviking" || hit.Metadata["openviking_category"] != "preferences" || hit.Metadata["openviking_overview"] != "Backend infrastructure preference" {
 		t.Fatalf("metadata = %#v", hit.Metadata)
 	}
+	if hit.Scope.Type != "unknown" || hit.Origin != (memory.MemoryOrigin{}) {
+		t.Fatalf("OpenViking must not synthesize attribution: %#v", hit)
+	}
 }
 
 func TestSearchClampsNativeScoreForRouter(t *testing.T) {

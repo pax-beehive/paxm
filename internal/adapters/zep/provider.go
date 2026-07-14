@@ -123,6 +123,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 	hits := mapSearchResults(result)
 	for i := range hits {
 		hits[i].Provider = p.name
+		hits[i] = memory.ApplyHitAttribution(hits[i])
 	}
 	return hits, nil
 }
@@ -420,6 +421,7 @@ func relevance(relevanceValue, scoreValue *float64, selectionRank *int) (float64
 }
 
 func toZepMetadata(item memory.MemoryItem) map[string]interface{} {
+	item = memory.PrepareProviderItem(item)
 	metadata := make(map[string]interface{})
 	addMetadata(metadata, "paxm_id", item.ID)
 	addMetadata(metadata, "paxm_source", item.Source)
@@ -427,7 +429,7 @@ func toZepMetadata(item memory.MemoryItem) map[string]interface{} {
 	if item.ExpiresAt != nil {
 		addMetadata(metadata, "paxm_expires_at", item.ExpiresAt.UTC().Format(time.RFC3339Nano))
 	}
-	for _, key := range []string{memory.MetadataUserID, memory.MetadataAgentID, memory.MetadataScopeType, memory.MetadataScopeID} {
+	for _, key := range []string{memory.MetadataUserID, memory.MetadataAgentID, memory.MetadataSessionID, memory.MetadataTurnID, memory.MetadataScopeType, memory.MetadataScopeID} {
 		addMetadata(metadata, key, item.Metadata[key])
 	}
 	keys := make([]string, 0, len(item.Metadata))

@@ -667,7 +667,7 @@ func TestProviderSearchReturnsTurnBoundaryMetadata(t *testing.T) {
 	}
 	startedAt := time.Date(2026, 7, 13, 10, 0, 0, 123, time.UTC)
 	endedAt := startedAt.Add(3 * time.Minute)
-	_, err = provider.Put(context.Background(), memory.MemoryItem{
+	item := memory.ApplyProvenance(memory.MemoryItem{
 		Text: "turn boundary marker",
 		Tier: memory.TierLTM,
 		Turn: &memory.TurnContext{
@@ -676,7 +676,8 @@ func TestProviderSearchReturnsTurnBoundaryMetadata(t *testing.T) {
 			StartedAt: startedAt,
 			EndedAt:   endedAt,
 		},
-	})
+	}, memory.Provenance{UserID: "todd", AgentID: "codex", ScopeType: "personal", ScopeID: "todd"})
+	_, err = provider.Put(context.Background(), item)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,6 +699,12 @@ func TestProviderSearchReturnsTurnBoundaryMetadata(t *testing.T) {
 		if hits[0].Metadata[key] != value {
 			t.Fatalf("metadata[%s] = %q, want %q: %#v", key, hits[0].Metadata[key], value, hits[0].Metadata)
 		}
+	}
+	if hits[0].Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) {
+		t.Fatalf("origin = %#v", hits[0].Origin)
+	}
+	if hits[0].Scope != (memory.MemoryScope{Type: "personal", ID: "todd"}) {
+		t.Fatalf("scope = %#v", hits[0].Scope)
 	}
 }
 
