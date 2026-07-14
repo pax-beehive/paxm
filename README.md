@@ -1,17 +1,18 @@
 <div align="center">
 
-# paxm
+# PAXM
 
-### Local-first memory for every AI agent.
+### One memory adaptor for every AI agent.
 
 [![CI](https://github.com/pax-beehive/paxm/actions/workflows/ci.yml/badge.svg)](https://github.com/pax-beehive/paxm/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/pax-beehive/paxm)](https://github.com/pax-beehive/paxm/releases/latest)
 [![Go](https://img.shields.io/github/go-mod/go-version/pax-beehive/paxm)](go.mod)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-6f42c1)](https://github.com/pax-beehive/paxm/releases/latest)
 
-Give Codex, Claude Code, OpenCode, Pi, and MCP clients one active and passive
-memory surface. Start with built-in SQLite, connect Zep, Mem0, MemOS, or OpenViking, or
-bring a private provider through JSON-RPC.
+Connect Codex, Claude Code, OpenCode, Pi, and MCP clients to the memory system
+you choose through one active and passive memory surface. Use the default
+SQLite provider, connect Zep, Mem0, MemOS, or OpenViking, or bring a private
+provider through JSON-RPC.
 
 [Install](#quick-start) · [SQLite quality](#sqlite-quality-preview) · [How it works](#how-it-works) · [Providers](#agents-and-providers) · [Docs](#documentation)
 
@@ -29,6 +30,12 @@ new agent or provider multiplies that work.
 providers implement one adapter contract, and users keep control of
 credentials, routing, hooks, and data location.
 
+`paxm` is a memory adaptor, not another local memory service. It standardizes
+how agents recall and write memory while leaving storage, extraction, search,
+and hosting to the selected provider. SQLite is included as a convenient,
+zero-setup default so paxm works immediately; it is one provider behind the
+same routing contract, not the product boundary.
+
 ```text
 AI agents  ->  CLI / MCP / skills / hooks  ->  paxm  ->  any memory provider
 ```
@@ -40,8 +47,8 @@ AI agents  ->  CLI / MCP / skills / hooks  ->  paxm  ->  any memory provider
   durable writes without relying on the model to call a tool.
 - **Provider independence** through a common search/write contract and
   multi-provider routing.
-- **Useful local memory** with SQLite, no account, and no external model
-  dependency for memory ingestion or retrieval.
+- **A zero-setup default** with SQLite, requiring no account or external model
+  for memory ingestion or retrieval, without coupling agents to SQLite.
 - **Failure isolation** with per-provider timeouts, an overall passive-recall
   budget, bulkheads, and partial-result fallback.
 - **Durable passive writes** through a local queue with retry, deduplication,
@@ -51,9 +58,10 @@ AI agents  ->  CLI / MCP / skills / hooks  ->  paxm  ->  any memory provider
 
 ## SQLite quality preview
 
-The built-in SQLite provider is more than a storage fallback. It combines FTS5
-and BM25 retrieval with turn-level memories and deterministic, query-focused
-excerpts for unusually long results.
+SQLite is paxm's default provider, not its product identity. It gives new users
+a complete memory path before they choose or deploy a dedicated memory system.
+The implementation combines FTS5 and BM25 retrieval with turn-level memories
+and deterministic, query-focused excerpts for unusually long results.
 
 It performs memory ingestion and retrieval without calling an external LLM or
 embedding service. The answering agent still uses its configured model; the
@@ -115,8 +123,9 @@ lifecycle hooks: `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
 
 ### OpenCode, Pi, CLI, or MCP
 
-Install the latest release and run interactive setup. SQLite provides a full
-local flow without an account or API key.
+Install the latest release and run interactive setup. The default SQLite
+provider makes the adaptor usable without first creating an account or API
+key.
 
 ```bash
 curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
@@ -129,8 +138,8 @@ integrations. Use up/down to move, space to toggle, and enter to confirm.
 Selected agents are configured one at a time.
 
 Active recall skills remain user-installed. SQLite works without an API key;
-remote providers such as Zep, Mem0, MemOS, and OpenViking require connection details during
-setup.
+remote providers such as Zep, Mem0, MemOS, and OpenViking require connection
+details during setup.
 
 SQLite health checks must be allowed to create WAL/SHM files beside the
 configured database. A sandbox that can read the database but cannot write its
@@ -175,6 +184,38 @@ Passive recall uses an `800ms` overall budget and `250ms` per-provider budget
 by default. It returns healthy partial results and records downstream
 timeouts.
 
+### See it in motion
+
+<details>
+<summary><strong>One agent surface, any memory provider</strong></summary>
+
+<br>
+
+<p align="center">
+  <img src="docs/assets/paxm-provider-routing.gif" width="900" alt="Conceptual animation showing AI agents using PAXM to route memory requests across SQLite, OpenViking, Zep, Mem0, and private JSON-RPC providers">
+</p>
+
+PAXM keeps the agent-facing contract stable while profiles choose providers,
+failure policy, ranking, and timeouts. SQLite is the zero-setup default, not a
+required storage backend.
+
+</details>
+
+<details>
+<summary><strong>Passive recall and durable background writes</strong></summary>
+
+<br>
+
+<p align="center">
+  <img src="docs/assets/paxm-passive-memory.gif" width="900" alt="Conceptual animation showing PAXM hooks recalling context for an agent and delivering completed turns through a durable background queue">
+</p>
+
+Lifecycle hooks recall context before the model request and capture completed
+turns afterward. Writes enter a durable local queue before provider delivery,
+so provider latency does not block the agent.
+
+</details>
+
 Read the detailed [architecture](docs/architecture.md) and
 [provider adapter contract](docs/provider-adapter-contract.md).
 
@@ -193,7 +234,7 @@ Read the detailed [architecture](docs/architecture.md) and
 
 | Provider | Mode | Notes |
 | --- | --- | --- |
-| SQLite | Built in | Local-first turn memory; no API key, LLM, or embeddings |
+| SQLite | Default, built in | Zero-setup turn memory; no API key, LLM, or embeddings |
 | Zep | Built in | User or graph scoped |
 | Mem0 | Built in | Self-hosted REST API |
 | Mem0 Cloud | Built in | Managed Platform API with async v3 writes/search |
@@ -205,6 +246,18 @@ Read the detailed [architecture](docs/architecture.md) and
 Enable multiple provider instances at once. Recall and write profiles control
 routes, required or best-effort behavior, ranking weights, thresholds, memory
 tiers, and timeouts.
+
+### Self-hosted OpenViking
+
+OpenViking support connects paxm to a user-operated OpenViking server. Writes
+are recorded through OpenViking sessions and committed for asynchronous memory
+extraction. Recall uses semantic memory search through `/api/v1/search/find`.
+The server URL and optional API key remain in the user's paxm configuration.
+
+Run `paxm setup`, select OpenViking, and provide the self-hosted base URL and
+API key. OpenViking can then participate in the same recall and write profiles
+as SQLite or any other provider, with required or best-effort routing and
+provider-specific timeouts.
 
 ## MCP server
 
