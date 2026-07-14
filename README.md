@@ -14,7 +14,7 @@ Claude Code, OpenCode, Pi, and MCP sessions. Start locally with SQLite and no
 account, API key, embeddings, or extra memory-layer model calls. Change memory
 providers later without rewiring every agent.
 
-[Install for Codex](#codex-plugin) · [Install the CLI](#opencode-pi-cli-or-mcp) · [See the result](#what-changes-after-installation) · [Docs](#documentation)
+[Install for Codex](#codex-plugin) · [Install the CLI](#opencode-pi-cli-or-mcp) · [See the result](#what-changes-after-installation) · [Docs](#documentation) · [中文](docs/README.zh-CN.md)
 
 </div>
 
@@ -417,6 +417,8 @@ memory-layer cost from answering-model cost and state their evidence limits.
 
 | Guide | Contents |
 | --- | --- |
+| [中文使用指南](docs/README.zh-CN.md) | 中文快速开始、agent 接入、provider 配置与排障 |
+| [中文 JSON-RPC 接入指南](docs/jsonrpc-provider-protocol.zh-CN.md) | 自定义 memory provider 的协议、实现与一致性验证 |
 | [Configuration](docs/config.md) | Providers, profiles, agents, hooks, telemetry |
 | [Architecture](docs/architecture.md) | Runtime modules and data flow |
 | [Provider contract](docs/provider-adapter-contract.md) | Implementing a memory adapter |
