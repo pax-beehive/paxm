@@ -123,12 +123,12 @@ v0.1 acceptance checks:
 
 ### Current v0.1 Distribution Pairing
 
-The current pairing is:
+The current distribution channels are:
 
 ```text
-paxm binary: v0.1.20
-plugin:     v0.1.4
-marketplace: pax-agent-nexus
+paxm binary: latest stable v0.1 release
+Codex plugin: v0.1.4
+marketplace:  pax-agent-nexus
 ```
 
 The plugin installer follows the latest GitHub binary release by default so

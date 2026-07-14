@@ -1,0 +1,54 @@
+name: Agent or provider integration
+description: Propose a demand-backed agent or memory-provider integration
+title: "integration: "
+labels:
+  - integration
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Integration type
+      options:
+        - Coding agent
+        - Memory provider
+        - MCP client
+        - Distribution channel
+    validations:
+      required: true
+  - type: input
+    id: project
+    attributes:
+      label: Project and documentation
+      description: Name the project and link its official integration documentation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome
+      description: Explain the real workflow this integration would unlock.
+    validations:
+      required: true
+  - type: textarea
+    id: demand
+    attributes:
+      label: Evidence of demand
+      description: Share users, issues, discussions, or workflows asking for this path.
+    validations:
+      required: true
+  - type: textarea
+    id: lifecycle
+    attributes:
+      label: Runtime and lifecycle surface
+      description: List available hooks, events, MCP support, or provider APIs.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Boundary check
+      options:
+        - label: The proposal can reuse the existing runtime and adapter or integration seams.
+          required: true
+        - label: Users retain control of credentials, installation, disable, and rollback.
+          required: true

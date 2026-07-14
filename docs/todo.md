@@ -3,8 +3,9 @@
 The detailed delivery plan is in [`docs/roadmap.md`](roadmap.md). The v0.1
 Codex plugin slice is scaffolded under `plugins/paxm-memory/`. The initial
 real-task blocker and successful remediation run are recorded in
-[`docs/acceptance/phase-1-v0.1.md`](acceptance/phase-1-v0.1.md). The compatible
-release pairing is binary `v0.1.13` with plugin `v0.1.1`. Phase 1 is complete.
+[`docs/acceptance/phase-1-v0.1.md`](acceptance/phase-1-v0.1.md). The initially
+validated release pairing was binary `v0.1.13` with plugin `v0.1.1`; current
+plugin installs follow the latest stable binary release. Phase 1 is complete.
 Phase 2 starts with `paxm eval run --suite evals/baseline`: a versioned,
 deterministic 100-case SQLite retrieval suite that runs in CI. The second slice,
 `paxm eval run --suite evals/conversation-write`, adds 50 deterministic cases

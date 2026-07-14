@@ -1,0 +1,62 @@
+name: Bug report
+description: Report reproducible incorrect paxm behavior
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove credentials, memory content,
+        workspace paths, and private logs before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: paxm version
+      description: Output from `paxm version`.
+      placeholder: v0.1.26
+    validations:
+      required: true
+  - type: dropdown
+    id: integration
+    attributes:
+      label: Integration
+      options:
+        - Codex plugin
+        - Claude Code plugin
+        - OpenCode plugin
+        - Pi extension
+        - MCP
+        - CLI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe sequence that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste relevant `paxm config doctor` output after removing private data.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, memory content, private paths, and private logs.
+          required: true
+        - label: This report does not describe a security vulnerability.
+          required: true

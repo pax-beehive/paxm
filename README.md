@@ -2,106 +2,81 @@
 
 # PAXM
 
-### One memory adaptor for every AI agent.
+### Stop re-explaining your project to every new coding-agent session.
 
 [![CI](https://github.com/pax-beehive/paxm/actions/workflows/ci.yml/badge.svg)](https://github.com/pax-beehive/paxm/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/pax-beehive/paxm)](https://github.com/pax-beehive/paxm/releases/latest)
 [![Go](https://img.shields.io/github/go-mod/go-version/pax-beehive/paxm)](go.mod)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-6f42c1)](https://github.com/pax-beehive/paxm/releases/latest)
 
-Connect Codex, Claude Code, OpenCode, Pi, and MCP clients to the memory system
-you choose through one active and passive memory surface. Use the default
-SQLite provider, connect Zep, Mem0, MemOS, or OpenViking, or bring a private
-provider through JSON-RPC.
+PAXM carries decisions, conventions, and working context into later Codex,
+Claude Code, OpenCode, Pi, and MCP sessions. Start locally with SQLite and no
+account, API key, embeddings, or extra memory-layer model calls. Change memory
+providers later without rewiring every agent.
 
-[Install](#quick-start) · [SQLite quality](#sqlite-quality-preview) · [How it works](#how-it-works) · [Providers](#agents-and-providers) · [Docs](#documentation)
+[Install for Codex](#codex-plugin) · [Install the CLI](#opencode-pi-cli-or-mcp) · [See the result](#what-changes-after-installation) · [Docs](#documentation)
 
 </div>
 
-![Animated PAXM architecture showing active recall and passive memory routed from AI agents through the adaptor to interchangeable providers](docs/assets/paxm-architecture-animated.gif)
+## What changes after installation
 
-## Why paxm
+In one session, record a decision:
 
-Memory engines often leave agent integration to the user. Each agent needs its
-own SDK wiring, MCP instructions, lifecycle hooks, and failure handling. Every
-new agent or provider multiplies that work.
-
-`paxm` makes that integration reusable. Agents get one memory surface,
-providers implement one adapter contract, and users keep control of
-credentials, routing, hooks, and data location.
-
-`paxm` is a memory adaptor, not another local memory service. It standardizes
-how agents recall and write memory while leaving storage, extraction, search,
-and hosting to the selected provider. SQLite is included as a convenient,
-zero-setup default so paxm works immediately; it is one provider behind the
-same routing contract, not the product boundary.
-
-```text
-AI agents  ->  CLI / MCP / skills / hooks  ->  paxm  ->  any memory provider
+```bash
+paxm remember --profile ltm --text \
+  "Production deploys run through GitHub Actions; never deploy from a laptop"
 ```
 
-## What you get
+In a later session, Codex, Claude Code, OpenCode, Pi, or an MCP client can
+recover it:
 
-- **Active memory** through CLI commands, MCP tools, and an agent skill.
-- **Passive memory** through lifecycle hooks that recall context and capture
-  durable writes without relying on the model to call a tool.
-- **Provider independence** through a common search/write contract and
-  multi-provider routing.
-- **A zero-setup default** with SQLite, requiring no account or external model
-  for memory ingestion or retrieval, without coupling agents to SQLite.
-- **Failure isolation** with per-provider timeouts, an overall passive-recall
-  budget, bulkheads, and partial-result fallback.
-- **Durable passive writes** through a local queue with retry, deduplication,
-  and crash-safe state.
-- **Operational visibility** through local event logs, latency histograms,
-  provider errors, timeout counts, and `paxm history`.
+```bash
+paxm recall --query "how do we deploy production?"
+```
 
-## SQLite quality preview
+With passive integration enabled, paxm recalls relevant context before the
+agent responds and durably captures completed turns afterward. Provider delays
+or failures do not block the coding session.
 
-SQLite is paxm's default provider, not its product identity. It gives new users
-a complete memory path before they choose or deploy a dedicated memory system.
-The implementation combines FTS5 and BM25 retrieval with turn-level memories
-and deterministic, query-focused excerpts for unusually long results.
+The practical result:
 
-It performs memory ingestion and retrieval without calling an external LLM or
-embedding service. The answering agent still uses its configured model; the
-zero-model-cost claim applies to the memory layer.
-
-In an initial 30-question LoCoMo agent evaluation, SQLite turn memory answered
-13 questions successfully, compared with 11 for Mem0 product-default.
-
-| Memory arm | Successful answers | Mean token F1 | External models in memory layer |
-| --- | ---: | ---: | --- |
-| paxm SQLite turn memory | 13 / 30 | 0.4211 | None |
-| Mem0 product-default | 11 / 30 | 0.3811 | GPT-5 mini + OpenAI embeddings |
-
-This is an exploratory result, not an official LoCoMo score or proof that
-SQLite broadly outperforms Mem0. It covers one balanced conversation with
-OpenCode and DeepSeek V4 Flash, using deterministic token F1.
-
-The result supports a narrower claim: local SQLite memory can deliver
-competitive agent recall quality without external model cost. See the
-[LoCoMo methodology and limitations](evals/locomo/README.md).
-
-For graph memory, semantic extraction, managed infrastructure, or a different
-retrieval strategy, connect Zep, Mem0, MemOS, or a custom provider without
-changing the agent integrations.
+- **New sessions resume with project context** instead of making you restate
+  architecture decisions, conventions, and operational constraints.
+- **One memory path works across agents.** A decision captured from Codex can
+  be recalled from Claude Code, OpenCode, Pi, or any MCP client.
+- **Your storage stays your choice.** Start with local SQLite, connect Zep,
+  Mem0, MemOS, or OpenViking, or bring a private provider through JSON-RPC.
+- **You retain control.** Credentials, hook trust, routing, data location,
+  disable, uninstall, and rollback remain user-owned.
 
 ## Quick start
 
-Choose the path for the agent you use. The Codex plugin is the shortest path:
+Choose the agent you already use. The Codex plugin is the shortest path to a
+complete active-and-passive memory loop.
 
 ### Codex plugin
 
 ```bash
 codex plugin marketplace add pax-beehive/paxm --ref paxm-memory-v0.1.4
 codex plugin add paxm-memory@pax-agent-nexus
+curl -fsSL https://github.com/pax-beehive/paxm/releases/latest/download/install.sh | bash
 paxm setup --integration codex-plugin
 ```
 
 Start a new Codex task and trust the Pax Agent neXus hooks when `/hooks` asks.
-The plugin installs the latest published paxm binary, registers active-memory
-skills, and owns the passive Codex hooks.
+The explicit installer downloads the latest published paxm binary. The plugin
+registers active-memory skills and owns the passive Codex hooks after setup;
+it never installs a binary, writes credentials, or bypasses hook trust on its
+own.
+
+Verify the first successful loop before relying on passive memory:
+
+```bash
+paxm config doctor
+paxm remember --profile stm --text "PAXM_FIRST_RECALL_OK"
+paxm recall --query "PAXM_FIRST_RECALL_OK"
+paxm history --days 1
+```
 
 Set `PAXM_VERSION` before installation for a reproducible version or rollback.
 Provider credentials remain user-managed.
@@ -168,7 +143,35 @@ Select OpenCode during setup to install a global local plugin under
 MCP-compatible client can use `paxm mcp serve --agent codex` without passive
 hooks; replace `codex` with the configured client identity.
 
+## SQLite quality preview
+
+SQLite gives a new user a complete local memory loop before they choose or
+deploy a dedicated memory system. It uses FTS5 and BM25 retrieval with
+turn-level memories and deterministic, query-focused excerpts. Memory ingestion
+and retrieval call no external LLM or embedding service.
+
+In an initial 30-question LoCoMo agent evaluation, SQLite turn memory answered
+13 questions successfully, compared with 11 for Mem0 product-default.
+
+| Memory arm | Successful answers | Mean token F1 | External models in memory layer |
+| --- | ---: | ---: | --- |
+| paxm SQLite turn memory | 13 / 30 | 0.4211 | None |
+| Mem0 product-default | 11 / 30 | 0.3811 | GPT-5 mini + OpenAI embeddings |
+
+This is an exploratory result, not an official LoCoMo score or proof that
+SQLite broadly outperforms Mem0. It covers one balanced conversation with
+OpenCode and DeepSeek V4 Flash, using deterministic token F1. See the
+[methodology and limitations](evals/locomo/README.md).
+
 ## How it works
+
+![Animated PAXM architecture showing active recall and passive memory routed from AI agents through the adaptor to interchangeable providers](docs/assets/paxm-architecture-animated.gif)
+
+PAXM is a memory adaptor, not another hosted memory service:
+
+```text
+AI agents  ->  CLI / MCP / skills / hooks  ->  paxm  ->  any memory provider
+```
 
 Agents reach paxm in two ways:
 
@@ -416,6 +419,16 @@ memory-layer cost from answering-model cost and state their evidence limits.
 | [LoCoMo evaluation](evals/locomo/README.md) | Real-agent memory quality methodology |
 | [Release guide](docs/release.md) | Builds, checksums, tags, and publishing |
 | [Roadmap](docs/roadmap.md) | Current product direction |
+
+## Community
+
+- Ask setup questions, share successful workflows, and discuss early ideas in
+  [GitHub Discussions](https://github.com/pax-beehive/paxm/discussions).
+- Report reproducible bugs or request a demand-backed integration through the
+  repository's structured [issue forms](https://github.com/pax-beehive/paxm/issues/new/choose).
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a substantial change.
+- Report suspected vulnerabilities privately according to
+  [SECURITY.md](SECURITY.md).
 
 ## Development
 

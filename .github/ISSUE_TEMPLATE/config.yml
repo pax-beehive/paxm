@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup help and questions
+    url: https://github.com/pax-beehive/paxm/discussions
+    about: Ask for help or share an early idea in GitHub Discussions.
+  - name: Security vulnerability
+    url: https://github.com/pax-beehive/paxm/security/advisories/new
+    about: Report suspected vulnerabilities privately.
