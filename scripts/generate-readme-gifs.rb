@@ -207,6 +207,100 @@ def passive_frame(phase)
   base_svg("PAXM / PASSIVE MEMORY", "Memory that moves with the agent.", "Recall before the model. Capture after the turn.", body)
 end
 
+def architecture_agent(x, title, subtitle, active: false)
+  color = active ? C[:text] : C[:muted]
+  dot = active ? C[:blue] : C[:line]
+  <<~SVG
+    <circle cx="#{x}" cy="178" r="5" fill="#{dot}"/>
+    #{label(x, 157, title, size: 14, color: color, weight: 680, anchor: "middle")}
+    #{label(x, 202, subtitle, size: 10, color: C[:muted], weight: 520, anchor: "middle", tracking: 0.5)}
+  SVG
+end
+
+def architecture_provider(x, title, subtitle, active: false, color: C[:blue])
+  title_color = active ? C[:text] : C[:muted]
+  dot = active ? color : C[:line]
+  <<~SVG
+    <circle cx="#{x}" cy="470" r="5" fill="#{dot}"/>
+    #{label(x, 495, title, size: 14, color: title_color, weight: 680, anchor: "middle")}
+    #{label(x, 514, subtitle, size: 10, color: C[:muted], weight: 500, anchor: "middle")}
+  SVG
+end
+
+def architecture_hub(active: true, passive: false)
+  ring = passive ? C[:mint] : active ? C[:blue] : C[:line]
+  <<~SVG
+    <circle cx="500" cy="316" r="91" fill="#0a1120" fill-opacity="0.94" stroke="#{ring}" stroke-opacity="0.5" filter="url(#hub-shadow)"/>
+    <circle cx="500" cy="316" r="70" fill="none" stroke="#ffffff" stroke-opacity="0.065"/>
+    <circle cx="500" cy="316" r="52" fill="none" stroke="url(#signal)" stroke-width="1.3" stroke-opacity="0.62" stroke-dasharray="3 7"/>
+    <circle cx="462" cy="281" r="4" fill="#{C[:blue]}"/>
+    <circle cx="538" cy="281" r="4" fill="#{C[:violet]}"/>
+    <circle cx="500" cy="368" r="4" fill="#{C[:mint]}"/>
+    #{label(500, 314, "PAXM", size: 25, color: C[:text], weight: 760, anchor: "middle", tracking: 1.2)}
+    #{label(500, 338, "MEMORY ADAPTOR", size: 9, color: C[:muted], weight: 680, anchor: "middle", tracking: 1.7)}
+  SVG
+end
+
+def architecture_frame(phase)
+  active_phase = phase < 12
+  agent_x = active_phase ? 342 : 658
+  provider_x = active_phase ? 330 : 150
+  channel_color = active_phase ? C[:violet] : C[:mint]
+
+  if active_phase
+    if phase < 4
+      dot = bezier([342, 178], [342, 244], [430, 286], phase / 3.0)
+      status = "ACTIVE RECALL"
+    elsif phase < 8
+      dot = bezier([500, 407], [500, 444], [330, 470], (phase - 4) / 3.0)
+      status = "ROUTE TO OPENVIKING"
+    else
+      dot = bezier([430, 286], [342, 244], [342, 178], (phase - 8) / 3.0)
+      status = "RANKED CONTEXT"
+    end
+  elsif phase < 16
+    dot = bezier([658, 178], [658, 244], [570, 286], (phase - 12) / 3.0)
+    status = "PASSIVE CAPTURE"
+  elsif phase < 20
+    dot = bezier([500, 407], [500, 444], [150, 470], (phase - 16) / 3.0)
+    status = "DURABLE DELIVERY"
+  else
+    angle = ((phase - 20) / 4.0) * Math::PI * 2
+    dot = [500 + (Math.cos(angle) * 52), 316 + (Math.sin(angle) * 52)]
+    status = "RETRY-SAFE RECEIPT"
+  end
+
+  body = +""
+  body << %(<line x1="150" y1="178" x2="850" y2="178" stroke="#{C[:line]}" stroke-width="1" stroke-dasharray="2 10"/> )
+  body << %(<path d="M 342 178 C 342 240 370 260 430 286" fill="none" stroke="#{C[:line]}" stroke-width="1.4"/> )
+  body << %(<path d="M 658 178 C 658 240 630 260 570 286" fill="none" stroke="#{C[:line]}" stroke-width="1.4"/> )
+  body << %(<path d="M 500 407 C 500 440 150 438 150 470" fill="none" stroke="#{C[:line]}" stroke-width="1.1"/> )
+  body << %(<path d="M 500 407 C 500 440 330 438 330 470" fill="none" stroke="#{C[:line]}" stroke-width="1.1"/> )
+  body << %(<path d="M 500 407 L 500 470" fill="none" stroke="#{C[:line]}" stroke-width="1.1"/> )
+  body << %(<path d="M 500 407 C 500 440 670 438 670 470" fill="none" stroke="#{C[:line]}" stroke-width="1.1"/> )
+  body << %(<path d="M 500 407 C 500 440 850 438 850 470" fill="none" stroke="#{C[:line]}" stroke-width="1.1"/> )
+
+  body << architecture_agent(150, "CODEX", "skills + hooks", active: false)
+  body << architecture_agent(342, "CLAUDE CODE", "plugin + MCP", active: agent_x == 342)
+  body << architecture_agent(658, "OPENCODE", "global plugin", active: agent_x == 658)
+  body << architecture_agent(850, "ANY MCP CLIENT", "stdio tools", active: false)
+
+  body << label(393, 235, "ACTIVE", size: 9, color: active_phase ? C[:blue] : C[:muted], weight: 720, anchor: "middle", tracking: 1.8)
+  body << label(607, 235, "PASSIVE", size: 9, color: active_phase ? C[:muted] : C[:mint], weight: 720, anchor: "middle", tracking: 1.8)
+  body << architecture_hub(active: active_phase, passive: !active_phase)
+  body << label(500, 399, "timeouts  ·  bulkheads  ·  durable queue  ·  telemetry", size: 11, color: C[:muted], weight: 540, anchor: "middle", tracking: 0.45)
+
+  body << architecture_provider(150, "SQLITE", "zero-setup default", active: provider_x == 150, color: C[:mint])
+  body << architecture_provider(330, "OPENVIKING", "self-hosted memory", active: provider_x == 330, color: C[:violet])
+  body << architecture_provider(500, "ZEP", "graph memory")
+  body << architecture_provider(670, "MEM0 / MEMOS", "managed or private")
+  body << architecture_provider(850, "JSON-RPC", "your provider")
+  body << pulse(dot[0], dot[1], channel_color)
+  body << label(500, 544, status, size: 10, color: channel_color, weight: 740, anchor: "middle", tracking: 2.2)
+
+  base_svg("PAXM / RUNTIME MAP", "One memory surface. Every agent.", "Active recall and passive memory, routed to the provider you choose.", body)
+end
+
 def run!(*command)
   abort "command failed: #{command.join(' ')}" unless system(*command)
 end
@@ -224,7 +318,10 @@ def build_animation(name, frame_builder)
   png_paths = svg_paths.map do |svg_path|
     thumbnail = "#{svg_path}.png"
     png = svg_path.sub(/\.svg\z/, ".png")
-    run!("sips", "-c", "560", "1000", thumbnail, "--out", png)
+    # Quick Look preserves hidden RGB under an unreliable alpha channel for
+    # filtered SVG elements. Flatten to RGB while cropping so no labels or
+    # background regions disappear during GIF encoding.
+    run!("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", thumbnail, "-vf", "crop=1000:560:0:220,format=rgb24", png)
     png
   end
 
@@ -249,10 +346,11 @@ FileUtils.mkdir_p(WORK)
 FileUtils.mkdir_p(ASSETS)
 
 outputs = [
+  build_animation("paxm-architecture-animated", method(:architecture_frame)),
   build_animation("paxm-provider-routing", method(:routing_frame)),
   build_animation("paxm-passive-memory", method(:passive_frame))
 ]
 
 puts "Generated:"
 outputs.each { |path| puts "  #{path}" }
-FileUtils.rm_rf(WORK)
+FileUtils.rm_rf(WORK) unless ENV["KEEP_README_GIF_FRAMES"] == "1"
