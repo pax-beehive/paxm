@@ -35,6 +35,9 @@ func (s *Service) RememberBatch(ctx context.Context, input tools.RememberBatchIn
 func (s *Service) CleanupExpired(ctx context.Context, limit int) (memory.CleanupExpiredResult, error) {
 	return s.engine.CleanupExpired(ctx, limit)
 }
+func (s *Service) PreservesTurnBoundaries(provider string) bool {
+	return s.router != nil && s.router.PreservesTurnBoundaries(provider)
+}
 func (s *Service) History(days int) (telemetry.HistorySummary, error) {
 	return telemetry.NewRecorder(s.cfg.Telemetry, s.configPath).History(days)
 }

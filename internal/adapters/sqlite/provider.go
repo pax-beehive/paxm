@@ -43,6 +43,8 @@ func (p *Provider) Name() string {
 	return p.name
 }
 
+func (*Provider) PreserveTurnBoundaries() bool { return true }
+
 func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

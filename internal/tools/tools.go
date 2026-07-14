@@ -33,7 +33,7 @@ type RememberInput struct {
 	CreatedAt     time.Time           `json:"created_at,omitempty"`
 	Tier          memory.MemoryTier   `json:"tier,omitempty"`
 	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
-	Turn          *memory.TurnContext `json:"paxm_turn,omitempty"`
+	Turn          *memory.TurnContext `json:"-"`
 }
 type RememberResult struct {
 	Refs           []memory.MemoryRef     `json:"refs"`
@@ -140,6 +140,9 @@ func directProviderRoute(routes []memory.ProviderRoute, provider string) memory.
 }
 func (s *Engine) CleanupExpired(ctx context.Context, limit int) (memory.CleanupExpiredResult, error) {
 	return s.router.CleanupExpired(ctx, limit)
+}
+func (s *Engine) PreservesTurnBoundaries(provider string) bool {
+	return s.router != nil && s.router.PreservesTurnBoundaries(provider)
 }
 func (s *Engine) PutPolicy(profile string) (memory.PutPolicy, error) { return s.putPolicy(profile) }
 

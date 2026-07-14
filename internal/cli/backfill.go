@@ -148,7 +148,7 @@ func (r runner) runBackfillRun(args []string) error {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
 	}
 	defer func() { _ = store.Close() }()
-	options := r.backfillRunOptions(runArgs, agent, provider, providerCfg.Type == "sqlite", files, cutoff, interval)
+	options := r.backfillRunOptions(runArgs, agent, provider, files, cutoff, interval)
 	ctx, cleanup := backfillRunContext(runArgs.maxDuration)
 	defer cleanup()
 	status, runErr := (backfill.Runner{Store: store, Service: rt.Operator}).Run(ctx, options)
@@ -198,7 +198,7 @@ func backfillRunContext(maxDuration time.Duration) (context.Context, func()) {
 	}
 }
 
-func (r runner) backfillRunOptions(args backfillRunArgs, agent, provider string, preserveTurns bool, files []sessions.File, cutoff time.Time, interval time.Duration) backfill.RunOptions {
+func (r runner) backfillRunOptions(args backfillRunArgs, agent, provider string, files []sessions.File, cutoff time.Time, interval time.Duration) backfill.RunOptions {
 	runID := args.runID
 	if runID == "" {
 		runID = backfill.NewRunID()
@@ -208,15 +208,14 @@ func (r runner) backfillRunOptions(args backfillRunArgs, agent, provider string,
 		mode = "background"
 	}
 	options := backfill.RunOptions{
-		Scope:         backfill.Scope(r.configFile(), agent, provider),
-		RunID:         runID,
-		Mode:          mode,
-		Agent:         agent,
-		Provider:      provider,
-		Files:         files,
-		Cutoff:        cutoff,
-		RateInterval:  interval,
-		PreserveTurns: preserveTurns,
+		Scope:        backfill.Scope(r.configFile(), agent, provider),
+		RunID:        runID,
+		Mode:         mode,
+		Agent:        agent,
+		Provider:     provider,
+		Files:        files,
+		Cutoff:       cutoff,
+		RateInterval: interval,
 	}
 	if args.backgroundWorker {
 		options.Started = func(status backfill.Status) {

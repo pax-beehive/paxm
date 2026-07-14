@@ -598,6 +598,15 @@ func (r *Router) CleanupExpired(ctx context.Context, limit int) (CleanupExpiredR
 	return result, nil
 }
 
+func (r *Router) PreservesTurnBoundaries(provider string) bool {
+	binding, ok := r.byName[strings.TrimSpace(provider)]
+	if !ok {
+		return false
+	}
+	capability, ok := binding.Provider.(TurnBoundaryProvider)
+	return ok && capability.PreserveTurnBoundaries()
+}
+
 func dedupeKey(hit MemoryHit) string {
 	if hit.Text != "" {
 		return "text:" + strings.Join(strings.Fields(strings.ToLower(hit.Text)), " ")

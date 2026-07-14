@@ -153,6 +153,12 @@ type BatchProvider interface {
 	PutBatch(ctx context.Context, items []MemoryItem) ([]MemoryRef, error)
 }
 
+// TurnBoundaryProvider opts into storing a complete turn as one memory item.
+// Providers without this capability retain bounded backfill splitting.
+type TurnBoundaryProvider interface {
+	PreserveTurnBoundaries() bool
+}
+
 type CleanupExpiredProvider interface {
 	CleanupExpired(ctx context.Context, limit int) (int, error)
 }

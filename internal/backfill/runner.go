@@ -22,22 +22,22 @@ type Runner struct {
 	Store   *Store
 	Service interface {
 		RememberBatchToProvider(context.Context, string, tools.RememberBatchInput) (tools.RememberResult, error)
+		PreservesTurnBoundaries(string) bool
 	}
 	ProcessID func() int
 }
 
 type RunOptions struct {
-	Scope         string
-	RunID         string
-	Mode          string
-	Agent         string
-	Provider      string
-	Files         []sessions.File
-	Cutoff        time.Time
-	RateInterval  time.Duration
-	PreserveTurns bool
-	Progress      func(Status)
-	Started       func(Status)
+	Scope        string
+	RunID        string
+	Mode         string
+	Agent        string
+	Provider     string
+	Files        []sessions.File
+	Cutoff       time.Time
+	RateInterval time.Duration
+	Progress     func(Status)
+	Started      func(Status)
 }
 
 func NewRunID() string {
@@ -128,7 +128,7 @@ func (r Runner) processBackfillFile(ctx context.Context, options RunOptions, sta
 		return []error{readErr}, r.finishBackfillFile(options, status, fileStartBytes, file.Size)
 	}
 
-	items := ingestItems(turns, options.PreserveTurns)
+	items := ingestItems(turns, r.Service.PreservesTurnBoundaries(options.Provider))
 	status.Discovered += len(items)
 	if err := r.publish(options, *status); err != nil {
 		return nil, err
