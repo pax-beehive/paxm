@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,6 +11,21 @@ import (
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
 )
+
+func TestRememberInputDoesNotExposeInternalTurnContext(t *testing.T) {
+	t.Parallel()
+
+	data, err := json.Marshal(RememberInput{
+		Text: "internal boundary",
+		Turn: &memory.TurnContext{SessionID: "session", TurnID: "turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("paxm_turn")) || bytes.Contains(data, []byte("session")) {
+		t.Fatalf("internal turn context leaked into agent-facing JSON: %s", data)
+	}
+}
 
 type blockingProvider struct{ release chan struct{} }
 
@@ -43,8 +60,12 @@ func TestAgentInterfaceRecallsAndRemembersWithoutFacade(t *testing.T) {
 	cfg := config.DefaultConfig("config.yaml")
 	engine := New(cfg, router)
 	var agent Agent = engine
-	if _, err := agent.Remember(context.Background(), RememberInput{Text: "operator and tools are separate"}); err != nil {
+	turn := &memory.TurnContext{SessionID: "session", TurnID: "turn"}
+	if _, err := agent.Remember(context.Background(), RememberInput{Text: "operator and tools are separate", Turn: turn}); err != nil {
 		t.Fatal(err)
+	}
+	if provider.item.Turn != turn {
+		t.Fatalf("turn context was not forwarded: %#v", provider.item.Turn)
 	}
 	result, err := agent.Recall(context.Background(), RecallInput{Query: "operator tools"})
 	if err != nil {

@@ -78,6 +78,16 @@ type MemoryItem struct {
 	CreatedAt     time.Time         `json:"created_at,omitempty"`
 	Tier          MemoryTier        `json:"tier,omitempty"`
 	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
+	Turn          *TurnContext      `json:"-"`
+}
+
+// TurnContext carries capture boundaries to providers without exposing them as
+// provider-neutral metadata. Providers that do not model turns can ignore it.
+type TurnContext struct {
+	SessionID string    `json:"session_id"`
+	TurnID    string    `json:"turn_id"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
 }
 
 type MemoryRef struct {
@@ -141,6 +151,12 @@ type Provider interface {
 
 type BatchProvider interface {
 	PutBatch(ctx context.Context, items []MemoryItem) ([]MemoryRef, error)
+}
+
+// TurnBoundaryProvider opts into storing a complete turn as one memory item.
+// Providers without this capability retain bounded backfill splitting.
+type TurnBoundaryProvider interface {
+	PreserveTurnBoundaries() bool
 }
 
 type CleanupExpiredProvider interface {

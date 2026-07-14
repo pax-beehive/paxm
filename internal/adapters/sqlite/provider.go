@@ -43,6 +43,8 @@ func (p *Provider) Name() string {
 	return p.name
 }
 
+func (*Provider) PreserveTurnBoundaries() bool { return true }
+
 func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -131,6 +133,7 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 		if err != nil {
 			return refs, err
 		}
+		itemMetadata = sqliteTurnMetadata(itemMetadata, item.Turn)
 		metadata, err := encodeMetadata(itemMetadata)
 		if err != nil {
 			return refs, err
@@ -161,6 +164,22 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 	}
 	committed = true
 	return refs, nil
+}
+
+func sqliteTurnMetadata(metadata map[string]string, turn *memory.TurnContext) map[string]string {
+	if turn == nil {
+		return metadata
+	}
+	annotated := copyMetadata(metadata)
+	annotated["session_id"] = strings.TrimSpace(turn.SessionID)
+	annotated["turn_id"] = strings.TrimSpace(turn.TurnID)
+	if !turn.StartedAt.IsZero() {
+		annotated["started_at"] = turn.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !turn.EndedAt.IsZero() {
+		annotated["ended_at"] = turn.EndedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return annotated
 }
 
 func mergeLifecycleMetadata(ctx context.Context, tx *sql.Tx, item memory.MemoryItem) (map[string]string, error) {

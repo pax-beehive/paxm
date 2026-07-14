@@ -2,6 +2,7 @@ package backfill
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,7 +17,8 @@ import (
 )
 
 type countingProvider struct {
-	items []memory.MemoryItem
+	items                  []memory.MemoryItem
+	preserveTurnBoundaries bool
 }
 
 func (p *countingProvider) Name() string { return "target" }
@@ -28,6 +30,47 @@ func (p *countingProvider) Put(_ context.Context, item memory.MemoryItem) (memor
 	return memory.MemoryRef{ID: item.ID}, nil
 }
 func (p *countingProvider) Health(context.Context) error { return nil }
+func (p *countingProvider) PreserveTurnBoundaries() bool { return p.preserveTurnBoundaries }
+
+func TestRunnerPreservesAnUnboundedTurnWhenProviderSupportsIt(t *testing.T) {
+	t.Parallel()
+
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	longQuestion := strings.Repeat("question ", 4000)
+	content := fmt.Sprintf(`{"type":"session_meta","timestamp":"2026-07-01T10:00:00Z","payload":{"id":"session","cwd":"/repo"}}
+{"type":"event_msg","timestamp":"2026-07-01T10:01:00Z","payload":{"type":"user_message","message":%q}}
+{"type":"event_msg","timestamp":"2026-07-01T10:02:00Z","payload":{"type":"agent_message","phase":"final_answer","message":"answer"}}
+`, longQuestion)
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider := &countingProvider{preserveTurnBoundaries: true}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	runner := Runner{Store: store, Service: facade.New(config.Config{Version: 1}, router).Tools()}
+	status, err := runner.Run(context.Background(), RunOptions{
+		Scope: "scope", RunID: "run", Agent: "codex", Provider: "target",
+		Files:  []sessions.File{{Path: sessionPath, Size: int64(len(content))}},
+		Cutoff: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Uploaded != 1 || len(provider.items) != 1 {
+		t.Fatalf("turn was split: status=%#v writes=%d", status, len(provider.items))
+	}
+	item := provider.items[0]
+	if len(item.Text) <= maxItemBytes || item.Turn == nil || item.Turn.SessionID != "session" || item.Turn.TurnID == "" {
+		t.Fatalf("turn boundary was not preserved: %#v", item)
+	}
+}
 
 func TestRunnerResumesWithoutUploadingSucceededTurnsAgain(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
@@ -160,7 +203,7 @@ func TestTurnItemsAndSplitUTF8Table(t *testing.T) {
 			Assistant: "answer",
 			CreatedAt: createdAt,
 		}
-		items := turnItems(turn)
+		items := turnItems(turn, false)
 		if len(items) != 1 {
 			t.Fatalf("turnItems() = %#v", items)
 		}
@@ -183,12 +226,30 @@ func TestTurnItemsAndSplitUTF8Table(t *testing.T) {
 			User:      strings.Repeat("界", 9000),
 			Assistant: strings.Repeat("答", 9000),
 		}
-		items := turnItems(turn)
+		items := turnItems(turn, false)
 		if len(items) < 2 {
 			t.Fatalf("expected multipart items, got %#v", items)
 		}
 		if items[0].ID != "large-part-1" || items[0].Metadata["part"] != "1" || items[0].Metadata["parts"] == "" {
 			t.Fatalf("multipart metadata missing: %#v", items[0])
+		}
+	})
+
+	t.Run("sqlite preserves an unbounded turn", func(t *testing.T) {
+		turn := sessions.Turn{
+			ID:        "large",
+			Agent:     "codex",
+			SessionID: "session",
+			User:      strings.Repeat("question ", 4000),
+			Assistant: strings.Repeat("answer ", 4000),
+			CreatedAt: time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC),
+		}
+		items := turnItems(turn, true)
+		if len(items) != 1 || items[0].ID != "large" {
+			t.Fatalf("SQLite turn was split: %#v", items)
+		}
+		if items[0].Turn == nil || items[0].Turn.SessionID != "session" || items[0].Turn.TurnID != "large" {
+			t.Fatalf("turn boundary missing: %#v", items[0].Turn)
 		}
 	})
 }

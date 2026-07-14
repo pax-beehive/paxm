@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,6 +67,389 @@ func TestProviderPutAndSearch(t *testing.T) {
 	}
 	if hit.RawScore == nil || hit.RawScoreKind != "sqlite_fts_bm25_negated" {
 		t.Fatalf("expected sqlite raw score, got %#v", hit)
+	}
+}
+
+func TestProviderSearchExtractsRelevantContextFromLongSQLiteMemory(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+
+	lines := make([]string, 0, 64)
+	for i := 0; i < 70; i++ {
+		lines = append(lines, "Morgan: unrelated planning notes that should not consume recall context")
+	}
+	lines = append(lines,
+		"Riley: the deployment discussion starts here",
+		"Morgan: the atlas deployment region is us-west-2",
+		"Riley: keep the rollback in us-east-1",
+	)
+	for i := 0; i < 70; i++ {
+		lines = append(lines, "Morgan: unrelated retrospective notes that should not consume recall context")
+	}
+	original := strings.Join(lines, "\n")
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: original, Source: "session"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "atlas deployment region", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("expected one hit, got %d", len(hits))
+	}
+	hit := hits[0]
+	for _, want := range []string{
+		"Riley: the deployment discussion starts here",
+		"Morgan: the atlas deployment region is us-west-2",
+		"Riley: keep the rollback in us-east-1",
+	} {
+		if !strings.Contains(hit.Text, want) {
+			t.Fatalf("excerpt missing %q:\n%s", want, hit.Text)
+		}
+	}
+	if len(hit.Text) >= len(original) {
+		t.Fatalf("long SQLite memory was not shortened: got %d bytes, original %d", len(hit.Text), len(original))
+	}
+	if hit.Metadata["sqlite_excerpted"] != "true" {
+		t.Fatalf("excerpt metadata = %#v", hit.Metadata)
+	}
+}
+
+func TestProviderSearchLeavesShortSQLiteMemoryUnchanged(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	original := "Morgan: the atlas deployment region is us-west-2"
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: original}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "atlas deployment region", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Text != original {
+		t.Fatalf("short SQLite memory changed: %#v", hits)
+	}
+	if hits[0].Metadata["sqlite_excerpted"] != "" {
+		t.Fatalf("short SQLite memory marked as excerpted: %#v", hits[0].Metadata)
+	}
+}
+
+func TestProviderSearchLeavesExactEightKiBMemoryUnchanged(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	seed := strings.Repeat("atlas deployment region supporting detail\n", 256)
+	original := seed[:8192]
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: original}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "atlas deployment region", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Text != original {
+		t.Fatalf("exact 8 KiB SQLite memory changed: %#v", hits)
+	}
+}
+
+func TestProviderSearchReturnsNoHitsWithoutExcerptPanic(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: "unrelated stored memory"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "atlas deployment region", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("unexpected hits: %#v", hits)
+	}
+}
+
+func TestProviderSearchExtractsEvidenceFromLongSingleLineMemory(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	prefix := strings.Repeat("Old planning detail without a final location. ", 100)
+	target := "The atlas deployment region is us-west-2. "
+	suffix := strings.Repeat("Unrelated retrospective detail after the decision. ", 100)
+	original := "Morgan: " + prefix + target + suffix
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: original}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "atlas deployment region", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, strings.TrimSpace(target)) {
+		t.Fatalf("single-line excerpt lost target evidence: %#v", hits)
+	}
+	if len(hits[0].Text) >= len(original) {
+		t.Fatalf("single-line SQLite memory was not shortened: got %d bytes, original %d", len(hits[0].Text), len(original))
+	}
+}
+
+func TestProviderSearchExtractsEvidenceFromLongUnspacedCJKMemory(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	target := "部署区域是美国西部二区"
+	original := strings.Repeat("背景资料", 400) + target + strings.Repeat("历史记录", 400)
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: original}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "部署区域", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, target) {
+		t.Fatalf("CJK excerpt lost target evidence: %#v", hits)
+	}
+	if len(hits[0].Text) >= len(original) {
+		t.Fatalf("long CJK memory was not shortened: got %d bytes, original %d", len(hits[0].Text), len(original))
+	}
+}
+
+func TestProviderSearchKeepsBestEvidenceUnderExcerptBudget(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	longFiller := strings.Repeat(" background", 300)
+	original := strings.Join([]string{
+		"Morgan: atlas" + longFiller,
+		"Riley: context before the first partial match" + longFiller,
+		"Morgan: deployment" + longFiller,
+		"Riley: context after the second partial match" + longFiller,
+		"Morgan: the atlas deployment region is us-west-2",
+	}, "\n")
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: original}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "atlas deployment region", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, "the atlas deployment region is us-west-2") {
+		t.Fatalf("best evidence was displaced by lower-quality segments:\n%#v", hits)
+	}
+}
+
+func TestProviderSearchBoundsCombinedLongSQLiteContext(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	for i := 0; i < 5; i++ {
+		text := strings.Join([]string{
+			fmt.Sprintf("Morgan: atlas deployment region %d is us-west-2 %s", i, strings.Repeat("supporting detail ", 200)),
+			"Riley: " + strings.Repeat("unrelated historical context ", 200),
+		}, "\n")
+		if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "atlas deployment region", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 5 {
+		t.Fatalf("expected five hits, got %d", len(hits))
+	}
+	totalBytes := 0
+	for _, hit := range hits {
+		totalBytes += len(hit.Text)
+		if !strings.Contains(hit.Text, "atlas deployment region") {
+			t.Fatalf("budgeted hit lost evidence: %#v", hit)
+		}
+	}
+	if totalBytes > 8000 {
+		t.Fatalf("combined SQLite context = %d bytes, want <= 8000", totalBytes)
+	}
+}
+
+func TestProviderSearchExcerptIgnoresQuestionStopWords(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	lines := make([]string, 0, 142)
+	for i := 0; i < 70; i++ {
+		lines = append(lines, "Caroline: I did give support at a community gathering with friends")
+	}
+	lines = append(lines, "Caroline: My school event was last week")
+	for i := 0; i < 70; i++ {
+		lines = append(lines, "Caroline: I did give support at a community gathering with friends")
+	}
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: strings.Join(lines, "\n")}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "When did Caroline give a speech at a school?", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, "My school event was last week") {
+		t.Fatalf("question stop words displaced the relevant evidence:\n%#v", hits)
+	}
+}
+
+func TestProviderSearchExcerptKeepsSessionTimestamp(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	lines := []string{"[9 June 2023]"}
+	for i := 0; i < 150; i++ {
+		lines = append(lines, "Caroline: unrelated details about the community gathering")
+	}
+	lines = append(lines, "Caroline: I talked at the school event last week")
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: strings.Join(lines, "\n")}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "When did Caroline give a speech at a school?", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, "[9 June 2023]") {
+		t.Fatalf("session timestamp was omitted from the excerpt:\n%#v", hits)
+	}
+}
+
+func TestProviderSearchExcerptPrioritizesTemporalEvidenceForDurationQuestion(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	lines := make([]string, 0, 182)
+	for i := 0; i < 90; i++ {
+		lines = append(lines, "Caroline: my current group of friends is supportive")
+	}
+	lines = append(lines, "Caroline: we have known each other for 4 years")
+	for i := 0; i < 90; i++ {
+		lines = append(lines, "Caroline: my current group of friends is supportive")
+	}
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: strings.Join(lines, "\n")}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "How long has Caroline had her current group of friends for?", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, "4 years") {
+		t.Fatalf("duration evidence was displaced by lexical distractors:\n%#v", hits)
+	}
+}
+
+func TestProviderSearchLeavesPartialLexicalHitUnchanged(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	lines := make([]string, 0, 142)
+	for i := 0; i < 70; i++ {
+		lines = append(lines, "Caroline: unrelated background about friends and community support")
+	}
+	lines = append(lines, "Caroline: I am single")
+	for i := 0; i < 70; i++ {
+		lines = append(lines, "Caroline: unrelated background about friends and community support")
+	}
+	original := strings.Join(lines, "\n")
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: original}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "What is Caroline relationship status?", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Text != original {
+		t.Fatalf("partial lexical hit should fail open to the original text: %#v", hits)
+	}
+}
+
+func TestProviderSearchTemporalExcerptRequiresQueryOverlap(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	lines := make([]string, 0, 242)
+	for i := 0; i < 120; i++ {
+		lines = append(lines, fmt.Sprintf("Morgan: unrelated budget number %d", 2020+i))
+	}
+	lines = append(lines, "Morgan: atlas deployment was finalized after approval")
+	for i := 0; i < 120; i++ {
+		lines = append(lines, fmt.Sprintf("Morgan: unrelated budget number %d", 2050+i))
+	}
+	if _, err := provider.Put(context.Background(), memory.MemoryItem{Text: strings.Join(lines, "\n")}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "When was atlas deployment finalized?", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Text, "atlas deployment was finalized") {
+		t.Fatalf("unrelated temporal segments displaced query evidence: %#v", hits)
 	}
 }
 
@@ -271,6 +655,49 @@ func TestProviderCleanupExpiredDeletesRows(t *testing.T) {
 	}
 	if deleted != 0 {
 		t.Fatalf("second CleanupExpired deleted %d rows, want 0", deleted)
+	}
+}
+
+func TestProviderSearchReturnsTurnBoundaryMetadata(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New("sqlite", filepath.Join(t.TempDir(), "memory.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Date(2026, 7, 13, 10, 0, 0, 123, time.UTC)
+	endedAt := startedAt.Add(3 * time.Minute)
+	_, err = provider.Put(context.Background(), memory.MemoryItem{
+		Text: "turn boundary marker",
+		Tier: memory.TierLTM,
+		Turn: &memory.TurnContext{
+			SessionID: "session-7",
+			TurnID:    "turn-42",
+			StartedAt: startedAt,
+			EndedAt:   endedAt,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "turn boundary marker", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("hits = %#v", hits)
+	}
+	want := map[string]string{
+		"session_id": "session-7",
+		"turn_id":    "turn-42",
+		"started_at": startedAt.Format(time.RFC3339Nano),
+		"ended_at":   endedAt.Format(time.RFC3339Nano),
+	}
+	for key, value := range want {
+		if hits[0].Metadata[key] != value {
+			t.Fatalf("metadata[%s] = %q, want %q: %#v", key, hits[0].Metadata[key], value, hits[0].Metadata)
+		}
 	}
 }
 

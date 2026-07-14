@@ -544,6 +544,12 @@ contradictory wording is not merged automatically. Passive `user_input` writes
 use the prompt as their stable identity basis while retaining the full rendered
 hook template as stored evidence.
 
+Buffered hook writes use the completed episode as an unbounded turn boundary.
+SQLite adds `session_id`, `turn_id`, `started_at`, and `ended_at` to that turn's
+stored metadata. Historical SQLite backfill also keeps one item per normalized
+turn; remote providers keep the existing bounded multipart behavior. These are
+internal behaviors and have no user-facing tuning knobs.
+
 ## Agents
 
 `agents.<name>.active_recall` controls explicit recall calls made by that agent

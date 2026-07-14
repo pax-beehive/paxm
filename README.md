@@ -65,6 +65,12 @@ state-of-the-art memory quality. Use Zep, Mem0, MemOS, or a custom adapter when 
 more advanced retrieval and memory behavior without rebuilding every agent
 integration.
 
+SQLite deterministically excerpts long recall hits around query terms before
+returning them to the agent. It preserves source text and nearby context and
+uses no LLM or embedding model; short hits remain unchanged. The context budget
+is an internal, best-effort SQLite default rather than a user-facing setting,
+and other providers do not pass through this path.
+
 ## Quick start
 
 Choose the path for the agent you use. The Codex plugin is the shortest path:
@@ -256,6 +262,8 @@ event mappings, profile settings, and uninstall behavior.
   isolated while required-provider failures are returned to the caller.
 - Recall provenance is stripped before passive writes to prevent memory echo.
 - Exact LTM consolidation limits duplicate accumulation.
+- SQLite preserves completed agent turns as the recall unit with explicit
+  session, turn, and time boundaries.
 - Telemetry stores hashes and lengths by default, not raw recall queries.
 
 Historical imports are also resumable:

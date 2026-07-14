@@ -101,6 +101,24 @@ When a query carries `metadata.workspace`, SQLite excludes rows owned by a
 different workspace in SQL before scoring; unscoped memories remain visible as
 shared memories for compatibility with the provider contract.
 
+SQLite also bounds unusually long recall results inside this retrieval module.
+Memories no larger than 8 KiB are returned unchanged. For longer results, SQLite
+selects query-bearing source segments plus adjacent context, preserves a
+session timestamp when present, and prioritizes explicit date or duration
+evidence for temporal questions. The selected text is extractive: it never
+generates or paraphrases memory content and does not call an LLM or embedding
+model. Internal defaults allocate excerpt-eligible long hits from an 8,000-byte
+top-K target, with at most 2,400 bytes assigned to one hit. Short hits and long
+hits without usable lexical evidence remain unchanged, so this is a
+best-effort context target rather than a hard response-size limit for arbitrary
+caller-supplied top-K values. A long hit also remains unchanged unless the
+original and selected excerpt both cover every significant query term; this
+fail-open quality gate favors recall evidence over context reduction. These are
+SQLite implementation defaults rather than public recall-profile settings;
+other providers are not processed by this path. Excerpted hits retain their ID,
+source, scores, and ordering and add
+`sqlite_excerpted` plus `sqlite_original_bytes` metadata for diagnosis.
+
 ## Recall Profiles
 
 A recall profile is the policy boundary for reads. It chooses:
@@ -302,6 +320,14 @@ and every event payload plus the assembled episode carries a SHA-256 checksum.
 Sessions that never emit `turn_end` are sealed as incomplete after the configured
 maximum episode age.
 
+The episode is the durable turn boundary, not a size-based text window. Its
+events are not split by rendered size; mixed write profiles may still produce
+one item per profile. For SQLite, paxm records `session_id`, `turn_id`,
+`started_at`, and `ended_at` on the stored memory. These fields stay internal to
+the SQLite adapter rather than becoming a metadata requirement for remote
+providers. SQLite may return a query-focused excerpt for an unusually large
+turn, but the complete turn remains stored as the evidence record.
+
 Each episode creates one independent delivery per write-profile provider. A
 background worker delivers different providers concurrently, preserves episode
 order within each provider/session partition, and records provider-specific ACK,
@@ -321,8 +347,9 @@ Backfill readers normalize Codex, Claude Code, and Pi JSONL histories into
 user/assistant turns. They discard system instructions, hidden reasoning, tool
 traffic, sidechains, and attachments. Each normalized turn receives a
 deterministic item ID, original timestamp, session ID, workspace, agent, and
-`backfill:<agent>` source. Oversized turns are split into bounded deterministic
-parts before entering the normal operator/router/provider write path.
+`backfill:<agent>` source. SQLite preserves each historical turn as one
+unbounded item. Other providers retain bounded deterministic splitting for
+oversized turns to respect their transport constraints.
 
 The target is an exact enabled provider name rather than a write profile. This
 keeps multiple Mem0 or custom provider instances unambiguous. Extraction rules

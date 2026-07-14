@@ -109,6 +109,7 @@ func memoryItemFromIngestInput(input IngestInput) (memory.MemoryItem, string, bo
 		CreatedAt:     effectiveCreatedAt(input.CreatedAt),
 		Tier:          input.Tier,
 		ExpiresAt:     input.ExpiresAt,
+		Turn:          input.Turn,
 	}, profile, true
 }
 

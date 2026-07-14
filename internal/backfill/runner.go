@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/pax-beehive/paxm/internal/memory"
 	"github.com/pax-beehive/paxm/internal/sessions"
 	"github.com/pax-beehive/paxm/internal/tools"
 )
@@ -21,6 +22,7 @@ type Runner struct {
 	Store   *Store
 	Service interface {
 		RememberBatchToProvider(context.Context, string, tools.RememberBatchInput) (tools.RememberResult, error)
+		PreservesTurnBoundaries(string) bool
 	}
 	ProcessID func() int
 }
@@ -126,7 +128,7 @@ func (r Runner) processBackfillFile(ctx context.Context, options RunOptions, sta
 		return []error{readErr}, r.finishBackfillFile(options, status, fileStartBytes, file.Size)
 	}
 
-	items := ingestItems(turns)
+	items := ingestItems(turns, r.Service.PreservesTurnBoundaries(options.Provider))
 	status.Discovered += len(items)
 	if err := r.publish(options, *status); err != nil {
 		return nil, err
@@ -138,10 +140,10 @@ func (r Runner) processBackfillFile(ctx context.Context, options RunOptions, sta
 	return operationErrors, r.finishBackfillFile(options, status, fileStartBytes, file.Size)
 }
 
-func ingestItems(turns []sessions.Turn) []tools.RememberInput {
+func ingestItems(turns []sessions.Turn, preserveTurns bool) []tools.RememberInput {
 	var items []tools.RememberInput
 	for _, turn := range turns {
-		items = append(items, turnItems(turn)...)
+		items = append(items, turnItems(turn, preserveTurns)...)
 	}
 	return items
 }
@@ -286,10 +288,13 @@ func updateRates(status *Status) {
 	}
 }
 
-func turnItems(turn sessions.Turn) []tools.RememberInput {
+func turnItems(turn sessions.Turn, preserve bool) []tools.RememberInput {
 	header := fmt.Sprintf("Historical %s agent session turn.\n\nUser:\n%s\n\nAssistant:\n", turn.Agent, turn.User)
 	text := header + turn.Assistant
-	parts := splitUTF8(text, maxItemBytes)
+	parts := []string{text}
+	if !preserve {
+		parts = splitUTF8(text, maxItemBytes)
+	}
 	items := make([]tools.RememberInput, 0, len(parts))
 	for index, part := range parts {
 		id := turn.ID
@@ -312,6 +317,12 @@ func turnItems(turn sessions.Turn) []tools.RememberInput {
 			Source:    "backfill:" + turn.Agent,
 			Metadata:  metadata,
 			CreatedAt: turn.CreatedAt,
+			Turn: &memory.TurnContext{
+				SessionID: turn.SessionID,
+				TurnID:    turn.ID,
+				StartedAt: turn.CreatedAt,
+				EndedAt:   turn.CreatedAt,
+			},
 		})
 	}
 	return items

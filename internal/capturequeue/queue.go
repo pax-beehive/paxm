@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
 	_ "modernc.org/sqlite"
 )
 
@@ -157,7 +158,32 @@ func (e Episode) ingestGroup(profile string, events []facade.IngestInput, multip
 		CreatedAt:     createdAt,
 		Tier:          events[0].Tier,
 		ExpiresAt:     events[0].ExpiresAt,
+		Turn:          e.turnContext(),
 	}
+}
+
+func (e Episode) turnContext() *memory.TurnContext {
+	turn := &memory.TurnContext{SessionID: e.SessionKey, TurnID: e.ID}
+	for _, item := range e.Events {
+		turn.SessionID = firstNonEmpty(item.Metadata["session_id"], turn.SessionID)
+		turn.TurnID = firstNonEmpty(item.Metadata["turn_id"], turn.TurnID)
+		if turn.StartedAt.IsZero() || (!item.CreatedAt.IsZero() && item.CreatedAt.Before(turn.StartedAt)) {
+			turn.StartedAt = item.CreatedAt
+		}
+		if turn.EndedAt.IsZero() || item.CreatedAt.After(turn.EndedAt) {
+			turn.EndedAt = item.CreatedAt
+		}
+	}
+	return turn
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func expiryString(value *time.Time) string {

@@ -522,9 +522,11 @@ func TestMaxEpisodeAgeSealsAbandonedTurnAsIncomplete(t *testing.T) {
 
 func TestEpisodePreservesMixedProfileTierAndExpiry(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Hour)
+	startedAt := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	endedAt := startedAt.Add(time.Minute)
 	episode := capturequeue.Episode{ID: "episode", SessionKey: "session", Complete: true, Events: []facade.IngestInput{
-		{Text: "short task state", Profile: "stm", Tier: memory.TierSTM, ExpiresAt: &expires},
-		{Text: "durable decision", Profile: "ltm", Tier: memory.TierLTM},
+		{Text: "short task state", Profile: "stm", Tier: memory.TierSTM, ExpiresAt: &expires, CreatedAt: startedAt},
+		{Text: "durable decision", Profile: "ltm", Tier: memory.TierLTM, CreatedAt: endedAt},
 	}}
 	items := episode.IngestInputs()
 	if len(items) != 2 {
@@ -539,6 +541,40 @@ func TestEpisodePreservesMixedProfileTierAndExpiry(t *testing.T) {
 	}
 	if byProfile["stm"].ID == byProfile["ltm"].ID {
 		t.Fatal("mixed policy groups must have independent idempotency IDs")
+	}
+	for profile, item := range byProfile {
+		if item.Turn == nil || !item.Turn.StartedAt.Equal(startedAt) || !item.Turn.EndedAt.Equal(endedAt) {
+			t.Fatalf("%s turn boundary = %#v", profile, item.Turn)
+		}
+	}
+}
+
+func TestEpisodeIngestInputPreservesUnboundedTurnBoundary(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	endedAt := startedAt.Add(2 * time.Minute)
+	episode := capturequeue.Episode{
+		ID:         "turn-42",
+		SessionKey: "codex/workspace/project/session/session-7",
+		Events: []facade.IngestInput{
+			{Text: "User: " + strings.Repeat("question ", 4000), CreatedAt: startedAt, Metadata: map[string]string{"session_id": "session-7"}},
+			{Text: "Assistant: answer", CreatedAt: endedAt, Metadata: map[string]string{"session_id": "session-7"}},
+		},
+	}
+
+	item := episode.IngestInput()
+	if !strings.Contains(item.Text, "Assistant: answer") || len(item.Text) < 24*1024 {
+		t.Fatalf("turn text was truncated or split: %d bytes", len(item.Text))
+	}
+	if item.Turn == nil {
+		t.Fatal("turn boundary is missing")
+	}
+	if item.Turn.SessionID != "session-7" || item.Turn.TurnID != "turn-42" {
+		t.Fatalf("turn identity = %#v", item.Turn)
+	}
+	if !item.Turn.StartedAt.Equal(startedAt) || !item.Turn.EndedAt.Equal(endedAt) {
+		t.Fatalf("turn times = %#v", item.Turn)
 	}
 }
 
