@@ -79,9 +79,38 @@ type MemoryItem struct {
 	Tier          MemoryTier        `json:"tier,omitempty"`
 	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
 	Turn          *TurnContext      `json:"-"`
-	Provenance    Provenance        `json:"provenance,omitempty"`
+	Origin        MemoryOrigin      `json:"origin,omitempty"`
+	Scope         MemoryScope       `json:"scope,omitempty"`
+	// Provenance is the v1 compatibility shape. New integrations should use
+	// Origin and Scope, which separate authorship from visibility boundaries.
+	Provenance Provenance `json:"provenance,omitempty"`
 }
 
+// MemoryOrigin identifies where a memory was produced. These values are
+// trusted runtime context, not caller-controlled search filters.
+type MemoryOrigin struct {
+	UserID    string `json:"user_id,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
+}
+
+// MemoryScope identifies the visibility boundary assigned at write time.
+type MemoryScope struct {
+	Type string `json:"type,omitempty"`
+	ID   string `json:"id,omitempty"`
+}
+
+// SessionIdentity identifies the current agent runtime. Integrations may
+// expose it once at session bootstrap; it is not per-memory provenance.
+type SessionIdentity struct {
+	UserID    string `json:"user_id"`
+	AgentID   string `json:"agent_id"`
+	SessionID string `json:"session_id"`
+}
+
+// Provenance is retained for compatibility with v1 providers and callers.
+// It combines origin and scope and therefore cannot represent session or turn.
 type Provenance struct {
 	UserID    string `json:"user_id,omitempty"`
 	AgentID   string `json:"agent_id,omitempty"`
@@ -123,6 +152,8 @@ type MemoryHit struct {
 	CreatedAt    time.Time         `json:"created_at,omitempty"`
 	Tier         MemoryTier        `json:"tier,omitempty"`
 	ExpiresAt    *time.Time        `json:"expires_at,omitempty"`
+	Origin       MemoryOrigin      `json:"origin,omitempty"`
+	Scope        MemoryScope       `json:"scope,omitempty"`
 	Provenance   Provenance        `json:"provenance,omitempty"`
 	rankingScore float64
 }

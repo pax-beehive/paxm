@@ -18,6 +18,18 @@ type memoryItem struct {
 	CreatedAt time.Time         `json:"created_at,omitempty"`
 	Tier      string            `json:"tier,omitempty"`
 	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	Origin    memoryOrigin      `json:"origin,omitempty"`
+	Scope     memoryScope       `json:"scope,omitempty"`
+}
+type memoryOrigin struct {
+	UserID    string `json:"user_id,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
+}
+type memoryScope struct {
+	Type string `json:"type,omitempty"`
+	ID   string `json:"id,omitempty"`
 }
 type memoryRef struct {
 	Provider string `json:"provider,omitempty"`
@@ -38,6 +50,8 @@ type memoryHit struct {
 	CreatedAt time.Time         `json:"created_at,omitempty"`
 	Tier      string            `json:"tier,omitempty"`
 	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	Origin    memoryOrigin      `json:"origin,omitempty"`
+	Scope     memoryScope       `json:"scope,omitempty"`
 }
 
 type request struct {
@@ -76,7 +90,7 @@ func dispatch(req request) (any, *rpcError) {
 	case "paxm.health":
 		return map[string]bool{"ok": true}, nil
 	case "paxm.capabilities":
-		return map[string]bool{"put_batch": true, "delete": true}, nil
+		return map[string]bool{"put_batch": true, "delete": true, "attribution": true}, nil
 	case "paxm.put":
 		var item memoryItem
 		if err := json.Unmarshal(req.Params, &item); err != nil {
@@ -204,7 +218,7 @@ func search(query searchQuery) ([]memoryHit, error) {
 		if !matches {
 			continue
 		}
-		hits = append(hits, memoryHit{ID: id, Text: item.Text, Relevance: 1, Score: 1, Metadata: item.Metadata, CreatedAt: item.CreatedAt, Tier: item.Tier, ExpiresAt: item.ExpiresAt})
+		hits = append(hits, memoryHit{ID: id, Text: item.Text, Relevance: 1, Score: 1, Metadata: item.Metadata, CreatedAt: item.CreatedAt, Tier: item.Tier, ExpiresAt: item.ExpiresAt, Origin: item.Origin, Scope: item.Scope})
 		if len(hits) >= limit {
 			break
 		}

@@ -86,8 +86,9 @@ type refsResult struct {
 }
 
 type Capabilities struct {
-	PutBatch bool `json:"put_batch"`
-	Delete   bool `json:"delete"`
+	PutBatch    bool `json:"put_batch"`
+	Delete      bool `json:"delete"`
+	Attribution bool `json:"attribution"`
 }
 
 func New(name string, cfg config.ProviderConfig) (*Provider, error) {
@@ -129,15 +130,26 @@ func (p *Provider) Name() string {
 }
 
 func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
+	hits, err := p.SearchWire(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	for i := range hits {
+		hits[i].Provider = p.name
+		hits[i] = memory.ApplyHitAttribution(hits[i])
+	}
+	return hits, nil
+}
+
+// SearchWire returns the plugin response before compatibility reconstruction.
+// The conformance kit uses it to verify advertised structured attribution.
+func (p *Provider) SearchWire(ctx context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	var result searchResult
 	if err := p.call(ctx, methodSearch, query, &result); err != nil {
 		return nil, err
-	}
-	for i := range result.Hits {
-		result.Hits[i].Provider = p.name
 	}
 	return result.Hits, nil
 }
@@ -146,6 +158,7 @@ func (p *Provider) Put(ctx context.Context, item memory.MemoryItem) (memory.Memo
 	if err := ctx.Err(); err != nil {
 		return memory.MemoryRef{}, err
 	}
+	item = memory.PrepareProviderItem(item)
 	var result refsResult
 	if err := p.call(ctx, methodPut, item, &result); err != nil {
 		return memory.MemoryRef{}, err
@@ -164,10 +177,14 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 	if len(items) == 0 {
 		return nil, nil
 	}
+	prepared := make([]memory.MemoryItem, len(items))
+	for i := range items {
+		prepared[i] = memory.PrepareProviderItem(items[i])
+	}
 	var result refsResult
-	err := p.call(ctx, methodPutBatch, putBatchParams{Items: items}, &result)
+	err := p.call(ctx, methodPutBatch, putBatchParams{Items: prepared}, &result)
 	if isMethodNotFound(err) {
-		return p.putBatchIndividually(ctx, items)
+		return p.putBatchIndividually(ctx, prepared)
 	}
 	if err != nil {
 		return nil, err

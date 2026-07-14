@@ -28,6 +28,7 @@ type Result struct {
 
 type Provider interface {
 	memory.Provider
+	SearchWire(context.Context, memory.SearchQuery) ([]memory.MemoryHit, error)
 	Capabilities(context.Context) (jsonrpcadapter.Capabilities, error)
 	Delete(context.Context, memory.MemoryRef) error
 	PutBatch(context.Context, []memory.MemoryItem) ([]memory.MemoryRef, error)
@@ -55,7 +56,11 @@ func Run(ctx context.Context, provider Provider) Result {
 		return result
 	}
 	token := fmt.Sprintf("paxm-conformance-%d", time.Now().UnixNano())
-	item := memory.MemoryItem{Text: "Remember " + token, Metadata: map[string]string{"paxm_conformance": token}}
+	item := memory.MemoryItem{
+		Text: "Remember " + token, Metadata: map[string]string{"paxm_conformance": token},
+		Origin: memory.MemoryOrigin{UserID: "conformance-user", AgentID: "conformance-agent", SessionID: "conformance-session", TurnID: "conformance-turn"},
+		Scope:  memory.MemoryScope{Type: "personal", ID: "conformance-user"},
+	}
 	ref, putErr := provider.Put(ctx, item)
 	add("put acknowledgement", true, putErr)
 	if putErr == nil && strings.TrimSpace(ref.ID) == "" {
@@ -78,9 +83,22 @@ func Run(ctx context.Context, provider Provider) Result {
 			}
 		}
 		add("search fidelity", true, searchErr)
+		if caps.Attribution {
+			rawHits, rawErr := provider.SearchWire(ctx, memory.SearchQuery{Text: token, Limit: 10, Metadata: item.Metadata})
+			if rawErr == nil {
+				rawErr = attributionFidelityError(rawHits, ref.ID, item)
+			}
+			add("attribution fidelity", true, rawErr)
+		} else {
+			result.Checks = append(result.Checks, Check{Name: "attribution fidelity", Skipped: true})
+		}
 	}
 	batchTexts := []string{token + " batch one", token + " batch two"}
-	batchRefs, batchErr := provider.PutBatch(ctx, []memory.MemoryItem{{Text: batchTexts[0]}, {Text: batchTexts[1]}})
+	batchItems := []memory.MemoryItem{
+		{Text: batchTexts[0], Origin: memory.MemoryOrigin{UserID: "batch-user-1", AgentID: "batch-agent", SessionID: "batch-session", TurnID: "batch-turn-1"}, Scope: memory.MemoryScope{Type: "team", ID: "team-1"}},
+		{Text: batchTexts[1], Origin: memory.MemoryOrigin{UserID: "batch-user-2", AgentID: "batch-agent", SessionID: "batch-session", TurnID: "batch-turn-2"}, Scope: memory.MemoryScope{Type: "team", ID: "team-1"}},
+	}
+	batchRefs, batchErr := provider.PutBatch(ctx, batchItems)
 	if batchErr == nil && len(batchRefs) != 2 {
 		batchErr = fmt.Errorf("putBatch returned %d refs, want 2", len(batchRefs))
 	}
@@ -107,6 +125,16 @@ func Run(ctx context.Context, provider Provider) Result {
 			if !found {
 				batchErr = fmt.Errorf("putBatch ref %s is not faithfully searchable", batchRef.ID)
 				break
+			}
+			if caps.Attribution {
+				rawHits, rawErr := provider.SearchWire(ctx, memory.SearchQuery{Text: batchTexts[index], Limit: 10})
+				if rawErr == nil {
+					rawErr = attributionFidelityError(rawHits, batchRef.ID, batchItems[index])
+				}
+				if rawErr != nil {
+					batchErr = fmt.Errorf("putBatch attribution: %w", rawErr)
+					break
+				}
 			}
 		}
 	}
@@ -144,4 +172,17 @@ func Run(ctx context.Context, provider Provider) Result {
 	}
 	result.DurationMS = time.Since(started).Milliseconds()
 	return result
+}
+
+func attributionFidelityError(hits []memory.MemoryHit, refID string, item memory.MemoryItem) error {
+	for _, hit := range hits {
+		if hit.ID != refID {
+			continue
+		}
+		if hit.Origin != item.Origin || hit.Scope != item.Scope {
+			return fmt.Errorf("search attribution = origin %#v scope %#v, want origin %#v scope %#v", hit.Origin, hit.Scope, item.Origin, item.Scope)
+		}
+		return nil
+	}
+	return fmt.Errorf("search did not return written ref %q for attribution check", refID)
 }

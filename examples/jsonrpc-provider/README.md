@@ -13,3 +13,7 @@ PAXM_SAMPLE_PROVIDER_STORE=/tmp/paxm-sample-store.json \
 Configure it in paxm with `type: jsonrpc`, `transport: stdio`, the executable
 path in `command`, and `PAXM_SAMPLE_PROVIDER_STORE` in the provider `env` map.
 The JSON store is intentionally educational, not a production database.
+
+The sample advertises `attribution:true`: it persists the provider-neutral
+`origin` and `scope` objects and returns them unchanged on search. Run the
+conformance command above after changing its storage mapping.

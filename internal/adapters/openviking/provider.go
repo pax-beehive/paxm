@@ -151,10 +151,11 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 		if result.Overview != "" {
 			metadata["openviking_overview"] = result.Overview
 		}
-		hits = append(hits, memory.MemoryHit{
+		hit := memory.MemoryHit{
 			Provider: p.name, ID: uri, Text: content, Relevance: relevance, Score: relevance,
 			RawScore: &rawScore, RawScoreKind: "openviking_score", Source: "openviking", Metadata: metadata, Tier: memory.TierLTM,
-		})
+		}
+		hits = append(hits, memory.ApplyHitAttribution(hit))
 		if len(hits) >= limit {
 			break
 		}

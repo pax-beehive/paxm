@@ -246,7 +246,7 @@ func appendSearchResponse(result *SearchResult, response searchResponse, policy 
 	now := time.Now().UTC()
 	for _, hit := range response.hits {
 		hit.Provider = name
-		hit.Provenance = ProvenanceFromMetadata(hit.Metadata)
+		hit = ApplyHitAttribution(hit)
 		hit.Tier = EffectiveHitTier(hit)
 		hit.ExpiresAt = EffectiveHitExpiresAt(hit)
 		hit.Relevance = normalizedRelevance(hit)
@@ -344,6 +344,9 @@ func (r *Router) PutBatchWithPolicy(ctx context.Context, items []MemoryItem, pol
 		return PutResult{}, nil
 	}
 	items = applyPutPolicy(items, policy)
+	for i := range items {
+		items[i] = PrepareProviderItem(items[i])
+	}
 	items = admitLongTermMemories(items)
 	return collectPutResponses(putProviders(ctx, writable, items))
 }

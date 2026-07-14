@@ -118,6 +118,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 	hits := hitsFromResponse(response)
 	for i := range hits {
 		hits[i].Provider = p.name
+		hits[i] = memory.ApplyHitAttribution(hits[i])
 	}
 	return hits, nil
 }
@@ -394,6 +395,7 @@ func metadataFromResult(object map[string]any) map[string]string {
 }
 
 func toMem0Metadata(item memory.MemoryItem) map[string]any {
+	item = memory.PrepareProviderItem(item)
 	metadata := make(map[string]any)
 	addNonEmpty(metadata, "paxm_id", item.ID)
 	addNonEmpty(metadata, "paxm_source", item.Source)

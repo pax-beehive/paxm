@@ -167,12 +167,15 @@ func TestZepMetadataPrioritizesProvenanceWithinProviderLimit(t *testing.T) {
 	item := memory.ApplyProvenance(memory.MemoryItem{ID: "memory", Source: "test", Tier: memory.TierLTM, Metadata: metadata}, memory.Provenance{
 		UserID: "todd", AgentID: "codex-todd", ScopeType: "team", ScopeID: "pax",
 	})
+	item.Origin.SessionID = "session-7"
+	item.Origin.TurnID = "turn-42"
 	got := toZepMetadata(item)
 	if len(got) != 10 {
 		t.Fatalf("metadata field count = %d, want 10: %#v", len(got), got)
 	}
 	for key, want := range map[string]string{
 		memory.MetadataUserID: "todd", memory.MetadataAgentID: "codex-todd",
+		memory.MetadataSessionID: "session-7", memory.MetadataTurnID: "turn-42",
 		memory.MetadataScopeType: "team", memory.MetadataScopeID: "pax",
 	} {
 		if got[key] != want {
@@ -204,7 +207,11 @@ func TestSearchMapsGraphResults(t *testing.T) {
 					CreatedAt: "2026-07-09T01:02:03Z",
 					Relevance: &episodeRelevance,
 					Score:     &episodeScore,
-					Metadata:  map[string]interface{}{"project": "paxm"},
+					Metadata: map[string]interface{}{
+						"project": "paxm", memory.MetadataUserID: "todd", memory.MetadataAgentID: "codex",
+						memory.MetadataSessionID: "session-7", memory.MetadataTurnID: "turn-42",
+						memory.MetadataScopeType: "team", memory.MetadataScopeID: "pax",
+					},
 				},
 			},
 			Edges: []*zepgo.EntityEdge{
@@ -293,6 +300,9 @@ func TestSearchMapsGraphResults(t *testing.T) {
 	}
 	if hits[1].ID != "episode-1" || hits[1].Relevance != 0.9 || hits[1].RawScore == nil || *hits[1].RawScore != 2 {
 		t.Fatalf("episode hit was not mapped: %#v", hits[1])
+	}
+	if hits[1].Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) || hits[1].Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
+		t.Fatalf("episode attribution was not restored: %#v", hits[1])
 	}
 	if hits[2].ID != "edge-1" || hits[2].Relevance != 0.2 || hits[2].Metadata["zep_edge_name"] != "USES" {
 		t.Fatalf("edge hit was not normalized: %#v", hits[2])

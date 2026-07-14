@@ -21,6 +21,22 @@ func jsonResponse(body string) *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
 
+func TestMemOSMetadataIncludesStructuredAttribution(t *testing.T) {
+	metadata := itemMetadata(memory.MemoryItem{
+		Text:   "remember",
+		Origin: memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"},
+		Scope:  memory.MemoryScope{Type: "team", ID: "pax"},
+	})
+	for key, want := range map[string]string{
+		memory.MetadataUserID: "todd", memory.MetadataAgentID: "codex", memory.MetadataSessionID: "session-7",
+		memory.MetadataTurnID: "turn-42", memory.MetadataScopeType: "team", memory.MetadataScopeID: "pax",
+	} {
+		if metadata[key] != want {
+			t.Fatalf("metadata[%q] = %#v, want %q", key, metadata[key], want)
+		}
+	}
+}
+
 func TestSelfHostedContract(t *testing.T) {
 	client := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
@@ -46,7 +62,7 @@ func TestCloudContract(t *testing.T) {
 	client := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/search/memory":
-			return jsonResponse(`{"code":200,"data":{"memory_detail_list":[{"memory_id":"hit-1","memory_value":"cloud memory","relativity":0.7}]}}`), nil
+			return jsonResponse(`{"code":200,"data":{"memory_detail_list":[{"memory_id":"hit-1","memory_value":"cloud memory","relativity":0.7,"metadata":{"paxm_user_id":"todd","paxm_agent_id":"codex","paxm_session_id":"session-7","paxm_turn_id":"turn-42","paxm_scope_type":"team","paxm_scope_id":"pax"}}]}}`), nil
 		case "/add/message":
 			return jsonResponse(`{"code":200,"data":{"message_id":"receipt-1"}}`), nil
 		default:
@@ -60,6 +76,13 @@ func TestCloudContract(t *testing.T) {
 	}
 	provider := &CloudProvider{provider: core}
 	contracttest.Run(t, provider, contracttest.Expectation{Name: "cloud-test", Item: memory.MemoryItem{Text: "cloud memory"}, Query: memory.SearchQuery{Text: "cloud"}, RefID: "receipt-1", HitID: "hit-1", HitText: "cloud memory"})
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "cloud", Limit: 1})
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("search hits = %#v err=%v", hits, err)
+	}
+	if hits[0].Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) || hits[0].Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
+		t.Fatalf("cloud attribution was not restored: %#v", hits[0])
+	}
 }
 
 func TestSelfHostedSearchMapsRequestAndResponse(t *testing.T) {
@@ -78,7 +101,7 @@ func TestSelfHostedSearchMapsRequestAndResponse(t *testing.T) {
 		if len(cubes) != 1 || cubes[0] != "cube-1" {
 			t.Fatalf("unexpected cube scope: %#v", cubes)
 		}
-		return jsonResponse(`{"code":0,"data":{"text_mem":[{"cube_id":"cube-1","memories":[{"id":"m1","memory":"Todd likes tea","metadata":{"relativity":0.82,"paxm_tier":"ltm"}}]}]}}`), nil
+		return jsonResponse(`{"code":0,"data":{"text_mem":[{"cube_id":"cube-1","memories":[{"id":"m1","memory":"Todd likes tea","metadata":{"relativity":0.82,"paxm_tier":"ltm","paxm_user_id":"todd","paxm_agent_id":"codex","paxm_session_id":"session-7","paxm_turn_id":"turn-42","paxm_scope_type":"team","paxm_scope_id":"pax"}}]}]}}`), nil
 	})
 	provider, err := newProvider("local", config.ProviderConfig{BaseURL: "http://memos.test", APIKey: "secret", UserID: "u1", MemCubeID: "cube-1", SearchMode: "mixture"}, selfHosted, client, func() string { return "generated" })
 	if err != nil {
@@ -90,6 +113,9 @@ func TestSelfHostedSearchMapsRequestAndResponse(t *testing.T) {
 	}
 	if len(hits) != 1 || hits[0].ID != "m1" || hits[0].Text != "Todd likes tea" || hits[0].Score != 0.82 || hits[0].RawScoreKind != "memos_relativity" {
 		t.Fatalf("unexpected hits: %#v", hits)
+	}
+	if hits[0].Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) || hits[0].Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
+		t.Fatalf("attribution was not restored: %#v", hits[0])
 	}
 }
 

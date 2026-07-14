@@ -600,14 +600,18 @@ use the prompt as their stable identity basis while retaining the full rendered
 hook template as stored evidence.
 
 Buffered hook writes use the completed episode as an unbounded turn boundary.
-SQLite adds `session_id`, `turn_id`, `started_at`, and `ended_at` to that turn's
-stored metadata. Historical SQLite backfill also keeps one item per normalized
+All attribution-capable providers receive canonical `paxm_session_id` and
+`paxm_turn_id` metadata. SQLite also adds `session_id`, `turn_id`, `started_at`,
+and `ended_at` to that turn's stored metadata. Historical SQLite backfill also keeps one item per normalized
 turn; remote providers keep the existing bounded multipart behavior. These are
 internal behaviors and have no user-facing tuning knobs.
 
 ## Agents
 
 `agents.<name>.agent_id` identifies the producing integration in provenance.
+At a native `session_start`, paxm injects `identity.user_id`, this agent ID, and
+the runtime-supplied session ID once as session identity. This bootstrap does
+not replace the origin metadata stored on individual memories.
 Passive writes resolve it from the hook target. Start MCP with
 `paxm mcp serve --agent <name>` to attach the corresponding configured identity
 to explicit MCP writes. The MCP tool itself cannot supply an arbitrary user or

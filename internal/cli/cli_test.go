@@ -23,6 +23,7 @@ import (
 	"github.com/pax-beehive/paxm/internal/facade"
 	"github.com/pax-beehive/paxm/internal/memory"
 	"github.com/pax-beehive/paxm/internal/telemetry"
+	"github.com/pax-beehive/paxm/internal/tools"
 )
 
 func TestEvalProviderJSONRPCPublicCommand(t *testing.T) {
@@ -1006,6 +1007,85 @@ func TestInternalCodexUserInputHookEmitsNativeContext(t *testing.T) {
 	}
 	if output.Target != "" || output.Event != "" {
 		t.Fatalf("internal paxm hook fields leaked into Codex output: %#v", output)
+	}
+}
+
+func TestInternalSessionStartInjectsConfiguredIdentity(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	cfg.Identity.UserID = "todd"
+	codex := cfg.Agents["codex"]
+	codex.Enabled = true
+	codex.AgentID = "codex-todd"
+	sessionStart := codex.Hooks["session_start"]
+	sessionStart.Write.Enabled = false
+	sessionStart.Recall.Enabled = false
+	codex.Hooks["session_start"] = sessionStart
+	cfg.Agents["codex"] = codex
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	event := strings.NewReader(`{"session_id":"session-7","cwd":"/tmp/project"}`)
+	code := Main([]string{"--config", configPath, "__hook", "--target", "codex", "--event", "session_start", "--json"}, event, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("hook failed with code %d: %s", code, stderr.String())
+	}
+	var output struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("session bootstrap is not JSON: %v\n%s", err, stdout.String())
+	}
+	if output.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Fatalf("hook event = %#v", output)
+	}
+	for _, value := range []string{`<paxm-session-identity version="1">`, `"user_id":"todd"`, `"agent_id":"codex-todd"`, `"session_id":"session-7"`} {
+		if !strings.Contains(output.HookSpecificOutput.AdditionalContext, value) {
+			t.Fatalf("identity context omitted %q: %#v", value, output)
+		}
+	}
+}
+
+func TestSessionIdentityFallbackAndPlainBootstrap(t *testing.T) {
+	cfg := config.Config{Agents: map[string]config.AgentConfig{"claude": {}}}
+	identity := sessionIdentity(cfg, capture.Event{Target: "claude"})
+	if identity.AgentID != "unknown" || identity.SessionID != "unknown" {
+		t.Fatalf("fallback identity = %#v", identity)
+	}
+	var output bytes.Buffer
+	if err := writeSessionIdentityBootstrap(&output, "claude", identity, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `<paxm-session-identity version="1">`) || !strings.Contains(output.String(), `"session_id":"unknown"`) {
+		t.Fatalf("plain bootstrap = %q", output.String())
+	}
+}
+
+func TestWriteHookResultFormatsJSONMarkdownAndEmptyResults(t *testing.T) {
+	result := capture.Result{Target: "claude", Event: "user_input", Recall: &tools.RecallResult{
+		Query: "memory", Hits: []memory.MemoryHit{{Provider: "sqlite", ID: "one", Text: "remember this", Score: 0.9}},
+	}}
+	for name, jsonOut := range map[string]bool{"json": true, "markdown": false} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			r := runner{stdout: &output}
+			if err := r.writeHookResult(result, jsonOut, false); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), "remember this") {
+				t.Fatalf("output = %q", output.String())
+			}
+		})
+	}
+	var output bytes.Buffer
+	if err := (runner{stdout: &output}).writeHookResult(capture.Result{Skipped: true}, false, false); err != nil || output.Len() != 0 {
+		t.Fatalf("empty result output = %q err=%v", output.String(), err)
 	}
 }
 

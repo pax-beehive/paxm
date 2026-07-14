@@ -77,6 +77,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 			Score: hit.Score, Relevance: hit.Score,
 			RawScore: hit.RawScore, RawScoreKind: hit.RawScoreKind,
 		}
+		result[i] = memory.ApplyHitAttribution(result[i])
 	}
 	return result, nil
 }
@@ -105,6 +106,7 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 	}
 	now := time.Now().UTC()
 	for i := range items {
+		items[i] = memory.PrepareProviderItem(items[i])
 		if strings.TrimSpace(items[i].Text) == "" {
 			return nil, errors.New("memory text is required")
 		}

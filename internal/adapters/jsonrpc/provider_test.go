@@ -84,6 +84,33 @@ func TestProviderSearchPutBatchAndHealth(t *testing.T) {
 	}
 }
 
+func TestProviderMapsStructuredAttribution(t *testing.T) {
+	provider := newHelperProvider(t, "put-attribution")
+	item := memory.MemoryItem{
+		Text:       "remember this",
+		Provenance: memory.Provenance{UserID: "todd", AgentID: "codex", ScopeType: "team", ScopeID: "pax"},
+		Turn:       &memory.TurnContext{SessionID: "session-7", TurnID: "turn-42"},
+	}
+	if _, err := provider.Put(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "paxm config"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("hits = %#v", hits)
+	}
+	got := memory.ApplyHitAttribution(hits[0])
+	if got.Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) {
+		t.Fatalf("origin = %#v", got.Origin)
+	}
+	if got.Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
+		t.Fatalf("scope = %#v", got.Scope)
+	}
+}
+
 func TestPutBatchFallsBackWhenPluginDoesNotSupportBatch(t *testing.T) {
 	t.Parallel()
 
@@ -174,8 +201,19 @@ func TestJSONRPCPluginHelper(t *testing.T) {
 			Score:     0.9,
 			Metadata:  query.Metadata,
 			CreatedAt: parseTimeForHelper(createdAt),
+			Origin:    memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"},
+			Scope:     memory.MemoryScope{Type: "team", ID: "pax"},
 		}}})
 	case methodPut:
+		if os.Getenv("PAXM_JSONRPC_PLUGIN_MODE") == "put-attribution" {
+			var item memory.MemoryItem
+			if err := remarshal(request.Params, &item); err != nil {
+				t.Fatal(err)
+			}
+			if item.Origin.SessionID != "session-7" || item.Origin.TurnID != "turn-42" || item.Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
+				t.Fatalf("put attribution = origin %#v scope %#v", item.Origin, item.Scope)
+			}
+		}
 		response.Result = mustRawJSON(refsResult{Ref: &memory.MemoryRef{ID: "put-1"}})
 	case methodPutBatch:
 		if os.Getenv("PAXM_JSONRPC_PLUGIN_MODE") == "nobatch" {

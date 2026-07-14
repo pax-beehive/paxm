@@ -79,6 +79,15 @@ Current provider adapters:
   contract with JSON-RPC 2.0 methods while paxm keeps routing, thresholds, and
   ranking in core.
 
+Provider-neutral memories carry separate `origin` (user, agent, session, turn)
+and `scope` (visibility type and ID) fields. The router mirrors these values to
+canonical `paxm_*` metadata for adapters whose native API only supports string
+metadata, and reconstructs structured attribution on recall. Attribution is
+memory data, not caller authentication; authorization policy must use trusted
+runtime identity rather than these returned fields.
+This change does not add caller identity to `SearchQuery` or replace existing
+recall-profile/provider-native authorization policy.
+
 SQLite retrieval is a deep module under `internal/adapters/sqlite/retrieval`.
 It owns lexical analysis, candidate SQL, scoring, and result ordering behind one
 `Search` operation using retrieval-local request and hit types. The SQLite
@@ -321,6 +330,11 @@ hooks directory. The state stores only recent session keys and timestamps; it
 does not store prompt text.
 
 `session_start` appends a write event to the durable capture queue.
+For integrations with a native session-start hook, paxm also injects one
+`paxm-session-identity` block containing the configured user ID, configured
+agent ID, and runtime-supplied session ID. This tells the agent its current
+identity without repeating it on every recalled memory; the block is runtime
+context and is not used as memory provenance.
 
 The queue is a SQLite WAL-backed event log partitioned by agent session. Hook
 callers acknowledge after the event transaction commits; they do not wait for a
@@ -332,10 +346,10 @@ maximum episode age.
 
 The episode is the durable turn boundary, not a size-based text window. Its
 events are not split by rendered size; mixed write profiles may still produce
-one item per profile. For SQLite, paxm records `session_id`, `turn_id`,
-`started_at`, and `ended_at` on the stored memory. These fields stay internal to
-the SQLite adapter rather than becoming a metadata requirement for remote
-providers. SQLite may return a query-focused excerpt for an unusually large
+one item per profile. Paxm records the originating `session_id` and `turn_id`
+as provider-neutral origin data and canonical metadata. SQLite additionally
+records `started_at` and `ended_at`; remote providers may preserve those times
+as ordinary metadata. SQLite may return a query-focused excerpt for an unusually large
 turn, but the complete turn remains stored as the evidence record.
 
 Each episode creates one independent delivery per write-profile provider. A

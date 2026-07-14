@@ -69,6 +69,33 @@ func writeCodexUserPromptHookOutput(w io.Writer, result capture.Result) error {
 	})
 }
 
+func sessionIdentity(cfg config.Config, event capture.Event) memory.SessionIdentity {
+	agentID := strings.TrimSpace(cfg.Agents[event.Target].AgentID)
+	if agentID == "" {
+		agentID = "unknown"
+	}
+	sessionID := strings.TrimSpace(event.Metadata["session_id"])
+	if sessionID == "" {
+		sessionID = "unknown"
+	}
+	return memory.SessionIdentity{UserID: strings.TrimSpace(cfg.Identity.UserID), AgentID: agentID, SessionID: sessionID}
+}
+
+func writeSessionIdentityBootstrap(w io.Writer, target string, identity memory.SessionIdentity, jsonOut bool) error {
+	payload, err := json.Marshal(identity)
+	if err != nil {
+		return err
+	}
+	context := "<paxm-session-identity version=\"1\">\n" + string(payload) + "\n</paxm-session-identity>"
+	if target == "codex" && jsonOut {
+		return writeJSON(w, codexUserPromptHookOutput{HookSpecificOutput: codexUserPromptHookSpecificOutput{
+			HookEventName: "SessionStart", AdditionalContext: context,
+		}})
+	}
+	_, err = fmt.Fprintln(w, context)
+	return err
+}
+
 type hookBufferRequest struct {
 	Action  string          `json:"action,omitempty"`
 	EventID string          `json:"event_id,omitempty"`
@@ -148,8 +175,14 @@ func (r runner) runInternalHook(args []string) error {
 	if outcome.BufferError != nil {
 		_, _ = fmt.Fprintf(r.stderr, "paxm hook buffer skipped: %s\n", outcome.BufferError)
 	}
-	if err != nil || outcome.Ignored || outcome.Result == nil {
+	if err != nil || outcome.Ignored {
 		return err
+	}
+	if outcome.Event.Event == "session_start" {
+		return writeSessionIdentityBootstrap(r.stdout, outcome.Event.Target, sessionIdentity(cfg, outcome.Event), *jsonOut)
+	}
+	if outcome.Result == nil {
+		return nil
 	}
 	codexNative := *jsonOut && outcome.Event.Target == "codex" && outcome.Event.Event == "user_input"
 	return r.writeHookResult(*outcome.Result, *jsonOut, codexNative)

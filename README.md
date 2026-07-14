@@ -227,6 +227,11 @@ so provider latency does not block the agent.
 Read the detailed [architecture](docs/architecture.md) and
 [provider adapter contract](docs/provider-adapter-contract.md).
 
+Stored memories distinguish their `origin` (user, agent, session, and turn)
+from their visibility `scope`. Providers that advertise attribution support
+must round-trip both values; see the
+[JSON-RPC provider protocol](docs/jsonrpc-provider-protocol.md#origin-scope-and-trust).
+
 ## Agents and providers
 
 ### Agent surfaces
