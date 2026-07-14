@@ -9,10 +9,29 @@ Default config path for new installs:
 `paxm` can still load legacy JSON configs for compatibility, but setup writes
 YAML unless an explicit `.json` path is provided.
 
+## Identity and provenance
+
+`identity.user_id` is the stable user identity attached to paxm writes. Each
+configured agent also has an `agent_id`. Setup derives the default as
+`<agent>-<user_id>` (for example, `codex-todd`) and lets an interactive user
+override it. IDs are normalized to lower-case slugs. Existing explicit agent
+IDs remain stable when the user ID later changes.
+
+Interactive setup also accepts optional team IDs. Non-interactive setup can use
+`--user-id todd --team-id pax-core`; each team ID creates a durable
+`team-<id>` write profile with matching team provenance.
+
+These fields describe who produced a memory. They do not implement access
+control. Provider-native fields such as a Mem0 `user_id` or `agent_id` remain
+provider routing and ACL inputs; paxm does not replace them with provenance.
+
 ## Shape
 
 ```yaml
 version: 1
+
+identity:
+  user_id: todd
 
 providers:
   sqlite:
@@ -120,6 +139,9 @@ recall_profiles:
 write_profiles:
   default:
     tier: ltm
+    scope:
+      type: personal
+      id: todd
     providers:
       - name: sqlite
         required: true
@@ -127,12 +149,18 @@ write_profiles:
   stm:
     tier: stm
     expires_after: 24h
+    scope:
+      type: personal
+      id: todd
     providers:
       - name: sqlite
         required: true
         timeout: 30s
   ltm:
     tier: ltm
+    scope:
+      type: personal
+      id: todd
     providers:
       - name: sqlite
         required: true
@@ -141,6 +169,7 @@ write_profiles:
 agents:
   claude:
     enabled: false
+    agent_id: claude-todd
     active_recall:
       enabled: true
       profile: default
@@ -550,15 +579,22 @@ positive Go duration in `expires_after`, and an `ltm` profile must not set
 `expires_after`. Invalid configuration fails before an existing config file is
 overwritten.
 
+Each write profile may also declare a provenance `scope` with type `personal`
+or `team` and a stable ID. Scope is attached to stored metadata and shown on
+every recalled or injected memory, but it never filters recall. When setup
+creates profiles for a configured user, omitted scopes default to
+`personal:<identity.user_id>`. Memories written before provenance support are
+reported as `scope: unknown`.
+
 `paxm remember` uses the `default` write profile unless another profile is
 selected. Agent skills should use `--profile stm` for short-lived task state and
 `--profile ltm` for durable preferences, decisions, or recurring fixes.
 
 For LTM writes without an explicit ID, paxm derives a stable ID from normalized
-text and optional `workspace` metadata. SQLite consolidates exact repeats and
+text, optional `workspace` metadata, and provenance scope. SQLite consolidates exact repeats and
 stores lifecycle metadata under `paxm_fingerprint`, `paxm_occurrences`,
 `paxm_first_seen_at`, and `paxm_last_seen_at`. Different workspaces remain
-separate. STM and explicit-ID writes are not content-addressed. Near-duplicate or
+separate, and identical personal and team memories remain distinct. STM and explicit-ID writes are not content-addressed. Near-duplicate or
 contradictory wording is not merged automatically. Passive `user_input` writes
 use the prompt as their stable identity basis while retaining the full rendered
 hook template as stored evidence.
@@ -570,6 +606,12 @@ turn; remote providers keep the existing bounded multipart behavior. These are
 internal behaviors and have no user-facing tuning knobs.
 
 ## Agents
+
+`agents.<name>.agent_id` identifies the producing integration in provenance.
+Passive writes resolve it from the hook target. Start MCP with
+`paxm mcp serve --agent <name>` to attach the corresponding configured identity
+to explicit MCP writes. The MCP tool itself cannot supply an arbitrary user or
+agent ID.
 
 `agents.<name>.active_recall` controls explicit recall calls made by that agent
 or by a skill running inside that agent. Setup preserves this field for

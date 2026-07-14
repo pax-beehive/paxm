@@ -315,6 +315,7 @@ func turnItems(turn sessions.Turn, preserve bool) []tools.RememberInput {
 			ID:        id,
 			Text:      part,
 			Source:    "backfill:" + turn.Agent,
+			AgentName: turn.Agent,
 			Metadata:  metadata,
 			CreatedAt: turn.CreatedAt,
 			Turn: &memory.TurnContext{

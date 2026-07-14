@@ -21,6 +21,7 @@ const protocolVersion = "2025-11-25"
 
 type Options struct {
 	ConfigPath string
+	AgentName  string
 	Version    string
 	Stdin      io.Reader
 	Stdout     io.Writer
@@ -29,6 +30,7 @@ type Options struct {
 
 type Server struct {
 	configPath string
+	agentName  string
 	version    string
 	stdin      io.Reader
 	stdout     io.Writer
@@ -59,6 +61,7 @@ func NewServer(opts Options) *Server {
 	}
 	return &Server{
 		configPath: opts.ConfigPath,
+		agentName:  strings.TrimSpace(opts.AgentName),
 		version:    version,
 		stdin:      stdin,
 		stdout:     stdout,
@@ -353,11 +356,12 @@ func (s *Server) callRemember(ctx context.Context, raw json.RawMessage) toolResu
 	}
 	started := time.Now()
 	result, opErr := rt.Tools.Remember(ctx, tools.RememberInput{
-		ID:       args.ID,
-		Text:     args.Text,
-		Profile:  args.Profile,
-		Source:   source,
-		Metadata: args.Metadata,
+		ID:        args.ID,
+		Text:      args.Text,
+		Profile:   args.Profile,
+		Source:    source,
+		Metadata:  args.Metadata,
+		AgentName: s.agentName,
 	})
 	if err := s.recordRemember(rt, args.Profile, 1, result, time.Since(started), opErr); err != nil {
 		_, _ = fmt.Fprintf(s.stderr, "paxm telemetry skipped: %s\n", err)

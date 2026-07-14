@@ -1073,6 +1073,9 @@ func TestHookWriteItemRendersTemplateAndMetadata(t *testing.T) {
 	if item.Source != "hook:codex:user_input" || item.Profile != "default" {
 		t.Fatalf("unexpected hook write routing: %#v", item)
 	}
+	if item.AgentName != "codex" {
+		t.Fatalf("hook agent identity = %q", item.AgentName)
+	}
 	if item.Metadata["hook_event"] != "user_input" || item.Metadata["workspace"] != "/tmp/project" || item.Metadata["project"] != "paxm" {
 		t.Fatalf("unexpected hook metadata: %#v", item.Metadata)
 	}

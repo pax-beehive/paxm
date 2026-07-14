@@ -79,6 +79,14 @@ type MemoryItem struct {
 	Tier          MemoryTier        `json:"tier,omitempty"`
 	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
 	Turn          *TurnContext      `json:"-"`
+	Provenance    Provenance        `json:"provenance,omitempty"`
+}
+
+type Provenance struct {
+	UserID    string `json:"user_id,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	ScopeType string `json:"scope_type,omitempty"`
+	ScopeID   string `json:"scope_id,omitempty"`
 }
 
 // TurnContext carries capture boundaries to providers without exposing them as
@@ -115,6 +123,7 @@ type MemoryHit struct {
 	CreatedAt    time.Time         `json:"created_at,omitempty"`
 	Tier         MemoryTier        `json:"tier,omitempty"`
 	ExpiresAt    *time.Time        `json:"expires_at,omitempty"`
+	Provenance   Provenance        `json:"provenance,omitempty"`
 	rankingScore float64
 }
 

@@ -24,6 +24,7 @@ import (
 	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
 	"github.com/pax-beehive/paxm/internal/config"
 	paxeval "github.com/pax-beehive/paxm/internal/eval"
+	"github.com/pax-beehive/paxm/internal/memory"
 	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
 	"github.com/pax-beehive/paxm/internal/telemetry"
 	"github.com/pax-beehive/paxm/internal/tools"
@@ -34,6 +35,8 @@ func (r runner) runSetup(args []string) error {
 	fs.SetOutput(r.stderr)
 	force := fs.Bool("force", false, "overwrite an existing config")
 	yes := fs.Bool("yes", false, "accept default setup answers")
+	userID := fs.String("user-id", "", "stable user identity")
+	teamIDs := fs.String("team-id", "", "comma-separated team scope IDs")
 	integration := fs.String("integration", config.IntegrationOwnerPaxm, "hook owner: paxm, codex-plugin, or claude-plugin")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -44,7 +47,7 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	prompter := newSetupPrompter(r.stdin, r.stdout)
-	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration)
+	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration, *userID, *teamIDs)
 	if err != nil || !proceed {
 		return err
 	}
@@ -75,7 +78,7 @@ type setupSelection struct {
 	selectedHooks map[string]bool
 }
 
-func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration string) (setupSelection, bool, error) {
+func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration, userID, teamIDs string) (setupSelection, bool, error) {
 	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, force, yes)
 	if err != nil || !proceed {
 		return setupSelection{}, false, err
@@ -88,6 +91,18 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
 	pluginTarget := setupPluginTarget(integration)
 	previousEnabled := enabledAgents(cfg)
+	if strings.TrimSpace(userID) != "" {
+		cfg.Identity.UserID = config.SlugID(userID)
+		if cfg.Identity.UserID == "" {
+			return setupSelection{}, false, errors.New("setup user ID must contain letters or numbers")
+		}
+	}
+	ensureSetupIdentity(&cfg)
+	if strings.TrimSpace(teamIDs) != "" {
+		if err := configureTeamWriteProfiles(&cfg, teamIDs); err != nil {
+			return setupSelection{}, false, err
+		}
+	}
 	constrainPluginHooks(selectedHooks, pluginTarget)
 	if !yes {
 		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
@@ -182,6 +197,11 @@ func (r runner) confirmSetupOverwrite(path string, prompter *setupPrompter, forc
 
 func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Config, selectedProviders, selectedHooks map[string]bool) (map[string]bool, map[string]bool, bool, error) {
 	var err error
+	if prompter.interactive {
+		if err := promptSetupIdentity(prompter, cfg); err != nil {
+			return nil, nil, false, r.finishSetupPrompt(err)
+		}
+	}
 	selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(*cfg), selectedProviders)
 	if err != nil {
 		return nil, nil, false, r.finishSetupPrompt(err)
@@ -202,6 +222,70 @@ func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Confi
 		return nil, nil, false, r.finishSetupPrompt(err)
 	}
 	return selectedProviders, selectedHooks, true, nil
+}
+
+func ensureSetupIdentity(cfg *config.Config) {
+	if strings.TrimSpace(cfg.Identity.UserID) == "" {
+		cfg.Identity.UserID = config.SlugID(firstNonEmpty(os.Getenv("USER"), "user"))
+	}
+}
+
+func promptSetupIdentity(prompter *setupPrompter, cfg *config.Config) error {
+	ensureSetupIdentity(cfg)
+	userID, err := prompter.text("User ID", cfg.Identity.UserID)
+	if err != nil {
+		return err
+	}
+	userID = config.SlugID(userID)
+	if userID == "" {
+		return errors.New("setup requires a user ID")
+	}
+	cfg.Identity.UserID = userID
+	teamIDs, err := prompter.text("Team IDs (comma-separated, optional)", configuredTeamIDs(*cfg))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(teamIDs) == "" {
+		return nil
+	}
+	return configureTeamWriteProfiles(cfg, teamIDs)
+}
+
+func configureTeamWriteProfiles(cfg *config.Config, values string) error {
+	base, ok := cfg.WriteProfiles["ltm"]
+	if !ok {
+		base = cfg.WriteProfiles["default"]
+	}
+	seen := make(map[string]bool)
+	for _, value := range strings.Split(values, ",") {
+		teamID := config.SlugID(value)
+		if teamID == "" {
+			return fmt.Errorf("team ID %q must contain letters or numbers", strings.TrimSpace(value))
+		}
+		if seen[teamID] {
+			continue
+		}
+		seen[teamID] = true
+		profile := base
+		profile.Tier = "ltm"
+		profile.ExpiresAfter = ""
+		profile.Scope = config.MemoryScopeConfig{Type: "team", ID: teamID}
+		cfg.WriteProfiles["team-"+teamID] = profile
+	}
+	return nil
+}
+
+func configuredTeamIDs(cfg config.Config) string {
+	var ids []string
+	seen := make(map[string]bool)
+	for _, profile := range cfg.WriteProfiles {
+		if profile.Scope.Type == "team" && profile.Scope.ID != "" && !seen[profile.Scope.ID] {
+			ids = append(ids, profile.Scope.ID)
+			seen[profile.Scope.ID] = true
+		}
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
 }
 
 func applySetupSelections(cfg *config.Config, selectedProviders, selectedHooks map[string]bool, yes bool) {
@@ -2689,6 +2773,17 @@ func writeRecallMarkdown(w io.Writer, result tools.RecallResult) {
 	}
 	for i, hit := range result.Hits {
 		_, _ = fmt.Fprintf(w, "### Memory %d (%s)\n", i+1, hit.Provider)
+		provenance := hit.Provenance
+		if provenance == (memory.Provenance{}) {
+			provenance = memory.ProvenanceFromMetadata(hit.Metadata)
+		}
+		_, _ = fmt.Fprintf(w, "Scope: %s\n", formatMemoryScope(provenance))
+		if provenance.UserID != "" {
+			_, _ = fmt.Fprintf(w, "User: %s\n", provenance.UserID)
+		}
+		if provenance.AgentID != "" {
+			_, _ = fmt.Fprintf(w, "Agent: %s\n", provenance.AgentID)
+		}
 		_, _ = fmt.Fprintf(w, "Score: %.4f\n", hit.Score)
 		_, _ = fmt.Fprintf(w, "Relevance: %.4f\n", hit.Relevance)
 		if hit.RawScore != nil {
@@ -2706,6 +2801,13 @@ func writeRecallMarkdown(w io.Writer, result tools.RecallResult) {
 		_, _ = fmt.Fprintln(w, strings.TrimSpace(hit.Text))
 		_, _ = fmt.Fprintln(w)
 	}
+}
+
+func formatMemoryScope(provenance memory.Provenance) string {
+	if provenance.ScopeType == "" || provenance.ScopeID == "" {
+		return "unknown"
+	}
+	return provenance.ScopeType + ":" + provenance.ScopeID
 }
 
 func writeRecallContextMarkdown(w io.Writer, result tools.RecallResult, mode string) {

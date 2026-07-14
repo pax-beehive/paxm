@@ -299,7 +299,7 @@ func TestCLISetupCodexPluginOwnsHooks(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	if code := Main([]string{"--config", configPath, "setup", "--integration", "codex-plugin"}, strings.NewReader("\n\n\n\n\n"), &stdout, &stderr); code != 0 {
+	if code := Main([]string{"--config", configPath, "setup", "--integration", "codex-plugin", "--user-id", "Todd", "--team-id", "PAX Core"}, strings.NewReader("\n\n\n\n\n"), &stdout, &stderr); code != 0 {
 		t.Fatalf("plugin setup failed with code %d: %s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "Codex hooks are owned by the paxm-memory plugin") {
@@ -318,6 +318,15 @@ func TestCLISetupCodexPluginOwnsHooks(t *testing.T) {
 	}
 	if owner := cfg.Agents["codex"].Integration.Owner; owner != config.IntegrationOwnerCodexPlugin {
 		t.Fatalf("Codex integration owner = %q, want %q", owner, config.IntegrationOwnerCodexPlugin)
+	}
+	if cfg.Identity.UserID != "todd" || cfg.Agents["codex"].AgentID != "codex-todd" {
+		t.Fatalf("setup identity = %#v agent=%#v", cfg.Identity, cfg.Agents["codex"])
+	}
+	if scope := cfg.WriteProfiles["ltm"].Scope; scope != (config.MemoryScopeConfig{Type: "personal", ID: "todd"}) {
+		t.Fatalf("default write scope = %#v", scope)
+	}
+	if scope := cfg.WriteProfiles["team-pax-core"].Scope; scope != (config.MemoryScopeConfig{Type: "team", ID: "pax-core"}) {
+		t.Fatalf("team write scope = %#v", scope)
 	}
 }
 
@@ -1487,6 +1496,9 @@ func TestWriteRecallMarkdownShowsScores(t *testing.T) {
 				RawScore:     &rawScore,
 				RawScoreKind: "keyword_ratio",
 				Source:       "cli",
+				Provenance: memory.Provenance{
+					UserID: "todd", AgentID: "codex-todd", ScopeType: "team", ScopeID: "pax",
+				},
 			},
 		},
 	})
@@ -1496,6 +1508,9 @@ func TestWriteRecallMarkdownShowsScores(t *testing.T) {
 		"Relevance: 0.7654",
 		"Raw score: 0.4200 (keyword_ratio)",
 		"Source: cli",
+		"Scope: team:pax",
+		"User: todd",
+		"Agent: codex-todd",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("recall markdown missing %q: %s", expected, output)

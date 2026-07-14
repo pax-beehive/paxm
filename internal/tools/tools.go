@@ -34,6 +34,7 @@ type RememberInput struct {
 	Tier          memory.MemoryTier   `json:"tier,omitempty"`
 	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
 	Turn          *memory.TurnContext `json:"-"`
+	AgentName     string              `json:"agent_name,omitempty"`
 }
 type RememberResult struct {
 	Refs           []memory.MemoryRef     `json:"refs"`
@@ -69,7 +70,7 @@ func (s *Engine) Recall(ctx context.Context, input RecallInput) (RecallResult, e
 	if err != nil {
 		return RecallResult{}, err
 	}
-	value, err := s.router.SearchWithPolicy(ctx, memory.SearchQuery{Text: query, Metadata: input.Meta}, policy)
+	value, err := s.router.SearchWithPolicy(ctx, memory.SearchQuery{Text: query, Metadata: memory.WithoutProvenanceMetadata(input.Meta)}, policy)
 	result := RecallResult{Query: query, Hits: value.Hits, ProviderErrors: value.ProviderErrors, ProviderRecalls: value.ProviderRecalls}
 	if errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
@@ -85,6 +86,7 @@ func (s *Engine) Remember(ctx context.Context, input RememberInput) (RememberRes
 	if err != nil {
 		return RememberResult{}, err
 	}
+	item = memory.ApplyProvenance(item, s.provenance(profile, input.AgentName))
 	value, err := s.router.PutWithPolicy(ctx, item, policy)
 	return RememberResult{Refs: value.Refs, ProviderErrors: value.ProviderErrors}, err
 }
@@ -102,6 +104,7 @@ func (s *Engine) rememberBatch(ctx context.Context, provider string, input Remem
 	for _, inputItem := range input.Items {
 		item, profile, ok := itemFromInput(inputItem)
 		if ok {
+			item = memory.ApplyProvenance(item, s.provenance(profile, inputItem.AgentName))
 			grouped[profile] = append(grouped[profile], item)
 		}
 	}
@@ -127,6 +130,33 @@ func (s *Engine) rememberBatch(ctx context.Context, provider string, input Remem
 		}
 	}
 	return result, errors.Join(errs...)
+}
+
+func (s *Engine) provenance(profileName, agentName string) memory.Provenance {
+	profile, ok := s.cfg.WriteProfiles[profileName]
+	if !ok {
+		return memory.Provenance{}
+	}
+	agentID := ""
+	agentName = strings.TrimSpace(agentName)
+	if agent, exists := s.cfg.Agents[agentName]; exists {
+		agentID = agent.AgentID
+	} else if agentName == "" {
+		for _, agent := range s.cfg.Agents {
+			if !agent.Enabled || agent.AgentID == "" {
+				continue
+			}
+			if agentID != "" {
+				agentID = ""
+				break
+			}
+			agentID = agent.AgentID
+		}
+	}
+	return memory.Provenance{
+		UserID: s.cfg.Identity.UserID, AgentID: agentID,
+		ScopeType: profile.Scope.Type, ScopeID: profile.Scope.ID,
+	}
 }
 
 func directProviderRoute(routes []memory.ProviderRoute, provider string) memory.ProviderRoute {

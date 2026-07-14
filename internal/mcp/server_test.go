@@ -16,6 +16,7 @@ import (
 func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.DefaultConfig(configPath)
+	cfg.Identity.UserID = "todd"
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +35,7 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	var stderr bytes.Buffer
 	if err := Serve(Options{
 		ConfigPath: configPath,
+		AgentName:  "codex",
 		Version:    "test",
 		Stdin:      strings.NewReader(input),
 		Stdout:     &stdout,
@@ -79,6 +81,11 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	for _, marker := range []string{`<paxm-recall version="1" mode="active">`, `</paxm-recall>`} {
 		if !strings.Contains(recallResult.Content[0].Text, marker) {
 			t.Fatalf("recall result omitted envelope %q: %#v", marker, recallResult)
+		}
+	}
+	for _, provenance := range []string{`"scope_type": "personal"`, `"scope_id": "todd"`, `"user_id": "todd"`, `"agent_id": "codex-todd"`} {
+		if !strings.Contains(recallResult.Content[0].Text, provenance) {
+			t.Fatalf("recall result omitted %q: %#v", provenance, recallResult)
 		}
 	}
 	structured, ok := recallResult.StructuredContent.(map[string]any)

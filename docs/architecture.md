@@ -172,11 +172,11 @@ number of hops, and verify current source when the remembered fact can drift.
 The default active recall profile reads both `stm` and `ltm`, so short-lived
 working memory can help active reasoning without being inserted by passive hooks.
 
-Agents that support MCP can use `paxm mcp serve` instead of shelling out to the
-CLI. The MCP server exposes only `paxm_recall` and `paxm_remember` over stdio.
-It reuses the same least-privilege tools and telemetry paths as the CLI, so
-recall/write policy remains entirely in user-owned paxm config. History,
-provider diagnostics, setup, uninstall, hook installation, routing changes,
+Agents that support MCP can use `paxm mcp serve --agent <name>` instead of shelling out to the
+CLI. The MCP server exposes `paxm_recall`, `paxm_remember`, `paxm_history`, and
+`paxm_config_doctor` over stdio. It reuses the same least-privilege tools and
+telemetry paths as the CLI, so recall/write policy remains entirely in
+user-owned paxm config. Setup, uninstall, hook installation, routing changes,
 and backfill remain operator capabilities and are not MCP tools.
 
 ## Write Profiles
@@ -187,6 +187,7 @@ A write profile is the policy boundary for writes. It chooses:
 - whether each provider is required or best effort for that write route;
 - the memory tier assigned to the item;
 - optional expiry for short-term memory.
+- a personal or team provenance scope.
 
 Enabled providers can be used by multiple read and write profiles.
 The built-in `stm` profile writes short-term working memory with a 24 hour
@@ -196,9 +197,15 @@ state and `ltm` only for durable facts. Configuration rejects unknown tier names
 requires every `stm` profile to have a positive expiry, and rejects expiry on
 `ltm` profiles.
 
-Before provider fan-out, LTM items without an explicit ID pass through a
+Before provider fan-out, paxm attaches the configured user identity, resolved
+agent identity, and write-profile scope as provenance metadata. Recall searches
+all scopes and labels every returned or injected item with its scope; access
+control remains provider-native. Identical text from different scopes is kept
+separate during recall deduplication.
+
+LTM items without an explicit ID then pass through a
 deterministic admission module. It canonicalizes text case and whitespace,
-includes `workspace` metadata in the identity scope when present, and assigns a
+includes `workspace` metadata and provenance scope in the identity when present, and assigns a
 SHA-256 content ID plus lifecycle metadata. SQLite consolidates repeated IDs in
 the same transaction, increments the occurrence count, keeps the earliest
 `first_seen_at`, and advances `last_seen_at`. This works for both sequential
@@ -261,7 +268,7 @@ paxm eval run locomo --dataset PATH --agent NAME --model PROVIDER/MODEL --provid
 paxm eval retrieval locomo --dataset PATH --provider NAME [--limit N] [--settle DURATION] [--keep-memory] [--json] [--output RESULT.json]
 paxm eval provider jsonrpc --command PATH [--arg VALUE] [--timeout DURATION] [--json]
 paxm eval cleanup (--run RUN_ID | --stale) [--manifest-dir PATH]
-paxm [--config PATH] mcp serve
+paxm [--config PATH] mcp serve [--agent AGENT]
 paxm [--config PATH] config doctor
 ```
 

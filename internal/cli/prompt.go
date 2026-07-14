@@ -108,6 +108,18 @@ func (p *setupPrompter) confirm(question string, defaultValue bool) (bool, error
 	return value, nil
 }
 
+func (p *setupPrompter) text(question, defaultValue string) (string, error) {
+	if !p.interactive {
+		return promptString(p.reader, p.output, question, defaultValue)
+	}
+	value := defaultValue
+	field := huh.NewInput().Title(question).Value(&value)
+	if err := huh.NewForm(huh.NewGroup(field)).WithInput(p.input).WithOutput(p.output).Run(); err != nil {
+		return "", normalizePromptError(err)
+	}
+	return value, nil
+}
+
 func normalizePromptError(err error) error {
 	if errors.Is(err, huh.ErrUserAborted) {
 		return errPromptCancelled

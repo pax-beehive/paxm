@@ -246,6 +246,7 @@ func appendSearchResponse(result *SearchResult, response searchResponse, policy 
 	now := time.Now().UTC()
 	for _, hit := range response.hits {
 		hit.Provider = name
+		hit.Provenance = ProvenanceFromMetadata(hit.Metadata)
 		hit.Tier = EffectiveHitTier(hit)
 		hit.ExpiresAt = EffectiveHitExpiresAt(hit)
 		hit.Relevance = normalizedRelevance(hit)
@@ -609,7 +610,11 @@ func (r *Router) PreservesTurnBoundaries(provider string) bool {
 
 func dedupeKey(hit MemoryHit) string {
 	if hit.Text != "" {
-		return "text:" + strings.Join(strings.Fields(strings.ToLower(hit.Text)), " ")
+		provenance := hit.Provenance
+		if provenance == (Provenance{}) {
+			provenance = ProvenanceFromMetadata(hit.Metadata)
+		}
+		return "text:" + provenance.ScopeType + ":" + provenance.ScopeID + ":" + strings.Join(strings.Fields(strings.ToLower(hit.Text)), " ")
 	}
 	return "id:" + hit.Provider + ":" + hit.ID
 }
