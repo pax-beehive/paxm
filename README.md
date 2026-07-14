@@ -18,7 +18,7 @@ provider through JSON-RPC.
 
 </div>
 
-![paxm architecture](docs/assets/paxm-architecture.png)
+![Animated PAXM architecture showing active recall and passive memory routed from AI agents through the adaptor to interchangeable providers](docs/assets/paxm-architecture-animated.gif)
 
 ## Why paxm
 
