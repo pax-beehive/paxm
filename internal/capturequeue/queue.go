@@ -110,6 +110,7 @@ func (e Episode) IngestInputs() []facade.IngestInput {
 func (e Episode) ingestGroup(profile string, events []facade.IngestInput, multiple bool) facade.IngestInput {
 	var texts []string
 	var admissionText string
+	var agentName string
 	metadata := map[string]string{
 		"paxm_episode_id":       e.ID,
 		"paxm_episode_complete": fmt.Sprintf("%t", e.Complete),
@@ -135,6 +136,9 @@ func (e Episode) ingestGroup(profile string, events []facade.IngestInput, multip
 		if admissionText == "" && strings.TrimSpace(item.AdmissionText) != "" {
 			admissionText = item.AdmissionText
 		}
+		if agentName == "" && strings.TrimSpace(item.AgentName) != "" {
+			agentName = item.AgentName
+		}
 		if createdAt.IsZero() || (!item.CreatedAt.IsZero() && item.CreatedAt.Before(createdAt)) {
 			createdAt = item.CreatedAt
 		}
@@ -159,6 +163,7 @@ func (e Episode) ingestGroup(profile string, events []facade.IngestInput, multip
 		Tier:          events[0].Tier,
 		ExpiresAt:     events[0].ExpiresAt,
 		Turn:          e.turnContext(),
+		AgentName:     agentName,
 	}
 }
 

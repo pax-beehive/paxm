@@ -3,6 +3,7 @@ package zep
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +156,28 @@ func TestCleanupEvalScopeDeletesDedicatedGraph(t *testing.T) {
 	}
 	if client.deletedGraph != "paxm-eval-run" {
 		t.Fatalf("deleted graph = %q", client.deletedGraph)
+	}
+}
+
+func TestZepMetadataPrioritizesProvenanceWithinProviderLimit(t *testing.T) {
+	metadata := make(map[string]string)
+	for index := range 20 {
+		metadata[fmt.Sprintf("a%02d", index)] = "optional"
+	}
+	item := memory.ApplyProvenance(memory.MemoryItem{ID: "memory", Source: "test", Tier: memory.TierLTM, Metadata: metadata}, memory.Provenance{
+		UserID: "todd", AgentID: "codex-todd", ScopeType: "team", ScopeID: "pax",
+	})
+	got := toZepMetadata(item)
+	if len(got) != 10 {
+		t.Fatalf("metadata field count = %d, want 10: %#v", len(got), got)
+	}
+	for key, want := range map[string]string{
+		memory.MetadataUserID: "todd", memory.MetadataAgentID: "codex-todd",
+		memory.MetadataScopeType: "team", memory.MetadataScopeID: "pax",
+	} {
+		if got[key] != want {
+			t.Fatalf("metadata[%s] = %#v, want %q: %#v", key, got[key], want, got)
+		}
 	}
 }
 

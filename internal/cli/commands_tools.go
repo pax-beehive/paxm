@@ -145,10 +145,11 @@ func (r runner) runMCP(args []string) error {
 	}
 	fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
 	fs.SetOutput(r.stderr)
+	agentName := fs.String("agent", "", "configured agent identity for MCP writes")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	return mcp.Serve(mcp.Options{ConfigPath: r.configFile(), Version: r.versionString(), Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr})
+	return mcp.Serve(mcp.Options{ConfigPath: r.configFile(), AgentName: *agentName, Version: r.versionString(), Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr})
 }
 
 type recallJSONOutput struct {

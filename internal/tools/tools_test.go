@@ -39,15 +39,40 @@ func (p *blockingProvider) Put(context.Context, memory.MemoryItem) (memory.Memor
 }
 func (*blockingProvider) Health(context.Context) error { return nil }
 
-type providerStub struct{ item memory.MemoryItem }
+type providerStub struct {
+	item  memory.MemoryItem
+	query memory.SearchQuery
+}
 
 func (*providerStub) Name() string { return "sqlite" }
 func (p *providerStub) Put(_ context.Context, item memory.MemoryItem) (memory.MemoryRef, error) {
 	p.item = item
 	return memory.MemoryRef{Provider: "sqlite", ID: "one"}, nil
 }
-func (p *providerStub) Search(context.Context, memory.SearchQuery) ([]memory.MemoryHit, error) {
+func (p *providerStub) Search(_ context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
+	p.query = query
 	return []memory.MemoryHit{{Provider: "sqlite", ID: "one", Text: p.item.Text, Relevance: 1, Score: 1}}, nil
+}
+
+func TestRecallDoesNotApplyProvenanceAsScopeFilters(t *testing.T) {
+	provider := &providerStub{item: memory.MemoryItem{Text: "team memory"}}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Read: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(config.DefaultConfig("config.yaml"), router)
+	_, err = engine.Recall(context.Background(), RecallInput{Query: "team", Meta: map[string]string{
+		memory.MetadataScopeType: "personal", memory.MetadataScopeID: "todd", "workspace": "/repo",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.query.Metadata[memory.MetadataScopeType] != "" || provider.query.Metadata[memory.MetadataScopeID] != "" {
+		t.Fatalf("provenance became a recall filter: %#v", provider.query.Metadata)
+	}
+	if provider.query.Metadata["workspace"] != "/repo" {
+		t.Fatalf("ordinary recall metadata was removed: %#v", provider.query.Metadata)
+	}
 }
 func (*providerStub) Health(context.Context) error { return nil }
 
@@ -73,6 +98,55 @@ func TestAgentInterfaceRecallsAndRemembersWithoutFacade(t *testing.T) {
 	}
 	if len(result.Hits) != 1 || result.Hits[0].Text != "operator and tools are separate" {
 		t.Fatalf("result=%#v", result)
+	}
+}
+
+func TestRememberAppliesConfiguredProvenanceAndRejectsMetadataSpoofing(t *testing.T) {
+	provider := &providerStub{}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig("config.yaml")
+	cfg.Identity.UserID = "todd"
+	agent := cfg.Agents["codex"]
+	agent.AgentID = "codex-todd"
+	cfg.Agents["codex"] = agent
+	profile := cfg.WriteProfiles["ltm"]
+	profile.Scope = config.MemoryScopeConfig{Type: "team", ID: "pax"}
+	cfg.WriteProfiles["ltm"] = profile
+
+	engine := New(cfg, router)
+	_, err = engine.Remember(context.Background(), RememberInput{
+		Text: "team decision", Profile: "ltm", AgentName: "codex",
+		Metadata: map[string]string{memory.MetadataUserID: "mallory", memory.MetadataScopeID: "other"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := memory.Provenance{UserID: "todd", AgentID: "codex-todd", ScopeType: "team", ScopeID: "pax"}
+	if provider.item.Provenance != want || memory.ProvenanceFromMetadata(provider.item.Metadata) != want {
+		t.Fatalf("provenance = %#v metadata=%#v", provider.item.Provenance, provider.item.Metadata)
+	}
+}
+
+func TestRememberMarksUnboundMultiAgentWriterUnknown(t *testing.T) {
+	provider := &providerStub{}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig("config.yaml")
+	cfg.Identity.UserID = "todd"
+	claude := cfg.Agents["claude"]
+	claude.Enabled = true
+	cfg.Agents["claude"] = claude
+	engine := New(cfg, router)
+	if _, err := engine.Remember(context.Background(), RememberInput{Text: "manual memory", Profile: "ltm"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := provider.item.Provenance.AgentID; got != "unknown" {
+		t.Fatalf("unbound agent_id = %q, want unknown", got)
 	}
 }
 

@@ -264,6 +264,7 @@ func (s *Service) HookWriteItem(event HookEvent) (IngestInput, bool, error) {
 		Profile:       eventCfg.Write.Profile,
 		Source:        "hook:" + event.Target + ":" + event.Event,
 		Metadata:      metadata,
+		AgentName:     event.Target,
 	}
 	policy, err := s.putPolicy(input.Profile)
 	if err != nil {

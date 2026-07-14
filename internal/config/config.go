@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,6 +61,7 @@ const (
 
 type Config struct {
 	Version        int                            `json:"version" yaml:"version"`
+	Identity       IdentityConfig                 `json:"identity,omitempty" yaml:"identity,omitempty"`
 	Providers      map[string]ProviderConfig      `json:"providers" yaml:"providers"`
 	RecallProfiles map[string]RecallProfileConfig `json:"recall_profiles,omitempty" yaml:"recall_profiles,omitempty"`
 	WriteProfiles  map[string]WriteProfileConfig  `json:"write_profiles,omitempty" yaml:"write_profiles,omitempty"`
@@ -68,6 +70,15 @@ type Config struct {
 	CaptureQueue   CaptureQueueConfig             `json:"capture_queue,omitempty" yaml:"capture_queue,omitempty"`
 
 	Hooks map[string]LegacyHookConfig `json:"hooks,omitempty" yaml:"hooks,omitempty"`
+}
+
+type IdentityConfig struct {
+	UserID string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+}
+
+type MemoryScopeConfig struct {
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	ID   string `json:"id,omitempty" yaml:"id,omitempty"`
 }
 
 type CaptureQueueConfig struct {
@@ -136,10 +147,12 @@ type WriteProfileConfig struct {
 	Providers    []ProviderRouteConfig `json:"providers,omitempty" yaml:"providers,omitempty"`
 	Tier         string                `json:"tier,omitempty" yaml:"tier,omitempty"`
 	ExpiresAfter string                `json:"expires_after,omitempty" yaml:"expires_after,omitempty"`
+	Scope        MemoryScopeConfig     `json:"scope,omitempty" yaml:"scope,omitempty"`
 }
 
 type AgentConfig struct {
 	Enabled               bool                       `json:"enabled" yaml:"enabled"`
+	AgentID               string                     `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	PassiveWriteStartedAt string                     `json:"passive_write_started_at,omitempty" yaml:"passive_write_started_at,omitempty"`
 	Integration           AgentIntegrationConfig     `json:"integration,omitempty" yaml:"integration,omitempty"`
 	ActiveRecall          ActiveRecallConfig         `json:"active_recall,omitempty" yaml:"active_recall,omitempty"`
@@ -616,6 +629,9 @@ func Save(path string, cfg Config) error {
 }
 
 func Validate(cfg Config) error {
+	if err := validateIdentity(cfg.Identity, cfg.Agents); err != nil {
+		return err
+	}
 	if err := validateCaptureQueue(cfg.CaptureQueue); err != nil {
 		return err
 	}
@@ -629,6 +645,18 @@ func Validate(cfg Config) error {
 		return err
 	}
 	return validateWriteProfiles(cfg.WriteProfiles)
+}
+
+func validateIdentity(identity IdentityConfig, agents map[string]AgentConfig) error {
+	if strings.TrimSpace(identity.UserID) != "" && slugID(identity.UserID) == "" {
+		return errors.New("identity.user_id must contain letters or numbers")
+	}
+	for name, agent := range agents {
+		if strings.TrimSpace(agent.AgentID) != "" && slugID(agent.AgentID) == "" {
+			return fmt.Errorf("agent %q agent_id must contain letters or numbers", name)
+		}
+	}
+	return nil
 }
 
 func validateCaptureQueue(queue CaptureQueueConfig) error {
@@ -724,6 +752,9 @@ func validatePositiveDuration(value string) error {
 
 func validateWriteProfiles(profiles map[string]WriteProfileConfig) error {
 	writeNames := sortedKeys(profiles)
+	if err := validateWriteProfileScopes(writeNames, profiles); err != nil {
+		return err
+	}
 	for _, name := range writeNames {
 		profile := profiles[name]
 		for _, route := range profile.Providers {
@@ -761,6 +792,29 @@ func validateWriteProfiles(profiles map[string]WriteProfileConfig) error {
 		if duration <= 0 {
 			return fmt.Errorf("write profile %q expires_after must be positive", name)
 		}
+	}
+	return nil
+}
+
+func validateWriteProfileScopes(names []string, profiles map[string]WriteProfileConfig) error {
+	for _, name := range names {
+		if err := validateMemoryScope(profiles[name].Scope); err != nil {
+			return fmt.Errorf("write profile %q scope: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateMemoryScope(scope MemoryScopeConfig) error {
+	typeName := strings.ToLower(strings.TrimSpace(scope.Type))
+	if typeName == "" && strings.TrimSpace(scope.ID) == "" {
+		return nil
+	}
+	if typeName != "personal" && typeName != "team" {
+		return fmt.Errorf("invalid type %q; expected personal or team", scope.Type)
+	}
+	if slugID(scope.ID) == "" {
+		return errors.New("id must contain letters or numbers")
 	}
 	return nil
 }
@@ -811,8 +865,53 @@ func Normalize(cfg Config) Config {
 	renamedLegacyLocal := normalizeProviders(&cfg)
 	normalizeProfiles(&cfg, renamedLegacyLocal)
 	normalizeAgents(&cfg)
+	normalizeIdentity(&cfg)
 	normalizeRuntime(&cfg)
 	return cfg
+}
+
+func normalizeIdentity(cfg *Config) {
+	cfg.Identity.UserID = slugID(cfg.Identity.UserID)
+	for name, agent := range cfg.Agents {
+		agent.AgentID = slugID(agent.AgentID)
+		if agent.AgentID == "" && cfg.Identity.UserID != "" {
+			agent.AgentID = slugID(name + "-" + cfg.Identity.UserID)
+		}
+		cfg.Agents[name] = agent
+	}
+	for name, profile := range cfg.WriteProfiles {
+		profile.Scope.Type = strings.ToLower(strings.TrimSpace(profile.Scope.Type))
+		profile.Scope.ID = slugID(profile.Scope.ID)
+		if profile.Scope.Type == "" && profile.Scope.ID == "" && cfg.Identity.UserID != "" {
+			profile.Scope = MemoryScopeConfig{Type: "personal", ID: cfg.Identity.UserID}
+		}
+		cfg.WriteProfiles[name] = profile
+	}
+}
+
+func SlugID(value string) string { return slugID(value) }
+
+func DefaultAgentID(agentName, userID string) string {
+	if slugID(userID) == "" {
+		return ""
+	}
+	return slugID(agentName + "-" + userID)
+}
+
+func slugID(value string) string {
+	var result strings.Builder
+	lastDash := false
+	for _, char := range strings.ToLower(strings.TrimSpace(value)) {
+		switch {
+		case unicode.IsLetter(char) || unicode.IsDigit(char):
+			result.WriteRune(char)
+			lastDash = false
+		case result.Len() > 0 && !lastDash:
+			result.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(result.String(), "-")
 }
 
 func normalizeProfiles(cfg *Config, renamedLegacyLocal bool) {

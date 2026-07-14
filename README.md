@@ -133,9 +133,13 @@ paxm setup
 paxm config doctor
 ```
 
-`paxm setup` is where the user chooses providers and passive agent
-integrations. Use up/down to move, space to toggle, and enter to confirm.
-Selected agents are configured one at a time.
+`paxm setup` is where the user chooses a stable user ID, providers, and passive
+agent integrations. Selected agents default to IDs such as `codex-todd` and
+can be renamed during interactive setup. Use up/down to move, space to toggle,
+and enter to confirm.
+
+Optional team IDs create explicit durable write profiles such as
+`team-pax-core`; non-interactive setup can pass `--user-id todd --team-id pax-core`.
 
 Active recall skills remain user-installed. SQLite works without an API key;
 remote providers such as Zep, Mem0, MemOS, and OpenViking require connection
@@ -161,7 +165,8 @@ paxm history --days 7
 
 Select OpenCode during setup to install a global local plugin under
 `~/.config/opencode/plugins/`. Select Pi to install its passive extension. Any
-MCP-compatible client can use `paxm mcp serve` without passive hooks.
+MCP-compatible client can use `paxm mcp serve --agent codex` without passive
+hooks; replace `codex` with the configured client identity.
 
 ## How it works
 
@@ -264,13 +269,13 @@ provider-specific timeouts.
 Run paxm as a local stdio MCP server:
 
 ```bash
-paxm mcp serve
+paxm mcp serve --agent codex
 ```
 
 ```json
 {
   "command": "paxm",
-  "args": ["mcp", "serve"]
+  "args": ["mcp", "serve", "--agent", "codex"]
 }
 ```
 
@@ -283,6 +288,11 @@ The server exposes four focused tools:
 
 Setup, credential management, hook installation, and backfill stay outside MCP
 so an agent cannot silently take ownership of user configuration.
+
+Writes carry user, agent, and named personal/team scope provenance. Recall does
+not filter by that scope: CLI, MCP, and passive injection label every result
+with its source scope, while provider-native routing and ACL remain under the
+provider's control.
 
 ## Agent integrations
 

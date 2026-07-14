@@ -25,6 +25,19 @@ func configureSelectedAgents(prompter *setupPrompter, cfg *config.Config, select
 	for index, option := range selectedOptions {
 		_, _ = fmt.Fprintf(prompter.output, "\nConfigure %s (%d/%d)\n", option.Label, index+1, len(selectedOptions))
 		agent := cfg.Agents[option.ID]
+		defaultAgentID := firstNonEmpty(agent.AgentID, config.DefaultAgentID(option.ID, cfg.Identity.UserID))
+		if prompter.interactive {
+			agentID, err := prompter.text("Agent ID", defaultAgentID)
+			if err != nil {
+				return err
+			}
+			agent.AgentID = config.SlugID(agentID)
+		} else {
+			agent.AgentID = config.SlugID(defaultAgentID)
+		}
+		if agent.AgentID == "" {
+			return errors.New("agent ID is required")
+		}
 		behaviors, err := promptRequiredMultiSelect(
 			prompter,
 			"Passive memory behavior",
@@ -55,6 +68,7 @@ func configureSelectedAgents(prompter *setupPrompter, cfg *config.Config, select
 
 func writeSetupSummary(writer io.Writer, cfg config.Config, providers, agents map[string]bool) {
 	_, _ = fmt.Fprintln(writer, "\nSetup summary")
+	_, _ = fmt.Fprintf(writer, "  User: %s\n", firstNonEmpty(cfg.Identity.UserID, "unknown"))
 	_, _ = fmt.Fprintf(writer, "  Providers: %s\n", strings.Join(selectedOptionLabels(providerOptions(cfg), providers), ", "))
 	selectedAgents := selectedOptionLabels(hookOptions(cfg), agents)
 	if len(selectedAgents) == 0 {
@@ -81,7 +95,7 @@ func writeSetupSummary(writer io.Writer, cfg config.Config, providers, agents ma
 		if len(writeEvents) > 0 {
 			writeSummary = strings.Join(writeEvents, ",") + " profile=" + firstNonEmpty(agentWriteProfile(agent), "ltm")
 		}
-		_, _ = fmt.Fprintf(writer, "    %s: recall=%s write=%s\n", option.Label, recall, writeSummary)
+		_, _ = fmt.Fprintf(writer, "    %s (%s): recall=%s write=%s\n", option.Label, firstNonEmpty(agent.AgentID, "unknown"), recall, writeSummary)
 	}
 }
 

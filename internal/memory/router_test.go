@@ -159,6 +159,40 @@ func TestRouterSearchFansOutAndDedupes(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsIdenticalTextFromDifferentScopes(t *testing.T) {
+	t.Parallel()
+	personal := map[string]string{MetadataScopeType: "personal", MetadataScopeID: "todd"}
+	team := map[string]string{MetadataScopeType: "team", MetadataScopeID: "pax"}
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "a", hits: []MemoryHit{{ID: "1", Text: "same decision", Relevance: 0.8, Metadata: personal}}}, Read: true},
+		{Provider: fakeProvider{name: "b", hits: []MemoryHit{{ID: "2", Text: "same decision", Relevance: 0.7, Metadata: team}}}, Read: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := router.Search(context.Background(), SearchQuery{Text: "decision", Limit: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 2 {
+		t.Fatalf("different scopes were deduped: %#v", result.Hits)
+	}
+}
+
+func TestLongTermFingerprintIncludesScope(t *testing.T) {
+	personal := longTermFingerprint("same decision", map[string]string{MetadataScopeType: "personal", MetadataScopeID: "todd"})
+	team := longTermFingerprint("same decision", map[string]string{MetadataScopeType: "team", MetadataScopeID: "pax"})
+	if personal == team {
+		t.Fatal("different scopes produced the same LTM fingerprint")
+	}
+}
+
+func TestMissingProvenanceIsReportedAsUnknown(t *testing.T) {
+	if got := ProvenanceFromMetadata(nil); got.ScopeType != "unknown" || got.ScopeID != "" {
+		t.Fatalf("missing provenance = %#v", got)
+	}
+}
+
 func TestRouterClosesProviderResources(t *testing.T) {
 	provider := &closeProvider{fakeProvider: fakeProvider{name: "sqlite"}}
 	router, err := NewRouter([]ProviderBinding{{Provider: provider}})

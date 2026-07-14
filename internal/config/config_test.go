@@ -16,6 +16,45 @@ func TestNormalizeCaptureQueueMergesMissingConcurrencyDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeDerivesAgentIdentityAndPersonalScopes(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig("config.yaml")
+	cfg.Identity.UserID = "Todd Smith"
+	custom := cfg.Agents["claude"]
+	custom.AgentID = "Research Claude"
+	cfg.Agents["claude"] = custom
+
+	normalized := Normalize(cfg)
+	if normalized.Identity.UserID != "todd-smith" {
+		t.Fatalf("user_id = %q", normalized.Identity.UserID)
+	}
+	if got := normalized.Agents["codex"].AgentID; got != "codex-todd-smith" {
+		t.Fatalf("codex agent_id = %q", got)
+	}
+	if got := normalized.Agents["claude"].AgentID; got != "research-claude" {
+		t.Fatalf("explicit agent_id = %q", got)
+	}
+	for name, profile := range normalized.WriteProfiles {
+		if profile.Scope != (MemoryScopeConfig{Type: "personal", ID: "todd-smith"}) {
+			t.Fatalf("write profile %q scope = %#v", name, profile.Scope)
+		}
+	}
+}
+
+func TestNormalizePreservesExplicitTeamScope(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig("config.yaml")
+	cfg.Identity.UserID = "todd"
+	profile := cfg.WriteProfiles["ltm"]
+	profile.Scope = MemoryScopeConfig{Type: "TEAM", ID: "PAX Core"}
+	cfg.WriteProfiles["ltm"] = profile
+
+	normalized := Normalize(cfg)
+	if got := normalized.WriteProfiles["ltm"].Scope; got != (MemoryScopeConfig{Type: "team", ID: "pax-core"}) {
+		t.Fatalf("team scope = %#v", got)
+	}
+}
+
 func TestSaveWritesYAMLByDefault(t *testing.T) {
 	t.Parallel()
 

@@ -16,6 +16,7 @@ import (
 func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.DefaultConfig(configPath)
+	cfg.Identity.UserID = "todd"
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +35,7 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 	var stderr bytes.Buffer
 	if err := Serve(Options{
 		ConfigPath: configPath,
+		AgentName:  "codex",
 		Version:    "test",
 		Stdin:      strings.NewReader(input),
 		Stdout:     &stdout,
@@ -81,6 +83,11 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 			t.Fatalf("recall result omitted envelope %q: %#v", marker, recallResult)
 		}
 	}
+	for _, provenance := range []string{`"scope_type": "personal"`, `"scope_id": "todd"`, `"user_id": "todd"`, `"agent_id": "codex-todd"`} {
+		if !strings.Contains(recallResult.Content[0].Text, provenance) {
+			t.Fatalf("recall result omitted %q: %#v", provenance, recallResult)
+		}
+	}
 	structured, ok := recallResult.StructuredContent.(map[string]any)
 	if !ok {
 		t.Fatalf("recall structured content has unexpected type: %#v", recallResult.StructuredContent)
@@ -102,6 +109,24 @@ func TestServerServesMemoryToolsOverStdio(t *testing.T) {
 		t.Fatalf("unexpected doctor result: %#v", doctorResult)
 	}
 
+}
+
+func TestServerLabelsMissingScopeUnknown(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(configPath, config.DefaultConfig(configPath)); err != nil {
+		t.Fatal(err)
+	}
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"paxm_remember","arguments":{"text":"legacy scope marker"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"paxm_recall","arguments":{"query":"legacy scope marker"}}}`,
+	}, "\n") + "\n"
+	var stdout bytes.Buffer
+	if err := Serve(Options{ConfigPath: configPath, Stdin: strings.NewReader(input), Stdout: &stdout}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"scope_type":"unknown"`) {
+		t.Fatalf("structured recall omitted unknown scope: %s", stdout.String())
+	}
 }
 
 func TestRecallErrorToolResultMarksPartialHits(t *testing.T) {
