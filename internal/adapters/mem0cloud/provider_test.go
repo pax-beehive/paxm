@@ -3,8 +3,10 @@ package mem0cloud
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +88,9 @@ func TestCloudLifecycle(t *testing.T) {
 	if hits[0].Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) || hits[0].Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
 		t.Fatalf("attribution was not restored: %#v", hits[0])
 	}
+	if hits[0].RawScore == nil || *hits[0].RawScore != 0.91 || hits[0].RawScoreKind != "mem0_cloud_similarity" {
+		t.Fatalf("score semantics were not preserved: %#v", hits[0])
+	}
 	if err := provider.Delete(context.Background(), memory.MemoryRef{Provider: "cloud", ID: "mem-1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -115,12 +120,69 @@ func TestCloudConfigValidation(t *testing.T) {
 		{BaseURL: "https://api.mem0.ai", UserID: "user"},
 		{BaseURL: "not-a-url", APIKey: "key", UserID: "user"},
 		{BaseURL: "https://api.mem0.ai", APIKey: "key"},
+		{BaseURL: "https://api.mem0.ai", APIKey: "key", UserID: "user", ScoreSemantics: "cosine"},
 	}
 	for _, cfg := range tests {
 		if _, err := newWithClient("cloud", cfg, http.DefaultClient, func() string { return "id" }); err == nil {
 			t.Fatalf("expected validation error for %#v", cfg)
 		}
 	}
+}
+
+func TestCloudScoreSemanticsDefaultsAndExplicitDistance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  config.ProviderConfig
+		want config.ScoreSemantics
+	}{
+		{name: "backward compatible default", cfg: config.ProviderConfig{BaseURL: "https://api.mem0.ai", APIKey: "key", UserID: "user"}, want: config.ScoreSemanticsSimilarity},
+		{name: "explicit distance", cfg: config.ProviderConfig{BaseURL: "https://api.mem0.ai", APIKey: "key", UserID: "user", ScoreSemantics: "distance"}, want: config.ScoreSemanticsDistance},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := newWithClient("cloud", tt.cfg, http.DefaultClient, func() string { return "id" })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if provider.scoreSemantics != tt.want {
+				t.Fatalf("score semantics = %q, want %q", provider.scoreSemantics, tt.want)
+			}
+		})
+	}
+}
+
+func TestCloudDistanceSemanticsMapsLowDistanceToHigherRelevance(t *testing.T) {
+	t.Parallel()
+
+	client := cloudHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"results":[{"id":"low","memory":"regulatory scope","score":0.479},{"id":"high","memory":"latest progress","score":0.840}]}`)),
+			Request:    request,
+		}, nil
+	})
+	provider, err := newWithClient("cloud", config.ProviderConfig{BaseURL: "https://mem0.test", APIKey: "key", UserID: "user", ScoreSemantics: "distance"}, client, func() string { return "id" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "scope", Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || hits[0].Relevance <= hits[1].Relevance {
+		t.Fatalf("low distance did not rank higher: %#v", hits)
+	}
+	if hits[0].RawScoreKind != "mem0_cloud_distance" || hits[1].RawScoreKind != "mem0_cloud_distance" {
+		t.Fatalf("raw score kinds = %#v", hits)
+	}
+}
+
+type cloudHTTPDoerFunc func(*http.Request) (*http.Response, error)
+
+func (f cloudHTTPDoerFunc) Do(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 func TestCloudEventFailure(t *testing.T) {

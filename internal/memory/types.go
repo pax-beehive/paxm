@@ -233,11 +233,14 @@ const (
 )
 
 type ProviderRecall struct {
-	Provider     string `json:"provider"`
-	DurationMS   int64  `json:"duration_ms"`
-	Outcome      string `json:"outcome"`
-	TimeoutMS    int64  `json:"timeout_ms,omitempty"`
-	BulkheadBusy bool   `json:"bulkhead_busy,omitempty"`
+	Provider       string   `json:"provider"`
+	DurationMS     int64    `json:"duration_ms"`
+	Outcome        string   `json:"outcome"`
+	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
+	BulkheadBusy   bool     `json:"bulkhead_busy,omitempty"`
+	CandidateCount int      `json:"candidate_count,omitempty"`
+	EligibleCount  int      `json:"eligible_count,omitempty"`
+	RawScoreKinds  []string `json:"raw_score_kinds,omitempty"`
 }
 
 type CleanupExpiredResult struct {

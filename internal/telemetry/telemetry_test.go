@@ -319,6 +319,32 @@ func TestRecorderAggregatesProviderRecallLatencyAndIsolationOutcomes(t *testing.
 	}
 }
 
+func TestRecorderPersistsProviderScoreDiagnostics(t *testing.T) {
+	t.Parallel()
+	enabled := true
+	dir := t.TempDir()
+	recorder := NewRecorder(config.TelemetryConfig{Enabled: &enabled, Dir: dir}, filepath.Join(dir, "config.yaml"))
+	if err := recorder.Record(Event{
+		Time: time.Now().UTC(), Kind: "recall", Success: true,
+		ProviderRecallDetails: []memory.ProviderRecall{{
+			Provider: "mem0", CandidateCount: 2, EligibleCount: 1, RawScoreKinds: []string{"mem0_distance"},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := recorder.TailEvents(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || len(events[0].ProviderRecallDetails) != 1 {
+		t.Fatalf("provider recall diagnostics missing: %#v", events)
+	}
+	diagnostic := events[0].ProviderRecallDetails[0]
+	if diagnostic.CandidateCount != 2 || diagnostic.EligibleCount != 1 || len(diagnostic.RawScoreKinds) != 1 || diagnostic.RawScoreKinds[0] != "mem0_distance" {
+		t.Fatalf("provider score diagnostics = %#v", diagnostic)
+	}
+}
+
 func TestQueryFieldsAvoidPreviewByDefault(t *testing.T) {
 	t.Parallel()
 

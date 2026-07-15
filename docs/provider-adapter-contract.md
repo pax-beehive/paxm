@@ -57,6 +57,33 @@ The contract deliberately does not require equal ranking, semantic recall,
 consolidation, latency, or result counts. Those are provider capabilities, not
 paxm adapter correctness.
 
+## Score semantics
+
+Every adapter must expose `relevance` and `score` as higher-is-better values in
+the `[0,1]` range before the router applies thresholds, weights, recency, or
+ranking. `raw_score` remains the untouched backend value, and
+`raw_score_kind` identifies its meaning.
+
+Mem0 and Mem0 Cloud deployments configure this direction with
+`providers.<name>.score_semantics`:
+
+- `similarity` is the backward-compatible default for scores where larger is
+  more relevant.
+- `distance` is for pgvector cosine distance in `[0,2]`; paxm converts it to
+  `1 - distance/2`, so smaller distance becomes larger relevance.
+
+The adapter must not infer direction from whether a response field is called
+`score`, `similarity`, or `relevance`: different Mem0 deployments and vector
+stores use those names for different semantics. Invalid values fail config
+validation. A distance response keeps `raw_score_kind: mem0_distance` or
+`mem0_cloud_distance`; the normalized value is the only value passed into
+router thresholds and hook insertion.
+
+Recall diagnostics retain the provider's `raw_score_kinds`, `candidate_count`,
+and `eligible_count` in the existing provider-recall telemetry details. This
+makes a score-direction or threshold problem visible through existing logs and
+JSON diagnostics without adding a new public command.
+
 Provider-specific tests supplement this shared matrix with the request shapes
 and response fields each backend actually supports. Coverage is intentionally
 not represented as identical across providers: paxm does not invent tier,

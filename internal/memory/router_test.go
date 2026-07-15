@@ -365,6 +365,41 @@ func TestRouterSearchAppliesPolicyThresholds(t *testing.T) {
 	}
 }
 
+func TestRouterOrdersAndFiltersNormalizedDistanceEvidence(t *testing.T) {
+	t.Parallel()
+
+	lowDistance := 0.479
+	highDistance := 0.840
+	router, err := NewRouter([]ProviderBinding{{
+		Provider: fakeProvider{name: "mem0", hits: []MemoryHit{
+			{ID: "low-distance", Text: "regulatory scope", Relevance: 0.7605, RawScore: &lowDistance, RawScoreKind: "mem0_distance"},
+			{ID: "high-distance", Text: "latest progress", Relevance: 0.58, RawScore: &highDistance, RawScoreKind: "mem0_distance"},
+		}},
+		Read: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "scope", Limit: 2}, SearchPolicy{
+		Providers:    []ProviderRoute{{Name: "mem0", Required: true}},
+		MinRelevance: 0.75,
+		MinScore:     0.75,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].ID != "low-distance" {
+		t.Fatalf("distance threshold/order was not preserved: %#v", result.Hits)
+	}
+	if result.Hits[0].RawScore == nil || *result.Hits[0].RawScore != lowDistance || result.Hits[0].RawScoreKind != "mem0_distance" {
+		t.Fatalf("raw distance attribution was lost: %#v", result.Hits[0])
+	}
+	if len(result.ProviderRecalls) != 1 || result.ProviderRecalls[0].CandidateCount != 2 || result.ProviderRecalls[0].EligibleCount != 1 || len(result.ProviderRecalls[0].RawScoreKinds) != 1 || result.ProviderRecalls[0].RawScoreKinds[0] != "mem0_distance" {
+		t.Fatalf("score diagnostics = %#v", result.ProviderRecalls)
+	}
+}
+
 func TestRouterCalibratesAllProviderScoreDistributions(t *testing.T) {
 	t.Parallel()
 	providers := []struct {
@@ -374,8 +409,8 @@ func TestRouterCalibratesAllProviderScoreDistributions(t *testing.T) {
 	}{
 		{name: "sqlite", rawScoreKind: "sqlite_fts_bm25_negated", scores: []float64{1, 0.75}},
 		{name: "zep", rawScoreKind: "zep_relevance", scores: []float64{1, 0.99993503}},
-		{name: "mem0", rawScoreKind: "mem0_score", scores: []float64{0.91, 0.82}},
-		{name: "mem0_cloud", rawScoreKind: "mem0_cloud_score", scores: []float64{0.2793, 0.21}},
+		{name: "mem0", rawScoreKind: "mem0_similarity", scores: []float64{0.91, 0.82}},
+		{name: "mem0_cloud", rawScoreKind: "mem0_cloud_similarity", scores: []float64{0.2793, 0.21}},
 		{name: "memos", rawScoreKind: "memos_relativity", scores: []float64{0.88, 0.67}},
 		{name: "memos_cloud", rawScoreKind: "memos_relativity", scores: []float64{0.42, 0.31}},
 		{name: "jsonrpc", rawScoreKind: "jsonrpc_relevance", scores: []float64{0.9, 0.6}},

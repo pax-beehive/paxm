@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pax-beehive/paxm/internal/adapters/scoresemantics"
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
 )
@@ -33,6 +34,7 @@ type httpDoer interface {
 type Provider struct {
 	name, baseURL, apiKey, userID, agentID, runID string
 	infer                                         *bool
+	scoreSemantics                                config.ScoreSemantics
 	client                                        httpDoer
 	writeID                                       func() string
 	lookupDelay                                   func(int) time.Duration
@@ -107,7 +109,11 @@ func newWithClient(name string, cfg config.ProviderConfig, client httpDoer, writ
 	if client == nil || writeID == nil {
 		return nil, errors.New("mem0 cloud http dependencies are required")
 	}
-	return &Provider{name: name, baseURL: baseURL, apiKey: apiKey, userID: userID, agentID: agentID, runID: runID, infer: cfg.Infer, client: client, writeID: writeID, lookupDelay: writeLookupDelay}, nil
+	scoreSemantics, err := config.ParseScoreSemantics(cfg.ScoreSemantics)
+	if err != nil {
+		return nil, fmt.Errorf("mem0 cloud provider: %w", err)
+	}
+	return &Provider{name: name, baseURL: baseURL, apiKey: apiKey, userID: userID, agentID: agentID, runID: runID, infer: cfg.Infer, scoreSemantics: scoreSemantics, client: client, writeID: writeID, lookupDelay: writeLookupDelay}, nil
 }
 
 func (p *Provider) Name() string { return p.name }
@@ -148,8 +154,8 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 		score := 1.0
 		kind := "mem0_cloud_unscored"
 		if item.Score != nil {
-			score = normalize(*item.Score)
-			kind = "mem0_cloud_score"
+			score = scoresemantics.Normalize(*item.Score, p.scoreSemantics)
+			kind = scoresemantics.RawScoreKind("mem0_cloud", p.scoreSemantics)
 		}
 		hit := memory.MemoryHit{Provider: p.name, ID: item.ID, Text: item.Memory, Source: "mem0-cloud", Relevance: score, Score: score, RawScore: item.Score, RawScoreKind: kind, Metadata: stringMetadata(item.Metadata), CreatedAt: parseTime(item.CreatedAt)}
 		hits = append(hits, memory.ApplyHitAttribution(hit))
@@ -430,15 +436,6 @@ func clamp(value, min, max int) int {
 		return max
 	}
 	return value
-}
-func normalize(value float64) float64 {
-	if value < 0 {
-		return 0
-	}
-	if value <= 1 {
-		return value
-	}
-	return 1 / (1 + value)
 }
 func parseTime(value string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339Nano, value)

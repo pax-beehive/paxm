@@ -191,8 +191,9 @@ func collectSearchResponses(responses []searchResponse, policy SearchPolicy) (Se
 	var result SearchResult
 	var requiredErrs []error
 	for _, response := range responses {
-		result.ProviderRecalls = append(result.ProviderRecalls, providerRecallFromResponse(response))
-		providerErr := appendSearchResponse(&result, response, policy)
+		recall := providerRecallFromResponse(response)
+		providerErr := appendSearchResponse(&result, response, policy, &recall)
+		result.ProviderRecalls = append(result.ProviderRecalls, recall)
 		if providerErr != nil {
 			requiredErrs = append(requiredErrs, providerErr)
 		}
@@ -211,12 +212,17 @@ func providerRecallFromResponse(response searchResponse) ProviderRecall {
 		}
 	}
 	return ProviderRecall{
-		Provider: response.binding.Provider.Name(), DurationMS: response.duration.Milliseconds(), Outcome: outcome,
-		TimeoutMS: response.binding.Timeout.Milliseconds(), BulkheadBusy: response.bulkheadBusy,
+		Provider:       response.binding.Provider.Name(),
+		DurationMS:     response.duration.Milliseconds(),
+		Outcome:        outcome,
+		TimeoutMS:      response.binding.Timeout.Milliseconds(),
+		BulkheadBusy:   response.bulkheadBusy,
+		CandidateCount: len(response.hits),
+		RawScoreKinds:  rawScoreKinds(response.hits),
 	}
 }
 
-func appendSearchResponse(result *SearchResult, response searchResponse, policy SearchPolicy) error {
+func appendSearchResponse(result *SearchResult, response searchResponse, policy SearchPolicy, recall *ProviderRecall) error {
 	name := response.binding.Provider.Name()
 	if response.err != nil {
 		result.ProviderErrors = append(result.ProviderErrors, ProviderError{
@@ -263,12 +269,33 @@ func appendSearchResponse(result *SearchResult, response searchResponse, policy 
 		}
 		eligible = append(eligible, hit)
 	}
+	if recall != nil {
+		recall.EligibleCount = len(eligible)
+	}
 	for _, hit := range calibrateProviderHits(eligible) {
 		recency := recencyScore(hit.CreatedAt, policy.RecencyBoost)
 		hit.rankingScore = applyWeightAndRecency(hit.rankingScore, weight, recency)
 		result.Hits = append(result.Hits, hit)
 	}
 	return nil
+}
+
+func rawScoreKinds(hits []MemoryHit) []string {
+	seen := make(map[string]struct{})
+	for _, hit := range hits {
+		if kind := strings.TrimSpace(hit.RawScoreKind); kind != "" {
+			seen[kind] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	kinds := make([]string, 0, len(seen))
+	for kind := range seen {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	return kinds
 }
 
 func dedupeSearchHits(hits []MemoryHit) []MemoryHit {

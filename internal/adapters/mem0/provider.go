@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pax-beehive/paxm/internal/adapters/scoresemantics"
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
 )
@@ -27,14 +28,15 @@ type httpDoer interface {
 }
 
 type Provider struct {
-	name    string
-	baseURL string
-	apiKey  string
-	userID  string
-	agentID string
-	runID   string
-	infer   *bool
-	client  httpDoer
+	name           string
+	baseURL        string
+	apiKey         string
+	userID         string
+	agentID        string
+	runID          string
+	infer          *bool
+	scoreSemantics config.ScoreSemantics
+	client         httpDoer
 }
 
 type message struct {
@@ -79,15 +81,20 @@ func newWithClient(name string, cfg config.ProviderConfig, client httpDoer) (*Pr
 	if client == nil {
 		return nil, errors.New("mem0 http client is required")
 	}
+	scoreSemantics, err := config.ParseScoreSemantics(cfg.ScoreSemantics)
+	if err != nil {
+		return nil, fmt.Errorf("mem0 provider: %w", err)
+	}
 	return &Provider{
-		name:    name,
-		baseURL: baseURL,
-		apiKey:  strings.TrimSpace(cfg.APIKey),
-		userID:  userID,
-		agentID: agentID,
-		runID:   runID,
-		infer:   cfg.Infer,
-		client:  client,
+		name:           name,
+		baseURL:        baseURL,
+		apiKey:         strings.TrimSpace(cfg.APIKey),
+		userID:         userID,
+		agentID:        agentID,
+		runID:          runID,
+		infer:          cfg.Infer,
+		scoreSemantics: scoreSemantics,
+		client:         client,
 	}, nil
 }
 
@@ -115,7 +122,7 @@ func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memo
 	if err := p.doJSON(ctx, http.MethodPost, "/search", request, &response); err != nil {
 		return nil, err
 	}
-	hits := hitsFromResponse(response)
+	hits := hitsFromResponse(response, p.scoreSemantics)
 	for i := range hits {
 		hits[i].Provider = p.name
 		hits[i] = memory.ApplyHitAttribution(hits[i])
@@ -303,7 +310,11 @@ func refsFromResponse(provider string, value any) []memory.MemoryRef {
 	return refs
 }
 
-func hitsFromResponse(value any) []memory.MemoryHit {
+func hitsFromResponse(value any, configured ...config.ScoreSemantics) []memory.MemoryHit {
+	semantics := config.NormalizeScoreSemantics("")
+	if len(configured) > 0 {
+		semantics = configured[0]
+	}
 	var hits []memory.MemoryHit
 	for _, object := range resultObjects(value) {
 		id := stringField(object, "id", "memory_id", "uuid")
@@ -311,7 +322,7 @@ func hitsFromResponse(value any) []memory.MemoryHit {
 		if id == "" || text == "" {
 			continue
 		}
-		relevance, rawScore, rawScoreKind := relevance(object)
+		relevance, rawScore, rawScoreKind := relevance(object, semantics)
 		hits = append(hits, memory.MemoryHit{
 			ID:           id,
 			Text:         text,
@@ -350,26 +361,20 @@ func resultObjects(value any) []map[string]any {
 	}
 }
 
-func relevance(object map[string]any) (float64, *float64, string) {
+func relevance(object map[string]any, semantics config.ScoreSemantics) (float64, *float64, string) {
 	for _, key := range []string{"score", "relevance", "similarity"} {
 		score, ok := floatField(object[key])
 		if !ok {
 			continue
 		}
 		raw := score
-		return normalizeScore(score), &raw, "mem0_" + key
+		return scoresemantics.Normalize(score, semantics), &raw, scoresemantics.RawScoreKind("mem0", semantics)
 	}
 	return 1, nil, "mem0_unscored"
 }
 
 func normalizeScore(score float64) float64 {
-	if score < 0 {
-		return 0
-	}
-	if score <= 1 {
-		return score
-	}
-	return 1 / (1 + score)
+	return scoresemantics.Normalize(score, config.ScoreSemanticsSimilarity)
 }
 
 func metadataFromResult(object map[string]any) map[string]string {

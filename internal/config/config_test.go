@@ -107,8 +107,11 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	if provider := cfg.Providers["sqlite"]; provider.Type != "sqlite" || !strings.HasSuffix(provider.Path, "memory.sqlite") {
 		t.Fatalf("default sqlite provider is invalid: %#v", provider)
 	}
-	if provider := cfg.Providers["mem0"]; provider.Type != "mem0" || provider.Enabled || provider.BaseURL != "http://localhost:8888" {
+	if provider := cfg.Providers["mem0"]; provider.Type != "mem0" || provider.Enabled || provider.BaseURL != "http://localhost:8888" || provider.ScoreSemantics != string(ScoreSemanticsSimilarity) {
 		t.Fatalf("default mem0 provider is invalid: %#v", provider)
+	}
+	if provider := cfg.Providers["mem0_cloud"]; provider.ScoreSemantics != string(ScoreSemanticsSimilarity) {
+		t.Fatalf("default mem0 cloud score semantics = %q", provider.ScoreSemantics)
 	}
 	if provider := cfg.Providers["jsonrpc"]; provider.Type != "jsonrpc" || provider.Enabled || provider.Transport != "stdio" || provider.Timeout != "30s" {
 		t.Fatalf("default jsonrpc provider is invalid: %#v", provider)
@@ -207,6 +210,43 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	}
 	if ltm := cfg.WriteProfiles["ltm"]; ltm.Tier != "ltm" || ltm.ExpiresAfter != "" {
 		t.Fatalf("ltm write profile should be long-term: %#v", ltm)
+	}
+}
+
+func TestScoreSemanticsConfigTable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		provider   string
+		configured string
+		want       ScoreSemantics
+		wantErr    string
+	}{
+		{name: "mem0 default", provider: "mem0", want: ScoreSemanticsSimilarity},
+		{name: "cloud default", provider: "mem0-cloud", want: ScoreSemanticsSimilarity},
+		{name: "explicit similarity", provider: "mem0", configured: " Similarity ", want: ScoreSemanticsSimilarity},
+		{name: "explicit distance", provider: "mem0", configured: "distance", want: ScoreSemanticsDistance},
+		{name: "invalid value", provider: "mem0-cloud", configured: "cosine", wantErr: "score_semantics must be similarity or distance"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{Providers: map[string]ProviderConfig{
+				"memory": {Type: tt.provider, ScoreSemantics: tt.configured},
+			}}
+			if err := Validate(cfg); tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Validate() error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			got := Normalize(cfg).Providers["memory"].ScoreSemantics
+			if got != string(tt.want) {
+				t.Fatalf("normalized score_semantics = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -169,6 +169,30 @@ provider 可执行文件里。
 
 更完整的 YAML 示例见[配置参考](config.md)。
 
+### Mem0 分数方向
+
+不同 Mem0 部署或 vector store 对返回字段的语义可能不同，不能看到字段名是
+`score` 或 `similarity` 就自动判断方向。`score_semantics` 默认是
+`similarity`，用于兼容原有配置；如果自托管 Mem0 使用 pgvector 的 cosine
+distance（`vector <=> query`，范围通常为 `[0,2]`），应显式配置：
+
+```yaml
+providers:
+  mem0_pgvector:
+    type: mem0
+    enabled: true
+    base_url: http://localhost:8888
+    user_id: todd
+    score_semantics: distance
+```
+
+paxm 会在阈值、排序和 hook 注入之前把 distance 转换为
+`1 - distance/2` 的 `[0,1]` relevance；原始值仍保留在 `raw_score`，并以
+`mem0_distance` 或 `mem0_cloud_distance` 标明语义。错误的 `score_semantics`
+会在配置校验阶段失败。现有 recall telemetry 还会记录 provider 的
+`raw_score_kinds`、`candidate_count` 和 `eligible_count`，用于区分分数方向
+错误与阈值过滤，不新增公共命令。
+
 ## 6. 可靠性和排障
 
 - 被动写入先进入本地 durable queue，再交给 provider；provider 慢或暂时不可用

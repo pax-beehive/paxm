@@ -260,6 +260,11 @@ Enable multiple provider instances at once. Recall and write profiles control
 routes, required or best-effort behavior, ranking weights, thresholds, memory
 tiers, and timeouts.
 
+Mem0 score direction is deployment-specific. `score_semantics` defaults to
+`similarity` for backward compatibility; set it to `distance` when the Mem0
+endpoint returns pgvector cosine distance. Paxm cannot infer this from a field
+named `score` or `similarity`.
+
 ### Self-hosted OpenViking
 
 OpenViking support connects paxm to a user-operated OpenViking server. Writes

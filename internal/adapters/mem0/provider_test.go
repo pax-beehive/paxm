@@ -67,8 +67,9 @@ func TestNewValidatesMem0Config(t *testing.T) {
 	t.Parallel()
 
 	for name, tc := range map[string]config.ProviderConfig{
-		"missing target": {BaseURL: "http://localhost:8888"},
-		"bad base url":   {BaseURL: "localhost:8888", UserID: "user-1"},
+		"missing target":      {BaseURL: "http://localhost:8888"},
+		"bad base url":        {BaseURL: "localhost:8888", UserID: "user-1"},
+		"bad score semantics": {BaseURL: "http://localhost:8888", UserID: "user-1", ScoreSemantics: "cosine"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -207,7 +208,7 @@ func TestSearchMapsMem0Results(t *testing.T) {
 	if hit.ID != "mem-1" || hit.Text != "YAML config is the paxm default" || hit.Relevance != 0.82 {
 		t.Fatalf("unexpected hit: %#v", hit)
 	}
-	if hit.RawScore == nil || *hit.RawScore != 0.82 || hit.RawScoreKind != "mem0_score" {
+	if hit.RawScore == nil || *hit.RawScore != 0.82 || hit.RawScoreKind != "mem0_similarity" {
 		t.Fatalf("unexpected score mapping: %#v", hit)
 	}
 	if hit.Metadata["project"] != "paxm" || hit.Metadata["mem0_user_id"] != "user-1" || hit.Metadata["mem0_score_details"] == "" {
@@ -218,6 +219,56 @@ func TestSearchMapsMem0Results(t *testing.T) {
 	}
 	if hit.Origin != (memory.MemoryOrigin{UserID: "todd", AgentID: "codex", SessionID: "session-7", TurnID: "turn-42"}) || hit.Scope != (memory.MemoryScope{Type: "team", ID: "pax"}) {
 		t.Fatalf("attribution was not restored: %#v", hit)
+	}
+}
+
+func TestMem0DistanceSemanticsMapsLowDistanceToHigherRelevance(t *testing.T) {
+	t.Parallel()
+
+	objects := map[string]any{
+		"results": []any{
+			map[string]any{"id": "low", "memory": "regulatory scope", "score": json.Number("0.479")},
+			map[string]any{"id": "high", "memory": "latest progress", "score": json.Number("0.840")},
+		},
+	}
+	hits := hitsFromResponse(objects, config.ScoreSemanticsDistance)
+	if len(hits) != 2 {
+		t.Fatalf("hitsFromResponse() = %#v", hits)
+	}
+	if hits[0].Relevance <= hits[1].Relevance {
+		t.Fatalf("low distance did not rank higher: %#v", hits)
+	}
+	if hits[0].Relevance < 0 || hits[0].Relevance > 1 || hits[1].Relevance < 0 || hits[1].Relevance > 1 {
+		t.Fatalf("distance relevance escaped [0,1]: %#v", hits)
+	}
+	for _, hit := range hits {
+		if hit.RawScore == nil || hit.RawScoreKind != "mem0_distance" {
+			t.Fatalf("raw distance attribution missing: %#v", hit)
+		}
+	}
+}
+
+func TestMem0ScoreSemanticsDefaultsAndExplicitDistance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  config.ProviderConfig
+		want config.ScoreSemantics
+	}{
+		{name: "backward compatible default", cfg: config.ProviderConfig{BaseURL: "http://mem0.test", UserID: "user"}, want: config.ScoreSemanticsSimilarity},
+		{name: "explicit distance", cfg: config.ProviderConfig{BaseURL: "http://mem0.test", UserID: "user", ScoreSemantics: "distance"}, want: config.ScoreSemanticsDistance},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := newWithClient("mem0", tt.cfg, http.DefaultClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if provider.scoreSemantics != tt.want {
+				t.Fatalf("score semantics = %q, want %q", provider.scoreSemantics, tt.want)
+			}
+		})
 	}
 }
 

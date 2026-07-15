@@ -52,6 +52,7 @@ providers:
     base_url: http://localhost:8888
     api_key: "plain-text-mem0-api-key"
     user_id: todd
+    score_semantics: similarity
 
   mem0_cloud:
     type: mem0-cloud
@@ -59,6 +60,7 @@ providers:
     base_url: https://api.mem0.ai
     api_key: "plain-text-mem0-cloud-api-key"
     user_id: todd
+    score_semantics: similarity
     infer: false
 
   memos:
@@ -400,6 +402,10 @@ Fields:
 - `user_id`: Zep user graph target, or Mem0 user scope.
 - `agent_id`: Mem0 agent scope.
 - `run_id`: Mem0 run scope.
+- `score_semantics`: Mem0 or Mem0 Cloud search score direction. Use
+  `similarity` (the backward-compatible default) when larger values are more
+  relevant, or `distance` when the deployment returns pgvector cosine distance
+  in the `[0,2]` range. Paxm cannot infer this from a response field name.
 - `graph_id`: Zep named graph target.
 - `mem_cube_id`: required memory cube for self-hosted MemOS.
 - `search_mode`: self-hosted MemOS retrieval mode: `fast`, `fine`, or `mixture`.
@@ -419,7 +425,12 @@ Mem0 is intended for the self-hosted OSS REST server. Configure `base_url`
 without a `/v1` prefix, for example `http://localhost:8888`, and set at least
 one scope for paxm to use with `user_id`, `agent_id`, or `run_id`. Programmatic
 auth uses `api_key` as an `X-API-Key` header; leave it blank only for local Mem0
-deployments that intentionally run with auth disabled.
+deployments that intentionally run with auth disabled. The default
+`score_semantics: similarity` preserves existing deployments; set
+`score_semantics: distance` for a deployment whose vector store returns cosine
+distance, such as a pgvector `vector <=> query` search. Distance is converted to
+`1 - distance/2` before thresholds and ranking, while the raw value remains in
+`raw_score` and its kind is `mem0_distance`.
 
 Mem0 Cloud uses the separate `mem0-cloud` type. It defaults to
 `https://api.mem0.ai`, requires `api_key`, authenticates with `Authorization:
@@ -430,7 +441,9 @@ latency and lexical recall. Explicit `infer: true` enables platform extraction
 and may require a write-route timeout above the default `30s`. After a successful
 asynchronous event, paxm retries the metadata lookup briefly to tolerate delayed
 read visibility. Eval runs force `infer: false` and add an isolated `run_id` so
-their writes can be removed.
+their writes can be removed. Configure `score_semantics` explicitly when a
+managed endpoint's score direction differs from the default; paxm does not
+infer direction from the JSON field name.
 
 MemOS self-hosted uses the product REST server (normally
 `http://localhost:8000`) and requires both `user_id` and `mem_cube_id`. The

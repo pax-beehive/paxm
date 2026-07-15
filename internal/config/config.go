@@ -103,6 +103,7 @@ type ProviderConfig struct {
 	UserID            string            `json:"user_id,omitempty" yaml:"user_id,omitempty"`
 	AgentID           string            `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	RunID             string            `json:"run_id,omitempty" yaml:"run_id,omitempty"`
+	ScoreSemantics    string            `json:"score_semantics,omitempty" yaml:"score_semantics,omitempty"`
 	GraphID           string            `json:"graph_id,omitempty" yaml:"graph_id,omitempty"`
 	MemCubeID         string            `json:"mem_cube_id,omitempty" yaml:"mem_cube_id,omitempty"`
 	SearchMode        string            `json:"search_mode,omitempty" yaml:"search_mode,omitempty"`
@@ -325,15 +326,17 @@ func DefaultConfig(configPath string) Config {
 				SearchScope: "episodes",
 			},
 			"mem0": {
-				Type:    "mem0",
-				Enabled: false,
-				BaseURL: defaultMem0BaseURL,
+				Type:           "mem0",
+				Enabled:        false,
+				BaseURL:        defaultMem0BaseURL,
+				ScoreSemantics: string(ScoreSemanticsSimilarity),
 			},
 			"mem0_cloud": {
-				Type:    "mem0-cloud",
-				Enabled: false,
-				BaseURL: defaultMem0CloudBaseURL,
-				Infer:   &inferFalse,
+				Type:           "mem0-cloud",
+				Enabled:        false,
+				BaseURL:        defaultMem0CloudBaseURL,
+				ScoreSemantics: string(ScoreSemanticsSimilarity),
+				Infer:          &inferFalse,
 			},
 			"memos": {
 				Type:       "memos",
@@ -629,6 +632,9 @@ func Save(path string, cfg Config) error {
 }
 
 func Validate(cfg Config) error {
+	if err := validateProviderScoreSemantics(cfg.Providers); err != nil {
+		return err
+	}
 	if err := validateIdentity(cfg.Identity, cfg.Agents); err != nil {
 		return err
 	}
@@ -645,6 +651,22 @@ func Validate(cfg Config) error {
 		return err
 	}
 	return validateWriteProfiles(cfg.WriteProfiles)
+}
+
+func validateProviderScoreSemantics(providers map[string]ProviderConfig) error {
+	for name, provider := range providers {
+		providerType := strings.ToLower(strings.TrimSpace(provider.Type))
+		if providerType == "" {
+			providerType = strings.ToLower(strings.TrimSpace(name))
+		}
+		if providerType != "mem0" && providerType != "mem0-cloud" {
+			continue
+		}
+		if _, err := ParseScoreSemantics(provider.ScoreSemantics); err != nil {
+			return fmt.Errorf("provider %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func validateIdentity(identity IdentityConfig, agents map[string]AgentConfig) error {
@@ -1049,6 +1071,7 @@ func normalizeProviderConfig(provider ProviderConfig) ProviderConfig {
 	if provider.BaseURL == "" && provider.Type == "mem0-cloud" {
 		provider.BaseURL = defaultMem0CloudBaseURL
 	}
+	provider = normalizeMem0ScoreSemantics(provider)
 	if provider.BaseURL == "" && provider.Type == "memos" {
 		provider.BaseURL = defaultMemOSBaseURL
 	}
@@ -1067,6 +1090,13 @@ func normalizeProviderConfig(provider ProviderConfig) ProviderConfig {
 	}
 	if provider.Timeout == "" && provider.Type == "jsonrpc" {
 		provider.Timeout = defaultJSONRPCTimeout
+	}
+	return provider
+}
+
+func normalizeMem0ScoreSemantics(provider ProviderConfig) ProviderConfig {
+	if provider.Type == "mem0" || provider.Type == "mem0-cloud" {
+		provider.ScoreSemantics = string(NormalizeScoreSemantics(provider.ScoreSemantics))
 	}
 	return provider
 }
