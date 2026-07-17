@@ -52,16 +52,35 @@ type hookJSONOutput struct {
 	AdditionalContext string `json:"additional_context,omitempty"`
 }
 
-type codexUserPromptHookOutput struct {
-	HookSpecificOutput codexUserPromptHookSpecificOutput `json:"hookSpecificOutput"`
+type clineHookOutput struct {
+	Cancel              bool   `json:"cancel"`
+	ContextModification string `json:"contextModification,omitempty"`
+	ErrorMessage        string `json:"errorMessage,omitempty"`
 }
 
-type codexUserPromptHookSpecificOutput struct {
-	HookEventName     string `json:"hookEventName"`
-	AdditionalContext string `json:"additionalContext"`
+type cursorHookOutput struct {
+	Continue          bool   `json:"continue"`
+	AdditionalContext string `json:"additional_context,omitempty"`
 }
 
-func writeCodexUserPromptHookOutput(w io.Writer, result capture.Result, supplemental string) error {
+func writeClineHookOutput(w io.Writer, result capture.Result, supplemental string) error {
+	return writeJSON(w, clineHookOutput{
+		ContextModification: hookContext(result, supplemental),
+	})
+}
+
+func writeCursorHookOutput(w io.Writer, result capture.Result, supplemental string, includeContext bool) error {
+	context := ""
+	if includeContext {
+		context = hookContext(result, supplemental)
+	}
+	return writeJSON(w, cursorHookOutput{
+		Continue:          true,
+		AdditionalContext: context,
+	})
+}
+
+func hookContext(result capture.Result, supplemental string) string {
 	contexts := make([]string, 0, 2)
 	if strings.TrimSpace(supplemental) != "" {
 		contexts = append(contexts, strings.TrimSpace(supplemental))
@@ -74,13 +93,27 @@ func writeCodexUserPromptHookOutput(w io.Writer, result capture.Result, suppleme
 			contexts = append(contexts, recallContext)
 		}
 	}
-	if len(contexts) == 0 {
+	return strings.Join(contexts, "\n\n")
+}
+
+type codexUserPromptHookOutput struct {
+	HookSpecificOutput codexUserPromptHookSpecificOutput `json:"hookSpecificOutput"`
+}
+
+type codexUserPromptHookSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+func writeCodexUserPromptHookOutput(w io.Writer, result capture.Result, supplemental string) error {
+	context := hookContext(result, supplemental)
+	if context == "" {
 		return nil
 	}
 	return writeJSON(w, codexUserPromptHookOutput{
 		HookSpecificOutput: codexUserPromptHookSpecificOutput{
 			HookEventName:     "UserPromptSubmit",
-			AdditionalContext: strings.Join(contexts, "\n\n"),
+			AdditionalContext: context,
 		},
 	})
 }
@@ -152,12 +185,20 @@ type hookBufferResponse struct {
 	Error          string                 `json:"error,omitempty"`
 }
 
+type hookOutputMode struct {
+	json   bool
+	cline  bool
+	cursor bool
+}
+
 func (r runner) runInternalHook(args []string) error {
 	fs := flag.NewFlagSet("__hook", flag.ContinueOnError)
 	fs.SetOutput(r.stderr)
 	target := fs.String("target", "codex", "hook target")
 	eventName := fs.String("event", "", "hook event")
 	jsonOut := fs.Bool("json", false, "write JSON recall output")
+	clineOut := fs.Bool("cline", false, "write Cline hook output")
+	cursorOut := fs.Bool("cursor", false, "write Cursor hook output")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -211,6 +252,14 @@ func (r runner) runInternalHook(args []string) error {
 		},
 	}
 	outcome, err := handler.Handle(context.Background(), event)
+	return r.writeInternalHookOutcome(cfg, outcome, err, hookOutputMode{
+		json:   *jsonOut,
+		cline:  *clineOut,
+		cursor: *cursorOut,
+	})
+}
+
+func (r runner) writeInternalHookOutcome(cfg config.Config, outcome capture.Outcome, hookErr error, mode hookOutputMode) error {
 	if outcome.BufferError != nil {
 		_, _ = fmt.Fprintf(r.stderr, "paxm hook buffer skipped: %s\n", outcome.BufferError)
 	}
@@ -222,23 +271,47 @@ func (r runner) runInternalHook(args []string) error {
 	}
 	now := outcome.ContextTime
 	if outcome.Event.Event == "session_start" {
-		return writeSessionIdentityBootstrapAt(r.stdout, outcome.Event.Target, sessionIdentity(cfg, outcome.Event), now, *jsonOut)
+		identity := sessionIdentity(cfg, outcome.Event)
+		if mode.cline || mode.cursor {
+			var contextBuffer bytes.Buffer
+			if bootstrapErr := writeSessionIdentityBootstrapAt(&contextBuffer, outcome.Event.Target, identity, now, false); bootstrapErr != nil {
+				return bootstrapErr
+			}
+			context := strings.TrimSpace(contextBuffer.String())
+			if mode.cline {
+				return writeClineHookOutput(r.stdout, capture.Result{}, context)
+			}
+			return writeCursorHookOutput(r.stdout, capture.Result{}, context, true)
+		}
+		return writeSessionIdentityBootstrapAt(r.stdout, outcome.Event.Target, identity, now, mode.json)
 	}
 	if outcome.Result == nil {
-		return err
+		if mode.cline {
+			return writeClineHookOutput(r.stdout, capture.Result{}, "")
+		}
+		if mode.cursor {
+			return writeCursorHookOutput(r.stdout, capture.Result{}, "", false)
+		}
+		return hookErr
 	}
-	codexNative := *jsonOut && outcome.Event.Target == "codex" && outcome.Event.Event == "user_input"
+	codexNative := mode.json && outcome.Event.Target == "codex" && outcome.Event.Event == "user_input"
 	additionalContext := ""
 	if outcome.RefreshLocalTime {
 		additionalContext = localTimeContext(now)
 	}
-	if err != nil {
-		_, _ = fmt.Fprintf(r.stderr, "paxm hook recall skipped: %s\n", err)
+	if hookErr != nil {
+		_, _ = fmt.Fprintf(r.stderr, "paxm hook recall skipped: %s\n", hookErr)
 		if additionalContext == "" {
 			return nil
 		}
 	}
-	return r.writeHookResult(*outcome.Result, *jsonOut, codexNative, additionalContext)
+	if mode.cline {
+		return writeClineHookOutput(r.stdout, *outcome.Result, additionalContext)
+	}
+	if mode.cursor {
+		return writeCursorHookOutput(r.stdout, *outcome.Result, additionalContext, outcome.Event.Event != "user_input")
+	}
+	return r.writeHookResult(*outcome.Result, mode.json, codexNative, additionalContext)
 }
 
 func (r runner) runHookControl(args []string) error {
@@ -568,6 +641,11 @@ func promptFromRawHook(raw []byte) string {
 			return value
 		}
 	}
+	for _, path := range [][2]string{{"userPromptSubmit", "prompt"}, {"taskStart", "task"}, {"taskResume", "task"}} {
+		if value := nestedStringField(object, path[0], path[1]); value != "" {
+			return value
+		}
+	}
 	return ""
 }
 
@@ -582,29 +660,74 @@ func enrichHookEventFromRaw(event *capture.Event, raw []byte) {
 
 func enrichHookFields(event *capture.Event, object map[string]any) {
 	if event.Workspace == "" {
-		for _, key := range []string{"workspace", "cwd", "current_dir"} {
-			if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
-				event.Workspace = value
-				break
-			}
-		}
+		event.Workspace = hookWorkspace(object)
 	}
 	if event.Metadata == nil {
 		event.Metadata = make(map[string]string)
 	}
-	for _, key := range []string{"session_id", "transcript_path", "cwd", "current_dir", "model", "source"} {
-		if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
-			event.Metadata[key] = value
-		}
-	}
+	enrichHookMetadata(event.Metadata, object)
 	if event.Assistant == "" {
-		for _, key := range []string{"last_assistant_message", "assistant", "assistant_message", "response", "output"} {
-			if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
-				event.Assistant = value
-				break
-			}
+		event.Assistant = hookAssistant(*event, object)
+	}
+}
+
+func hookWorkspace(object map[string]any) string {
+	for _, key := range []string{"workspace", "cwd", "current_dir"} {
+		if value := strings.TrimSpace(stringField(object, key)); value != "" {
+			return value
 		}
 	}
+	for _, key := range []string{"workspace_roots", "workspaceRoots"} {
+		if value := firstStringValue(object[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func enrichHookMetadata(metadata map[string]string, object map[string]any) {
+	for _, key := range []string{"session_id", "conversation_id", "taskId", "transcript_path", "cwd", "current_dir", "model", "source"} {
+		if value, ok := object[key].(string); ok && strings.TrimSpace(value) != "" {
+			metadataKey := key
+			if key == "conversation_id" || key == "taskId" {
+				metadataKey = "session_id"
+			}
+			metadata[metadataKey] = value
+		}
+	}
+}
+
+func hookAssistant(event capture.Event, object map[string]any) string {
+	for _, key := range []string{"last_assistant_message", "assistant_response", "assistant", "assistant_message", "response", "output"} {
+		if value := strings.TrimSpace(stringField(object, key)); value != "" {
+			return value
+		}
+	}
+	if event.Target == "cursor" && event.Event == "turn_end" {
+		return strings.TrimSpace(stringField(object, "text"))
+	}
+	return ""
+}
+
+func nestedStringField(object map[string]any, parent, child string) string {
+	nested, ok := object[parent].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(stringField(nested, child))
+}
+
+func firstStringValue(value any) string {
+	values, ok := value.([]any)
+	if !ok {
+		return ""
+	}
+	for _, item := range values {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
 }
 
 func enrichHookMessages(event *capture.Event, object map[string]any) {

@@ -1,9 +1,10 @@
 # paxm 中文使用指南
 
 paxm（PAX Memory）是一个本地优先的 memory adaptor。它把 Codex、Claude
-Code、OpenCode、Pi 和 MCP 客户端的记忆请求统一路由到 SQLite、Zep、Mem0、
-MemOS、OpenViking 或自定义 provider。默认使用本地 SQLite，不要求先申请账号、
-API key 或额外的 embedding/LLM 服务。
+Code、OpenCode、Pi、Cursor、TRAE、TRAE CN、Kimi Code、ZCode、Kiro、Cline
+和 MCP 客户端的记忆请求统一路由到 SQLite、Zep、Mem0、MemOS、OpenViking
+或自定义 provider。默认使用本地 SQLite，不要求先申请账号、API key 或额外的
+embedding/LLM 服务。
 
 本页是中文入口；完整的字段说明仍以英文的
 [配置参考](config.md)、[架构说明](architecture.md) 和
@@ -102,6 +103,11 @@ paxm mcp serve --agent codex
 
 把 `codex` 换成配置中的 agent 名称。MCP 复用同一个 runtime 和 provider 路由，
 不需要再写一套 provider 集成。
+
+Cursor、TRAE、TRAE CN、Kimi Code、ZCode、Kiro 和 Cline 也可以直接在
+`paxm setup` 中选择。setup 会合并它自己的 hook 和 MCP 条目，不覆盖客户端里
+已有的其他配置；具体事件、文件路径、Cursor/Cline 的宿主限制以及卸载/回滚方法
+见 [Agent 集成矩阵](agent-integrations.md)。
 
 ## 4. user、agent、session 身份
 

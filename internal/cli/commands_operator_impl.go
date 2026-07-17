@@ -387,7 +387,7 @@ func (r runner) installAgentHookIntegration(path string, agent config.AgentConfi
 		return fmt.Errorf("reset %s integration: %w", name, err)
 	}
 	installedScripts := make(map[string]string)
-	for _, event := range hookInstallEventsForAgent(agent) {
+	for _, event := range hookInstallEventsForNamedAgent(name, agent) {
 		scriptPath, err := installHookShim(path, name, event.ConfigEvent)
 		if err != nil {
 			return err
@@ -395,10 +395,10 @@ func (r runner) installAgentHookIntegration(path string, agent config.AgentConfi
 		installedScripts[event.ConfigEvent] = scriptPath
 		_, _ = fmt.Fprintf(r.stdout, "installed hook shim: %s\n", scriptPath)
 	}
-	return r.registerAgentIntegration(name, installedScripts)
+	return r.registerAgentIntegration(path, name, installedScripts)
 }
 
-func (r runner) registerAgentIntegration(name string, installedScripts map[string]string) error {
+func (r runner) registerAgentIntegration(configPath, name string, installedScripts map[string]string) error {
 	switch name {
 	case "codex":
 		_, _ = fmt.Fprintf(r.stdout, "registered Codex global hook: %s\n", codexConfigPath())
@@ -417,6 +417,22 @@ func (r runner) registerAgentIntegration(name string, installedScripts map[strin
 			return err
 		}
 		_, _ = fmt.Fprintf(r.stdout, "registered OpenCode global plugin: %s\n", openCodePluginPath())
+	default:
+		if !isRequestedAgent(name) {
+			return nil
+		}
+		path, err := installRequestedNativeHooks(name, installedScripts)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(r.stdout, "registered %s native hooks: %s\n", agentDisplayName(name), path)
+	}
+	if isRequestedAgent(name) {
+		path, err := installAgentMCP(configPath, name)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(r.stdout, "registered %s MCP server: %s\n", agentDisplayName(name), path)
 	}
 	return nil
 }
@@ -1607,6 +1623,22 @@ func agentOptionPriority(name string) int {
 		return 1
 	case "pi":
 		return 2
+	case "opencode":
+		return 3
+	case "cursor":
+		return 4
+	case "trae":
+		return 5
+	case "trae-cn":
+		return 6
+	case "kimi":
+		return 7
+	case "zcode":
+		return 8
+	case "kiro":
+		return 9
+	case "cline":
+		return 10
 	default:
 		return 100
 	}
@@ -1620,6 +1652,20 @@ func agentDisplayName(name string) string {
 		return "Claude Code"
 	case "pi":
 		return "Pi"
+	case "cursor":
+		return "Cursor"
+	case "trae":
+		return "TRAE"
+	case "trae-cn":
+		return "TRAE CN"
+	case "kimi":
+		return "Kimi Code"
+	case "zcode":
+		return "ZCode"
+	case "kiro":
+		return "Kiro"
+	case "cline":
+		return "Cline"
 	default:
 		return name
 	}
@@ -2024,17 +2070,6 @@ func installedHookEvents() []hookInstallEvent {
 	}
 }
 
-func hookInstallEventsForAgent(agent config.AgentConfig) []hookInstallEvent {
-	events := make([]hookInstallEvent, 0, len(agent.Hooks))
-	for _, installEvent := range installedHookEvents() {
-		hook, ok := agent.Hooks[installEvent.ConfigEvent]
-		if (agent.Enabled && installEvent.ConfigEvent == "session_start") || (ok && (hook.Recall.Enabled || hook.Write.Enabled)) {
-			events = append(events, installEvent)
-		}
-	}
-	return events
-}
-
 func hookInstallEventByConfig(configEvent string) (hookInstallEvent, bool) {
 	for _, event := range installedHookEvents() {
 		if event.ConfigEvent == configEvent {
@@ -2059,8 +2094,13 @@ func installHookShim(configPath, target, event string) (string, error) {
 	}
 	scriptPath := filepath.Join(hooksDir, target+"-"+event)
 	outputFlag := " --json"
-	if target == "claude" {
+	switch target {
+	case "claude", "trae", "trae-cn", "kimi", "zcode", "kiro":
 		outputFlag = ""
+	case "cline":
+		outputFlag = " --cline"
+	case "cursor":
+		outputFlag = " --cursor"
 	}
 	script := "#!/bin/sh\nexec " + shellQuote(binaryPath) + " --config " + shellQuote(config.ExpandPath(configPath)) + " __hook --target " + shellQuote(target) + " --event " + shellQuote(event) + outputFlag + "\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {

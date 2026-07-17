@@ -10,9 +10,10 @@
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-6f42c1)](https://github.com/pax-beehive/paxm/releases/latest)
 
 PAXM carries decisions, conventions, and working context into later Codex,
-Claude Code, OpenCode, Pi, and MCP sessions. Start locally with SQLite and no
-account, API key, embeddings, or extra memory-layer model calls. Change memory
-providers later without rewiring every agent.
+Claude Code, OpenCode, Pi, Cursor, TRAE, Kimi Code, ZCode, Kiro, Cline, and MCP
+sessions. Start locally with SQLite and no account, API key, embeddings, or
+extra memory-layer model calls. Change memory providers later without rewiring
+every agent.
 
 [Install for Codex](#codex-plugin) · [Install the CLI](#opencode-pi-cli-or-mcp) · [See the result](#what-changes-after-installation) · [Docs](#documentation) · [中文](docs/README.zh-CN.md)
 
@@ -146,9 +147,13 @@ paxm history --days 7
 ```
 
 Select OpenCode during setup to install a global local plugin under
-`~/.config/opencode/plugins/`. Select Pi to install its passive extension. Any
-MCP-compatible client can use `paxm mcp serve --agent codex` without passive
-hooks; replace `codex` with the configured client identity.
+`~/.config/opencode/plugins/`. Select Pi to install its passive extension.
+Cursor, TRAE, TRAE CN, Kimi Code, ZCode, Kiro, and Cline selections install a
+client-native hook/MCP integration while preserving unrelated client config.
+See the [agent integration matrix](docs/agent-integrations.md) for exact event
+mappings, paths, host limitations, verification, and rollback. Any
+MCP-compatible client can use `paxm mcp serve --agent codex`; replace `codex`
+with the configured client identity.
 
 ## SQLite quality preview
 
@@ -248,6 +253,13 @@ must round-trip both values; see the
 | Codex | CLI, MCP, skill | Hook | Hook |
 | Claude Code | CLI, MCP, skill | Hook | Hook |
 | Pi | CLI, MCP, skill | Extension | Extension |
+| OpenCode | CLI, MCP | Plugin | Plugin |
+| Cursor | MCP | — | Hook |
+| TRAE / TRAE CN | MCP | Hook | Hook |
+| Kimi Code | MCP | Hook | Hook |
+| ZCode | MCP | Hook | Hook |
+| Kiro `paxm` agent | MCP | Hook | Hook |
+| Cline | MCP | Hook | Hook |
 | Any MCP client | MCP tools | — | — |
 
 ### Memory providers

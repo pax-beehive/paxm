@@ -121,26 +121,30 @@ func uninstallTargets(agentName string) ([]string, error) {
 	if isSupportedPassiveAgent(name) {
 		return []string{name}, nil
 	}
-	return nil, fmt.Errorf("unsupported agent %q; expected codex, claude, pi, or opencode", agentName)
+	return nil, fmt.Errorf("unsupported agent %q; expected one of %s", agentName, strings.Join(supportedPassiveAgents(), ", "))
 }
 
 func supportedPassiveAgents() []string {
-	return []string{"codex", "claude", "pi", "opencode"}
+	return append([]string{"codex", "claude", "pi", "opencode"}, requestedAgentNames()...)
 }
 
 func isSupportedPassiveAgent(name string) bool {
-	switch name {
-	case "codex", "claude", "pi", "opencode":
-		return true
-	default:
-		return false
+	for _, candidate := range supportedPassiveAgents() {
+		if name == candidate {
+			return true
+		}
 	}
+	return false
 }
 
 func normalizeAgentName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "claude-code", "claude_code", "claudecode":
 		return "claude"
+	case "trae cn", "trae_cn", "traecn":
+		return "trae-cn"
+	case "kimi code", "kimi-code", "kimi_code", "kimicode":
+		return "kimi"
 	default:
 		return strings.ToLower(strings.TrimSpace(name))
 	}
@@ -173,6 +177,15 @@ func uninstallAgentIntegration(configPath, target string) error {
 	case "opencode":
 		if err := os.Remove(openCodePluginPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
+		}
+	default:
+		if isRequestedAgent(target) {
+			if err := uninstallRequestedNativeHooks(target, marker); err != nil {
+				errs = append(errs, err)
+			}
+			if err := uninstallAgentMCP(configPath, target); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	if err := removeAgentHookShims(configPath, target); err != nil {

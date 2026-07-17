@@ -554,6 +554,13 @@ func DefaultConfig(configPath string) Config {
 					},
 				},
 			},
+			"cursor":  defaultCompatibleAgent(false),
+			"trae":    defaultCompatibleAgent(true),
+			"trae-cn": defaultCompatibleAgent(true),
+			"kimi":    defaultCompatibleAgent(true),
+			"zcode":   defaultCompatibleAgent(true),
+			"kiro":    defaultCompatibleAgent(true),
+			"cline":   defaultCompatibleAgent(true),
 		},
 		Telemetry: defaultTelemetryConfig(configPath),
 		CaptureQueue: CaptureQueueConfig{
@@ -563,6 +570,73 @@ func DefaultConfig(configPath string) Config {
 			ProviderConcurrency: map[string]int{
 				"sqlite":  1,
 				"default": 4,
+			},
+		},
+	}
+}
+
+func defaultCompatibleAgent(passiveRecall bool) AgentConfig {
+	userInput := AgentHookConfig{
+		Write: HookWriteConfig{
+			Enabled:  true,
+			Profile:  "ltm",
+			Template: defaultHookWriteTemplate,
+			Mode:     "user_input",
+			Buffer: HookBufferConfig{
+				Enabled:    true,
+				FlushCount: defaultHookBufferFlushCount,
+			},
+		},
+	}
+	if passiveRecall {
+		userInput.Recall = HookRecallConfig{
+			Enabled:       true,
+			Profile:       "passive",
+			QueryTemplate: "{{ .prompt }}",
+			MaxResults:    defaultHookRecallMaxResults,
+			TimeoutExtra:  defaultPassiveRecallTimeoutExtra,
+			Output:        "markdown",
+			Insertion: HookInsertionConfig{
+				MinScore:          defaultHookInsertionMinScore,
+				MaxItems:          defaultHookInsertionMaxItems,
+				RequireQueryTerms: true,
+			},
+			Initial: defaultInitialHookRecall(),
+		}
+	}
+	return AgentConfig{
+		Enabled: false,
+		ActiveRecall: ActiveRecallConfig{
+			Enabled: true,
+			Profile: "default",
+			Output:  "markdown",
+		},
+		Hooks: map[string]AgentHookConfig{
+			"session_start": {
+				Write: HookWriteConfig{
+					Enabled:  true,
+					Profile:  "ltm",
+					Template: defaultHookWriteTemplate,
+					Mode:     "session_start",
+					Buffer: HookBufferConfig{
+						Enabled:    true,
+						FlushCount: defaultHookBufferFlushCount,
+					},
+				},
+			},
+			"user_input": userInput,
+			"turn_end": {
+				Write: HookWriteConfig{
+					Enabled:  true,
+					Profile:  "ltm",
+					Template: defaultHookWriteTemplate,
+					Mode:     "turn_end",
+					Buffer: HookBufferConfig{
+						Enabled:    true,
+						Flush:      true,
+						FlushCount: defaultHookBufferFlushCount,
+					},
+				},
 			},
 		},
 	}

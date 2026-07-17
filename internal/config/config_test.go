@@ -213,6 +213,38 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigIncludesRequestedAgentIntegrations(t *testing.T) {
+	t.Parallel()
+
+	agents := DefaultConfig(filepath.Join(t.TempDir(), "config.yaml")).Agents
+	for _, name := range []string{"cursor", "trae", "trae-cn", "kimi", "zcode", "kiro", "cline"} {
+		agent, ok := agents[name]
+		if !ok {
+			t.Fatalf("default config missing %q agent", name)
+		}
+		if agent.Enabled {
+			t.Fatalf("new agent %q should be opt-in", name)
+		}
+		if !agent.ActiveRecall.Enabled || agent.ActiveRecall.Profile != "default" {
+			t.Fatalf("agent %q active recall = %#v", name, agent.ActiveRecall)
+		}
+		for _, event := range []string{"session_start", "user_input", "turn_end"} {
+			if _, ok := agent.Hooks[event]; !ok {
+				t.Fatalf("agent %q missing %q hook", name, event)
+			}
+		}
+	}
+
+	if agents["cursor"].Hooks["user_input"].Recall.Enabled {
+		t.Fatal("Cursor beforeSubmitPrompt cannot inject prompt-specific recall")
+	}
+	for _, name := range []string{"trae", "trae-cn", "kimi", "zcode", "kiro", "cline"} {
+		if !agents[name].Hooks["user_input"].Recall.Enabled {
+			t.Fatalf("agent %q should enable passive recall", name)
+		}
+	}
+}
+
 func TestScoreSemanticsConfigTable(t *testing.T) {
 	t.Parallel()
 

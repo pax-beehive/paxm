@@ -658,7 +658,8 @@ the runtime-supplied session ID once as session identity, plus the current
 RFC3339 local time and time-zone name. On later user inputs, paxm refreshes the
 local-time context when the preceding session activity is more than 12 hours
 old. This bootstrap does not replace the origin metadata stored on individual
-memories. Codex, Claude Code, and Pi use session-start events; OpenCode performs
+memories. Codex, Claude Code, Pi, Cursor, TRAE, TRAE CN, Kimi Code, ZCode,
+Kiro, and Cline use their native session/task-start events; OpenCode performs
 the bootstrap before the first message in a new session.
 Passive writes resolve it from the hook target. Start MCP with
 `paxm mcp serve --agent <name>` to attach the corresponding configured identity
@@ -757,6 +758,8 @@ receives admitted recall hits as Markdown context from the synchronous
 For Pi, the paxm `turn_end` hook maps to Pi's runtime `agent_end` event and
 receives the complete buffered run from the generated extension. For OpenCode,
 it maps to `session.idle` and receives the last completed user/assistant turn.
+The additional client mappings and host-specific limits are documented in the
+[agent integration matrix](agent-integrations.md).
 
 Hook write fields:
 
@@ -831,14 +834,14 @@ storage cleanup runs.
 ## Setup And Uninstall
 
 In a TTY, multi-select prompts use up/down, space, and enter. After selecting
-agents, setup configures each one in the fixed order Codex, Claude Code, Pi, and
-OpenCode.
+agents, setup configures each one in the fixed order Codex, Claude Code, Pi,
+OpenCode, Cursor, TRAE, TRAE CN, Kimi Code, ZCode, Kiro, and Cline.
 Per-agent setup controls only passive recall, passive write, profiles, and write
 events. Non-TTY input retains the numbered selector for scripts and tests.
 
-`paxm uninstall` removes every built-in passive integration. Pass
-`--agent codex`, `--agent claude`, `--agent pi`, or `--agent opencode` to remove
-one. The command
+`paxm uninstall` removes every built-in passive integration. Pass `--agent`
+with `codex`, `claude`, `pi`, `opencode`, `cursor`, `trae`, `trae-cn`, `kimi`,
+`zcode`, `kiro`, or `cline` to remove one. The command
 preserves hook details in paxm config while setting the selected agent's
 `enabled` field to false, so a later setup can reuse the previous choices.
 Provider config, memory data, telemetry, active skills, the binary, and `.paxm.bak`
