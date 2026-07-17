@@ -835,6 +835,7 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	t.Setenv("PAXM_CLAUDE_SETTINGS", claudeSettingsPath)
 	t.Setenv("PAXM_CODEX_CONFIG", codexConfigPath)
 	t.Setenv("PAXM_PI_AGENT_DIR", piAgentDir)
+	integrationTestPaths(t, t.TempDir())
 
 	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\nall\n")
 	var stdout bytes.Buffer
@@ -854,7 +855,7 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	if code := Main([]string{"--config", configPath, "uninstall", "--yes"}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("uninstall failed with code %d: %s", code, stderr.String())
 	}
-	for _, name := range []string{"Codex", "Claude Code", "Pi"} {
+	for _, name := range []string{"Codex", "Claude Code", "Pi", "Cursor", "TRAE", "TRAE CN", "Kimi Code", "ZCode", "Kiro", "Cline"} {
 		if !strings.Contains(stdout.String(), "uninstalled "+name+" passive integration") {
 			t.Fatalf("uninstall output missing %s: %s", name, stdout.String())
 		}
