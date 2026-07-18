@@ -39,6 +39,7 @@ type searchQuery struct {
 	Text     string            `json:"text"`
 	Limit    int               `json:"limit,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
+	Filters  map[string]string `json:"filters,omitempty"`
 	Tiers    []string          `json:"tiers,omitempty"`
 }
 type memoryHit struct {
@@ -184,7 +185,7 @@ func put(item memoryItem) (memoryRef, error) {
 	}
 	id := strings.TrimSpace(item.ID)
 	if id == "" {
-		id = fmt.Sprintf("sample-%d", time.Now().UnixNano())
+		id = nextID(value, time.Now().UnixNano())
 	}
 	item.ID = id
 	if item.CreatedAt.IsZero() {
@@ -193,6 +194,16 @@ func put(item memoryItem) (memoryRef, error) {
 	value.Items[id] = item
 	return memoryRef{ID: id}, save(value)
 }
+
+func nextID(value store, base int64) string {
+	for sequence := int64(0); ; sequence++ {
+		candidate := fmt.Sprintf("sample-%d", base+sequence)
+		if _, exists := value.Items[candidate]; !exists {
+			return candidate
+		}
+	}
+}
+
 func search(query searchQuery) ([]memoryHit, error) {
 	value, err := load()
 	if err != nil {
@@ -209,7 +220,7 @@ func search(query searchQuery) ([]memoryHit, error) {
 			continue
 		}
 		matches := true
-		for key, want := range query.Metadata {
+		for key, want := range query.Filters {
 			if item.Metadata[key] != want {
 				matches = false
 				break
