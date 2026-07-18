@@ -230,3 +230,30 @@ func TestNewClampsInvalidDays(t *testing.T) {
 		t.Fatalf("days = %d, want %d", got, defaultDays)
 	}
 }
+
+func TestValidateLoopbackAddr(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		addr    string
+		wantErr bool
+	}{
+		{name: "ipv4 loopback", addr: "127.0.0.1:7465"},
+		{name: "ipv6 loopback", addr: "[::1]:7465"},
+		{name: "localhost", addr: "localhost:7465"},
+		{name: "ipv4 wildcard", addr: "0.0.0.0:7465", wantErr: true},
+		{name: "ipv6 wildcard", addr: "[::]:7465", wantErr: true},
+		{name: "non-loopback", addr: "192.0.2.10:7465", wantErr: true},
+		{name: "missing port", addr: "127.0.0.1", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateLoopbackAddr(tt.addr)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateLoopbackAddr(%q) error = %v, wantErr %v", tt.addr, err, tt.wantErr)
+			}
+		})
+	}
+}

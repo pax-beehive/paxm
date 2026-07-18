@@ -51,6 +51,9 @@ func (s *Server) Handler() http.Handler {
 // Serve binds addr, reports the effective URL on out, and serves until ctx is
 // cancelled.
 func (s *Server) Serve(ctx context.Context, addr string, out io.Writer) error {
+	if err := validateLoopbackAddr(addr); err != nil {
+		return err
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -68,6 +71,22 @@ func (s *Server) Serve(ctx context.Context, addr string, out io.Writer) error {
 		return nil
 	}
 	return err
+}
+
+func validateLoopbackAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid dashboard listen address %q: %w", addr, err)
+	}
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("dashboard listen address must use a loopback host, got %q", host)
+	}
+	return nil
 }
 
 func (s *Server) handlePage(w http.ResponseWriter, _ *http.Request) {
