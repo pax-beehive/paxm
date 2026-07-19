@@ -39,7 +39,7 @@ func TestEvalProviderJSONRPCPublicCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	exit := Main([]string{"eval", "provider", "jsonrpc", "--command", binary, "--json"}, nil, &stdout, &stderr)
 	if exit != 0 {
-		t.Fatalf("exit=%d stderr=%s", exit, stderr.String())
+		t.Fatalf("exit=%d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
 	}
 	var result struct {
 		Passed bool `json:"passed"`
