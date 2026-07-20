@@ -477,8 +477,8 @@ func TestDefaultConfigEnablesBoundedTelemetry(t *testing.T) {
 	if cfg.Telemetry.MaxEventFileBytes <= 0 || cfg.Telemetry.MaxEventFiles != 3 || cfg.Telemetry.RetentionDays != 30 {
 		t.Fatalf("unexpected telemetry bounds: %#v", cfg.Telemetry)
 	}
-	if cfg.Telemetry.CaptureQueryPreview == nil || !*cfg.Telemetry.CaptureQueryPreview {
-		t.Fatalf("query preview should be on by default")
+	if cfg.Telemetry.CaptureQueryPreview != nil {
+		t.Fatalf("query preview should be unset (off) by default: %#v", cfg.Telemetry)
 	}
 }
 

@@ -430,21 +430,21 @@ func TestCLISetupInteractiveProviderChoices(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n3\n1\nnone\n")
+	setupInput := strings.NewReader("1\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
 	if strings.Contains(stdout.String(), "installed hook shim") {
 		t.Fatalf("setup installed hook despite none selection: %s", stdout.String())
 	}
-	assertWriteOnlyConfig(t, configPath)
+	assertDefaultSQLiteConfig(t, configPath)
 
 	stdout.Reset()
 	stderr.Reset()
 	if code := Main([]string{"--config", configPath, "setup", "--force", "--yes"}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("force setup failed with code %d: %s", code, stderr.String())
 	}
-	assertWriteOnlyConfig(t, configPath)
+	assertDefaultSQLiteConfig(t, configPath)
 }
 
 func TestCLISetupInstallsPiHookExtension(t *testing.T) {
@@ -455,7 +455,7 @@ func TestCLISetupInstallsPiHookExtension(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n3\n")
+	setupInput := strings.NewReader("1\n3\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -554,7 +554,7 @@ func TestCLISetupInstallsClaudeCodeHooks(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n2\n")
+	setupInput := strings.NewReader("1\n2\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -671,78 +671,47 @@ func TestClaudePluginYesSetupEnablesOnlyClaudeTarget(t *testing.T) {
 	}
 }
 
-func TestCLISetupConfiguresSelectedAgentsInOrder(t *testing.T) {
+func TestCLISetupAppliesDefaultAgentHooks(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("PAXM_CLAUDE_SETTINGS", filepath.Join(t.TempDir(), "claude", "settings.json"))
 	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader(strings.Join([]string{
-		"1",                     // sqlite
-		"/custom/memory.sqlite", // path
-		"1",                     // read/write
-		"1",                     // required
-		"1,2",                   // codex and claude
-		"1",                     // codex: recall only
-		"passive",               // codex recall profile
-		"passive_initial",       // codex initial profile
-		"2",                     // claude: write only
-		"default",               // claude write profile
-		"3",                     // claude turn_end only
-		"y",                     // apply
-	}, "\n") + "\n")
+	setupInput := strings.NewReader("1\n1,2\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
-	}
-
-	output := stdout.String()
-	codexIndex := strings.Index(output, "Configure Codex (1/2)")
-	claudeIndex := strings.Index(output, "Configure Claude Code (2/2)")
-	if codexIndex == -1 || claudeIndex == -1 || codexIndex > claudeIndex {
-		t.Fatalf("agents were not configured in stable order: %s", output)
 	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	codex := cfg.Agents["codex"]
-	if !codex.Enabled || !codex.Hooks["user_input"].Recall.Enabled {
-		t.Fatalf("codex recall should be enabled: %#v", codex)
-	}
-	for eventName, hook := range codex.Hooks {
-		if hook.Write.Enabled {
-			t.Fatalf("codex write hook %s should be disabled: %#v", eventName, hook)
+	for _, name := range []string{"codex", "claude"} {
+		agent := cfg.Agents[name]
+		if !agent.Enabled {
+			t.Fatalf("%s should be enabled: %#v", name, agent)
 		}
-	}
-	claude := cfg.Agents["claude"]
-	if !claude.Enabled || claude.Hooks["user_input"].Recall.Enabled {
-		t.Fatalf("claude should be write-only: %#v", claude)
-	}
-	for eventName, hook := range claude.Hooks {
-		wantEnabled := eventName == "turn_end"
-		if hook.Write.Enabled != wantEnabled {
-			t.Fatalf("claude write hook %s enabled=%t, want %t", eventName, hook.Write.Enabled, wantEnabled)
+		if !agent.Hooks["user_input"].Recall.Enabled {
+			t.Fatalf("%s recall should use the default enabled hook: %#v", name, agent.Hooks["user_input"])
+		}
+		if !agent.Hooks["turn_end"].Write.Enabled {
+			t.Fatalf("%s turn_end write should use the default enabled hook: %#v", name, agent.Hooks["turn_end"])
 		}
 	}
 	hooksDir := filepath.Join(filepath.Dir(configPath), "hooks")
 	for _, path := range []string{
-		filepath.Join(hooksDir, "codex-user_input"),
 		filepath.Join(hooksDir, "codex-session_start"),
+		filepath.Join(hooksDir, "codex-user_input"),
+		filepath.Join(hooksDir, "codex-turn_end"),
 		filepath.Join(hooksDir, "claude-session_start"),
+		filepath.Join(hooksDir, "claude-user_input"),
+		filepath.Join(hooksDir, "claude-tool_use"),
+		filepath.Join(hooksDir, "claude-tool_failure"),
 		filepath.Join(hooksDir, "claude-turn_end"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("enabled hook shim missing: %s: %v", path, err)
-		}
-	}
-	for _, path := range []string{
-		filepath.Join(hooksDir, "codex-turn_end"),
-		filepath.Join(hooksDir, "claude-user_input"),
-	} {
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("disabled hook shim should not exist: %s (stat err: %v)", path, err)
 		}
 	}
 }
@@ -768,7 +737,7 @@ func TestCLIUninstallRemovesOnlySelectedAgentAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\n1,2\n")
+	setupInput := strings.NewReader("1\n1,2\n")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
@@ -837,7 +806,7 @@ func TestCLIUninstallRemovesAllPassiveIntegrations(t *testing.T) {
 	t.Setenv("PAXM_PI_AGENT_DIR", piAgentDir)
 	integrationTestPaths(t, t.TempDir())
 
-	setupInput := strings.NewReader("1\n/custom/memory.sqlite\n1\n1\nall\n")
+	setupInput := strings.NewReader("1\nall\n")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
@@ -1526,7 +1495,7 @@ func TestCLISetupInteractiveZepProvider(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("2\nzep-key\n2\ngraph-1\nedges\n1\n2\nnone\n")
+	setupInput := strings.NewReader("2\nzep-key\n2\ngraph-1\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -1539,19 +1508,19 @@ func TestCLISetupInteractiveZepProvider(t *testing.T) {
 		t.Fatalf("sqlite should be disabled when only zep was selected: %#v", cfg.Providers)
 	}
 	zep := cfg.Providers["zep"]
-	if !zep.Enabled || zep.APIKey != "zep-key" || zep.GraphID != "graph-1" || zep.UserID != "" || zep.SearchScope != "edges" {
+	if !zep.Enabled || zep.APIKey != "zep-key" || zep.GraphID != "graph-1" || zep.UserID != "" || zep.SearchScope != "episodes" {
 		t.Fatalf("unexpected zep provider config: %#v", zep)
 	}
 	recallRoutes := cfg.RecallProfiles["default"].Providers
-	if len(recallRoutes) != 1 || recallRoutes[0].Name != "zep" || recallRoutes[0].Required {
+	if len(recallRoutes) != 1 || recallRoutes[0].Name != "zep" || !recallRoutes[0].Required {
 		t.Fatalf("unexpected recall routes: %#v", recallRoutes)
 	}
 	passiveRoutes := cfg.RecallProfiles["passive"].Providers
-	if len(passiveRoutes) != 1 || passiveRoutes[0].Name != "zep" || passiveRoutes[0].Required {
+	if len(passiveRoutes) != 1 || passiveRoutes[0].Name != "zep" || !passiveRoutes[0].Required {
 		t.Fatalf("unexpected passive recall routes: %#v", passiveRoutes)
 	}
 	writeRoutes := cfg.WriteProfiles["default"].Providers
-	if len(writeRoutes) != 1 || writeRoutes[0].Name != "zep" || writeRoutes[0].Required {
+	if len(writeRoutes) != 1 || writeRoutes[0].Name != "zep" || !writeRoutes[0].Required {
 		t.Fatalf("unexpected write routes: %#v", writeRoutes)
 	}
 	if strings.Contains(stdout.String(), "installed hook shim") {
@@ -1565,7 +1534,7 @@ func TestCLISetupInteractiveMem0Provider(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("3\nhttp://mem0.local:8888\nmem0-key\n1\ntoddzheng\n1\n2\nnone\n")
+	setupInput := strings.NewReader("3\nhttp://mem0.local:8888\nmem0-key\n1\ntoddzheng\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -1582,15 +1551,15 @@ func TestCLISetupInteractiveMem0Provider(t *testing.T) {
 		t.Fatalf("unexpected mem0 provider config: %#v", mem0)
 	}
 	recallRoutes := cfg.RecallProfiles["default"].Providers
-	if len(recallRoutes) != 1 || recallRoutes[0].Name != "mem0" || recallRoutes[0].Required {
+	if len(recallRoutes) != 1 || recallRoutes[0].Name != "mem0" || !recallRoutes[0].Required {
 		t.Fatalf("unexpected recall routes: %#v", recallRoutes)
 	}
 	passiveRoutes := cfg.RecallProfiles["passive"].Providers
-	if len(passiveRoutes) != 1 || passiveRoutes[0].Name != "mem0" || passiveRoutes[0].Required {
+	if len(passiveRoutes) != 1 || passiveRoutes[0].Name != "mem0" || !passiveRoutes[0].Required {
 		t.Fatalf("unexpected passive recall routes: %#v", passiveRoutes)
 	}
 	writeRoutes := cfg.WriteProfiles["default"].Providers
-	if len(writeRoutes) != 1 || writeRoutes[0].Name != "mem0" || writeRoutes[0].Required {
+	if len(writeRoutes) != 1 || writeRoutes[0].Name != "mem0" || !writeRoutes[0].Required {
 		t.Fatalf("unexpected write routes: %#v", writeRoutes)
 	}
 	if strings.Contains(stdout.String(), "installed hook shim") {
@@ -1604,7 +1573,7 @@ func TestCLISetupInteractiveJSONRPCProvider(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	setupInput := strings.NewReader("7\n1\n/opt/paxm/plugins/corp-memory\n--config /etc/corp-memory.yaml\n15s\n1\n2\nnone\n")
+	setupInput := strings.NewReader("7\n/opt/paxm/plugins/corp-memory\n--config /etc/corp-memory.yaml\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -1617,18 +1586,18 @@ func TestCLISetupInteractiveJSONRPCProvider(t *testing.T) {
 		t.Fatalf("only jsonrpc should be enabled: %#v", cfg.Providers)
 	}
 	provider := cfg.Providers["jsonrpc"]
-	if !provider.Enabled || provider.Transport != "stdio" || provider.Command != "/opt/paxm/plugins/corp-memory" || provider.Timeout != "15s" {
+	if !provider.Enabled || provider.Transport != "stdio" || provider.Command != "/opt/paxm/plugins/corp-memory" || provider.Timeout != "30s" {
 		t.Fatalf("unexpected jsonrpc provider config: %#v", provider)
 	}
 	if len(provider.Args) != 2 || provider.Args[0] != "--config" || provider.Args[1] != "/etc/corp-memory.yaml" {
 		t.Fatalf("unexpected jsonrpc args: %#v", provider.Args)
 	}
 	recallRoutes := cfg.RecallProfiles["default"].Providers
-	if len(recallRoutes) != 1 || recallRoutes[0].Name != "jsonrpc" || recallRoutes[0].Required {
+	if len(recallRoutes) != 1 || recallRoutes[0].Name != "jsonrpc" || !recallRoutes[0].Required {
 		t.Fatalf("unexpected recall routes: %#v", recallRoutes)
 	}
 	writeRoutes := cfg.WriteProfiles["default"].Providers
-	if len(writeRoutes) != 1 || writeRoutes[0].Name != "jsonrpc" || writeRoutes[0].Required {
+	if len(writeRoutes) != 1 || writeRoutes[0].Name != "jsonrpc" || !writeRoutes[0].Required {
 		t.Fatalf("unexpected write routes: %#v", writeRoutes)
 	}
 	if strings.Contains(stdout.String(), "installed hook shim") {
@@ -1641,7 +1610,7 @@ func TestCLISetupInteractiveMem0CloudProvider(t *testing.T) {
 	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	setupInput := strings.NewReader("4\n\ncloud-key\n1\ntoddzheng\n1\n2\nnone\n")
+	setupInput := strings.NewReader("4\n\ncloud-key\n1\ntoddzheng\nnone\n")
 	if code := Main([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -1682,7 +1651,7 @@ func TestCLISetupEnsuresZepUserTarget(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	setupInput := strings.NewReader("2\nzep-key\n1\ntoddzheng\n6\n1\n2\nnone\n")
+	setupInput := strings.NewReader("2\nzep-key\n1\ntoddzheng\nnone\n")
 	if code := MainWithDependencies([]string{"--config", configPath, "setup"}, setupInput, &stdout, &stderr, deps); code != 0 {
 		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
 	}
@@ -1896,7 +1865,7 @@ func TestCLISetupReusesDisabledAgentPassiveChoices(t *testing.T) {
 	t.Setenv("PAXM_CLAUDE_SETTINGS", filepath.Join(t.TempDir(), "claude", "settings.json"))
 	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
 
-	setupInput := strings.NewReader("\n\n\n\n2\n\n\n\n\ny\n")
+	setupInput := strings.NewReader("\n2\n")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if code := Main([]string{"--config", configPath, "setup", "--force"}, setupInput, &stdout, &stderr); code != 0 {
@@ -1919,7 +1888,7 @@ func TestCLISetupReusesDisabledAgentPassiveChoices(t *testing.T) {
 	}
 }
 
-func assertWriteOnlyConfig(t *testing.T, configPath string) {
+func assertDefaultSQLiteConfig(t *testing.T, configPath string) {
 	t.Helper()
 
 	cfg, err := config.Load(configPath)
@@ -1927,24 +1896,20 @@ func assertWriteOnlyConfig(t *testing.T, configPath string) {
 		t.Fatal(err)
 	}
 	sqlite := cfg.Providers["sqlite"]
-	if sqlite.Type != "sqlite" {
-		t.Fatalf("unexpected sqlite type: %q", sqlite.Type)
+	if sqlite.Type != "sqlite" || !sqlite.Enabled {
+		t.Fatalf("unexpected sqlite provider: %#v", sqlite)
 	}
-	if sqlite.Path != "/custom/memory.sqlite" {
-		t.Fatalf("unexpected sqlite path: %q", sqlite.Path)
-	}
-	if recallHasProvider(cfg, "sqlite") {
-		t.Fatalf("sqlite should not be in default recall profile: %#v", cfg.RecallProfiles["default"])
-	}
-	if recallProfileHasProvider(cfg.RecallProfiles["passive"], "sqlite") {
-		t.Fatalf("sqlite should not be in passive recall profile: %#v", cfg.RecallProfiles["passive"])
+	if !recallHasProvider(cfg, "sqlite") {
+		t.Fatalf("sqlite should be in default recall profile: %#v", cfg.RecallProfiles["default"])
 	}
 	writeProfile := cfg.WriteProfiles["default"]
 	if len(writeProfile.Providers) != 1 || writeProfile.Providers[0].Name != "sqlite" || !writeProfile.Providers[0].Required {
 		t.Fatalf("unexpected default write profile: %#v", writeProfile)
 	}
-	if cfg.Agents["claude"].Enabled || cfg.Agents["codex"].Enabled || cfg.Agents["pi"].Enabled {
-		t.Fatalf("agents should be disabled when no hooks are selected: %#v", cfg.Agents)
+	for name, agent := range cfg.Agents {
+		if agent.Enabled {
+			t.Fatalf("agent %s should be disabled when no hooks are selected: %#v", name, agent)
+		}
 	}
 }
 
@@ -2202,17 +2167,15 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 
 	t.Run("provider routing modes", func(t *testing.T) {
 		tests := []struct {
-			name       string
-			mode       string
-			required   bool
-			wantMode   string
-			wantPolicy string
-			wantRead   bool
-			wantWrite  bool
+			name      string
+			mode      string
+			required  bool
+			wantRead  bool
+			wantWrite bool
 		}{
-			{name: "read write required", mode: "read_write", required: true, wantMode: "read_write", wantPolicy: "required", wantRead: true, wantWrite: true},
-			{name: "read only best effort", mode: "read_only", required: false, wantMode: "read_only", wantPolicy: "best_effort", wantRead: true},
-			{name: "write only required", mode: "write_only", required: true, wantMode: "write_only", wantPolicy: "required", wantWrite: true},
+			{name: "read write required", mode: "read_write", required: true, wantRead: true, wantWrite: true},
+			{name: "read only best effort", mode: "read_only", required: false, wantRead: true},
+			{name: "write only required", mode: "write_only", required: true, wantWrite: true},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -2220,12 +2183,6 @@ func TestSetupOptionHelpersTable(t *testing.T) {
 				cfg.Providers["archive"] = config.ProviderConfig{Type: "sqlite", Enabled: true}
 				removeProviderFromDefaultProfiles(&cfg, "archive")
 				setDefaultProviderMode(&cfg, "archive", tt.mode, tt.required)
-				if got := currentProviderMode(cfg, "archive"); got != tt.wantMode {
-					t.Fatalf("currentProviderMode() = %q, want %q", got, tt.wantMode)
-				}
-				if got := currentProviderPolicy(cfg, "archive"); got != tt.wantPolicy {
-					t.Fatalf("currentProviderPolicy() = %q, want %q", got, tt.wantPolicy)
-				}
 				if got := recallProfileHasProvider(cfg.RecallProfiles["default"], "archive"); got != tt.wantRead {
 					t.Fatalf("read route = %v, want %v", got, tt.wantRead)
 				}

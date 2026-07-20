@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"strings"
 	"testing"
@@ -19,9 +18,9 @@ func TestPromptMemOSProviders(t *testing.T) {
 		{
 			name:     "self hosted",
 			provider: config.ProviderConfig{Type: "memos"},
-			input:    "\n\nu1\ncube-1\n3\n3\n",
+			input:    "\n\nu1\ncube-1\n",
 			check: func(t *testing.T, got config.ProviderConfig) {
-				if got.BaseURL != config.DefaultMemOSBaseURL() || got.UserID != "u1" || got.MemCubeID != "cube-1" || got.SearchMode != "mixture" {
+				if got.BaseURL != config.DefaultMemOSBaseURL() || got.UserID != "u1" || got.MemCubeID != "cube-1" {
 					t.Fatalf("provider=%#v", got)
 				}
 			},
@@ -29,9 +28,9 @@ func TestPromptMemOSProviders(t *testing.T) {
 		{
 			name:     "cloud",
 			provider: config.ProviderConfig{Type: "memos-cloud"},
-			input:    "\nkey\nu1\nopencode\n3\n",
+			input:    "\nkey\nu1\n",
 			check: func(t *testing.T, got config.ProviderConfig) {
-				if got.BaseURL != config.DefaultMemOSCloudBaseURL() || got.APIKey != "key" || got.UserID != "u1" || got.AgentID != "opencode" {
+				if got.BaseURL != config.DefaultMemOSCloudBaseURL() || got.APIKey != "key" || got.UserID != "u1" {
 					t.Fatalf("provider=%#v", got)
 				}
 			},
@@ -46,7 +45,8 @@ func TestPromptMemOSProviders(t *testing.T) {
 			}
 			cfg.Providers[name] = test.provider
 			var output bytes.Buffer
-			err := promptMemOSProvider(bufio.NewReader(strings.NewReader(test.input)), &output, &cfg, name)
+			prompter := newSetupPrompter(strings.NewReader(test.input), &output)
+			err := promptMemOSProvider(prompter, &cfg, name)
 			if err != nil {
 				t.Fatal(err)
 			}

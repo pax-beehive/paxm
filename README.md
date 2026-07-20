@@ -116,13 +116,20 @@ paxm setup
 paxm config doctor
 ```
 
-`paxm setup` is where the user chooses a stable user ID, providers, and passive
-agent integrations. Selected agents default to IDs such as `codex-todd` and
-can be renamed during interactive setup. Use up/down to move, space to toggle,
-and enter to confirm.
+`paxm setup` asks only two questions: which providers to enable and which
+agents get passive memory. Agents found on the machine are pre-selected and
+marked `(detected)`, and cloud provider API keys are masked as they are typed.
+Everything else uses the tuned defaults — the user
+ID comes from `$USER`, agents get IDs such as `codex-todd`, and selected
+providers route read/write as required. Use up/down to move, space to toggle,
+and enter to confirm. Fine-tuning (paths, profiles, routing policy, per-hook
+behavior) lives in the config file; see `docs/config.md`.
 
 Optional team IDs create explicit durable write profiles such as
-`team-pax-core`; non-interactive setup can pass `--user-id todd --team-id pax-core`.
+`team-pax-core`; non-interactive setup can pass `--user-id todd --team-id
+pax-core`. Scripts can also skip the selection prompts entirely with
+repeatable flags, e.g. `paxm setup --provider sqlite --agent codex --agent
+claude`.
 
 Active recall skills remain user-installed. SQLite works without an API key;
 remote providers such as Zep, Mem0, MemOS, and OpenViking require connection

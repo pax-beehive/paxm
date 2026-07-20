@@ -402,14 +402,14 @@ func TestPrepareRecallHitsCapsAndPrivacyGate(t *testing.T) {
 	}
 }
 
-func TestEffectiveSettingsDefaultsQueryPreviewOn(t *testing.T) {
+func TestEffectiveSettingsDefaultsQueryPreviewOff(t *testing.T) {
 	t.Parallel()
 
-	if settings := EffectiveSettings(config.TelemetryConfig{}, "config.yaml"); !settings.CaptureQueryPreview {
-		t.Fatal("query preview capture should default to on")
+	if settings := EffectiveSettings(config.TelemetryConfig{}, "config.yaml"); settings.CaptureQueryPreview {
+		t.Fatal("query preview capture should default to off")
 	}
-	off := false
-	if settings := EffectiveSettings(config.TelemetryConfig{CaptureQueryPreview: &off}, "config.yaml"); settings.CaptureQueryPreview {
-		t.Fatal("explicit false should disable query preview capture")
+	on := true
+	if settings := EffectiveSettings(config.TelemetryConfig{CaptureQueryPreview: &on}, "config.yaml"); !settings.CaptureQueryPreview {
+		t.Fatal("explicit true should enable query preview capture")
 	}
 }

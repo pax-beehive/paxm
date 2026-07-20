@@ -526,13 +526,13 @@ aggregate metrics, raw events, sessions grouped by capture session key, and
 per-recall hit details for manual recall-quality inspection. It binds to
 loopback by default and should not be exposed beyond it.
 
-Default events store bounded text previews: the query preview (capped by
-`query_preview_chars`) and, on recall events, a bounded snapshot of the
-returned hits (provider, id, score, relevance, tier, and a 160-character text
-preview). Setting `capture_query_preview: false` restricts events to query
-length, a query hash prefix, profile, hook event, agent target,
-hit/insert/write counts, provider recall/write counts, provider hit/ref
-counts, provider error counts, and duration. Successful passive deliveries separately record provider call
+By default events store no raw text: only query length, a query hash prefix,
+profile, hook event, agent target, hit/insert/write counts, provider
+recall/write counts, provider hit/ref counts, provider error counts, and
+duration. Setting `capture_query_preview: true` additionally stores bounded
+text previews: the query preview (capped by `query_preview_chars`) and, on
+recall events, a bounded snapshot of the returned hits (provider, id, score,
+relevance, tier, and a 160-character text preview). Successful passive deliveries separately record provider call
 duration and average per-message latency from durable capture to provider ACK.
 `paxm history` aggregates both values by provider without including failed
 attempts in the averages.

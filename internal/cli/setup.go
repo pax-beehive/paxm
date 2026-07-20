@@ -1,16 +1,17 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"charm.land/huh/v2/spinner"
 	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
 	"github.com/pax-beehive/paxm/internal/config"
 )
@@ -23,6 +24,9 @@ func (r runner) runSetup(args []string) error {
 	userID := fs.String("user-id", "", "stable user identity")
 	teamIDs := fs.String("team-id", "", "comma-separated team scope IDs")
 	integration := fs.String("integration", config.IntegrationOwnerPaxm, "hook owner: paxm, codex-plugin, or claude-plugin")
+	var providerFlags, agentFlags stringListFlag
+	fs.Var(&providerFlags, "provider", "memory provider to enable; repeat as needed, skips the provider prompt")
+	fs.Var(&agentFlags, "agent", "agent to enable for passive memory; repeat as needed, skips the agent prompt")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -32,7 +36,10 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	prompter := newSetupPrompter(r.stdin, r.stdout)
-	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration, *userID, *teamIDs)
+	if prompter.interactive {
+		writeSetupBanner(r.stdout)
+	}
+	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration, *userID, *teamIDs, providerFlags, agentFlags)
 	if err != nil || !proceed {
 		return err
 	}
@@ -58,7 +65,11 @@ func (r runner) runSetup(args []string) error {
 		}
 		_, _ = fmt.Fprintf(r.stdout, "ensured Zep user: %s (%s)\n", zepUserResult.UserID, status)
 	}
-	return r.installSelectedHookIntegrations(path, cfg, selectedHooks)
+	if err := r.installSelectedHookIntegrations(path, cfg, selectedHooks); err != nil {
+		return err
+	}
+	writeSetupNextSteps(r.stdout, prompter.interactive)
+	return nil
 }
 
 func preflightSelectedHookIntegrations(path string, cfg config.Config, selectedHooks map[string]bool) error {
@@ -81,7 +92,7 @@ type setupSelection struct {
 	selectedHooks map[string]bool
 }
 
-func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration, userID, teamIDs string) (setupSelection, bool, error) {
+func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration, userID, teamIDs string, providerFlags, agentFlags []string) (setupSelection, bool, error) {
 	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, force, yes)
 	if err != nil || !proceed {
 		return setupSelection{}, false, err
@@ -107,8 +118,23 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 		}
 	}
 	constrainPluginHooks(selectedHooks, pluginTarget)
+	providersPinned := len(providerFlags) > 0
+	if providersPinned {
+		selectedProviders, err = pinnedSelections(providerFlags, providerOptions(cfg), "provider")
+		if err != nil {
+			return setupSelection{}, false, err
+		}
+	}
+	agentsPinned := len(agentFlags) > 0
+	if agentsPinned {
+		selectedHooks, err = pinnedSelections(agentFlags, hookOptions(cfg), "agent")
+		if err != nil {
+			return setupSelection{}, false, err
+		}
+		constrainPluginHooks(selectedHooks, pluginTarget)
+	}
 	if !yes {
-		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
+		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks, providersPinned, agentsPinned)
 		if err != nil || !proceed {
 			return setupSelection{}, false, err
 		}
@@ -117,7 +143,7 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	if !anySelected(selectedProviders) {
 		return setupSelection{}, false, errors.New("setup requires at least one memory provider")
 	}
-	applySetupSelections(&cfg, selectedProviders, selectedHooks, yes)
+	applySetupSelections(&cfg, selectedProviders, selectedHooks)
 	applySetupIntegration(&cfg, integration, pluginTarget, previousEnabled)
 	if !yes {
 		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
@@ -126,6 +152,30 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 		}
 	}
 	return setupSelection{cfg: cfg, selectedHooks: selectedHooks}, true, nil
+}
+
+// pinnedSelections converts --provider/--agent flag values into a selection
+// map, rejecting unknown names with the list of valid options.
+func pinnedSelections(names []string, options []setupOption, flagName string) (map[string]bool, error) {
+	selected := make(map[string]bool, len(options))
+	for _, option := range options {
+		selected[option.ID] = false
+	}
+	for _, name := range names {
+		if optionIndex(options, name) == -1 {
+			return nil, fmt.Errorf("unknown setup %s %q (options: %s)", flagName, name, strings.Join(optionIDs(options), ", "))
+		}
+		selected[name] = true
+	}
+	return selected, nil
+}
+
+func optionIDs(options []setupOption) []string {
+	ids := make([]string, 0, len(options))
+	for _, option := range options {
+		ids = append(ids, option.ID)
+	}
+	return ids
 }
 
 func setupPluginTarget(integration string) string {
@@ -198,31 +248,40 @@ func (r runner) confirmSetupOverwrite(path string, prompter *setupPrompter, forc
 	return configExists, true, nil
 }
 
-func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Config, selectedProviders, selectedHooks map[string]bool) (map[string]bool, map[string]bool, bool, error) {
+func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Config, selectedProviders, selectedHooks map[string]bool, providersPinned, agentsPinned bool) (map[string]bool, map[string]bool, bool, error) {
 	var err error
-	if prompter.interactive {
-		if err := promptSetupIdentity(prompter, cfg); err != nil {
+	if !providersPinned {
+		selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(*cfg), selectedProviders)
+		if err != nil {
 			return nil, nil, false, r.finishSetupPrompt(err)
 		}
-	}
-	selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(*cfg), selectedProviders)
-	if err != nil {
-		return nil, nil, false, r.finishSetupPrompt(err)
 	}
 	for _, providerName := range providerOptionIDs(*cfg) {
 		if !selectedProviders[providerName] {
 			continue
 		}
-		if err := promptProviderInstance(prompter.reader, prompter.output, cfg, providerName); err != nil {
+		if err := promptProviderInstance(prompter, cfg, providerName); err != nil {
 			return nil, nil, false, r.finishSetupPrompt(err)
 		}
 	}
-	selectedHooks, err = prompter.multiSelect("Select agents for passive memory", hookOptions(*cfg), selectedHooks)
-	if err != nil {
-		return nil, nil, false, r.finishSetupPrompt(err)
-	}
-	if err := configureSelectedAgents(prompter, cfg, selectedHooks); err != nil {
-		return nil, nil, false, r.finishSetupPrompt(err)
+	if !agentsPinned {
+		agentOptions := hookOptions(*cfg)
+		if prompter.interactive {
+			// Pre-select and label agents whose CLI or config directory is
+			// present on this machine.
+			for name := range detectInstalledAgents() {
+				selectedHooks[name] = true
+				for i, option := range agentOptions {
+					if option.ID == name {
+						agentOptions[i].Label = option.Label + " (detected)"
+					}
+				}
+			}
+		}
+		selectedHooks, err = prompter.multiSelect("Select agents for passive memory", agentOptions, selectedHooks)
+		if err != nil {
+			return nil, nil, false, r.finishSetupPrompt(err)
+		}
 	}
 	return selectedProviders, selectedHooks, true, nil
 }
@@ -231,27 +290,6 @@ func ensureSetupIdentity(cfg *config.Config) {
 	if strings.TrimSpace(cfg.Identity.UserID) == "" {
 		cfg.Identity.UserID = config.SlugID(firstNonEmpty(os.Getenv("USER"), "user"))
 	}
-}
-
-func promptSetupIdentity(prompter *setupPrompter, cfg *config.Config) error {
-	ensureSetupIdentity(cfg)
-	userID, err := prompter.text("User ID", cfg.Identity.UserID)
-	if err != nil {
-		return err
-	}
-	userID = config.SlugID(userID)
-	if userID == "" {
-		return errors.New("setup requires a user ID")
-	}
-	cfg.Identity.UserID = userID
-	teamIDs, err := prompter.text("Team IDs (comma-separated, optional)", configuredTeamIDs(*cfg))
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(teamIDs) == "" {
-		return nil
-	}
-	return configureTeamWriteProfiles(cfg, teamIDs)
 }
 
 func configureTeamWriteProfiles(cfg *config.Config, values string) error {
@@ -278,36 +316,28 @@ func configureTeamWriteProfiles(cfg *config.Config, values string) error {
 	return nil
 }
 
-func configuredTeamIDs(cfg config.Config) string {
-	var ids []string
-	seen := make(map[string]bool)
-	for _, profile := range cfg.WriteProfiles {
-		if profile.Scope.Type == "team" && profile.Scope.ID != "" && !seen[profile.Scope.ID] {
-			ids = append(ids, profile.Scope.ID)
-			seen[profile.Scope.ID] = true
-		}
-	}
-	sort.Strings(ids)
-	return strings.Join(ids, ",")
-}
-
-func applySetupSelections(cfg *config.Config, selectedProviders, selectedHooks map[string]bool, yes bool) {
+func applySetupSelections(cfg *config.Config, selectedProviders, selectedHooks map[string]bool) {
 	for name, provider := range cfg.Providers {
+		wasEnabled := provider.Enabled
 		provider.Enabled = selectedProviders[name]
 		cfg.Providers[name] = provider
-		if !provider.Enabled {
+		switch {
+		case !provider.Enabled:
 			removeProviderFromDefaultProfiles(cfg, name)
+		case !wasEnabled:
+			// Newly enabled providers get the default routing (read+write,
+			// required); custom routing for already-enabled providers is
+			// left untouched.
+			setDefaultProviderMode(cfg, name, "read_write", true)
 		}
+	}
+	for name, agent := range cfg.Agents {
+		agent.Enabled = selectedHooks[name]
+		cfg.Agents[name] = agent
 	}
 	for name, selected := range selectedHooks {
 		if selected {
 			enablePassiveWriteStart(cfg, name)
-		}
-	}
-	if yes {
-		for name, agent := range cfg.Agents {
-			agent.Enabled = selectedHooks[name]
-			cfg.Agents[name] = agent
 		}
 	}
 }
@@ -321,7 +351,13 @@ func enablePassiveWriteStart(cfg *config.Config, name string) {
 }
 
 func (r runner) confirmSetupSummary(prompter *setupPrompter, cfg config.Config, selectedProviders, selectedHooks map[string]bool) (bool, error) {
-	writeSetupSummary(r.stdout, cfg, selectedProviders, selectedHooks)
+	if prompter.interactive {
+		var summary strings.Builder
+		writeSetupSummary(&summary, cfg, selectedProviders, selectedHooks)
+		_, _ = fmt.Fprintln(r.stdout, renderSetupSummaryCard(summary.String()))
+	} else {
+		writeSetupSummary(r.stdout, cfg, selectedProviders, selectedHooks)
+	}
 	apply, err := prompter.confirm("Apply this setup?", true)
 	if err != nil {
 		return false, r.finishSetupPrompt(err)
@@ -334,20 +370,42 @@ func (r runner) confirmSetupSummary(prompter *setupPrompter, cfg config.Config, 
 }
 
 func (r runner) installSelectedHookIntegrations(path string, cfg config.Config, selectedHooks map[string]bool) error {
+	interactive := terminalPromptAvailable(r.stdin, r.stdout)
 	for _, name := range sortedSelected(selectedHooks) {
 		if !selectedHooks[name] {
 			continue
 		}
-		if handled, err := r.reconcilePluginOwnership(path, cfg, name); err != nil {
-			return err
-		} else if handled {
+		if interactive {
+			// Buffer the per-shim log lines so they do not interleave with
+			// the spinner redraws; flush them once the agent is done.
+			var captured bytes.Buffer
+			buffered := r
+			buffered.stdout = &captured
+			err := spinner.New().
+				Title("Installing " + agentDisplayName(name) + " integration").
+				ActionWithErr(func(_ context.Context) error {
+					return buffered.installAgentIntegration(path, cfg, name)
+				}).Run()
+			_, _ = fmt.Fprint(r.stdout, captured.String())
+			if err != nil {
+				return err
+			}
 			continue
 		}
-		if err := r.installAgentHookIntegration(path, cfg.Agents[name], name); err != nil {
+		if err := r.installAgentIntegration(path, cfg, name); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r runner) installAgentIntegration(path string, cfg config.Config, name string) error {
+	if handled, err := r.reconcilePluginOwnership(path, cfg, name); err != nil {
+		return err
+	} else if handled {
+		return nil
+	}
+	return r.installAgentHookIntegration(path, cfg.Agents[name], name)
 }
 
 func (r runner) reconcilePluginOwnership(path string, cfg config.Config, name string) (bool, error) {

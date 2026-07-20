@@ -215,7 +215,9 @@ func EffectiveSettings(cfg config.TelemetryConfig, configPath string) Settings {
 	if queryPreviewChars <= 0 {
 		queryPreviewChars = 80
 	}
-	captureQueryPreview := true
+	// Previews default to off: telemetry stores query length and hash only
+	// unless the operator explicitly opts in via capture_query_preview.
+	captureQueryPreview := false
 	if cfg.CaptureQueryPreview != nil {
 		captureQueryPreview = *cfg.CaptureQueryPreview
 	}

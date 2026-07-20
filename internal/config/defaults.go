@@ -481,15 +481,15 @@ func defaultInitialHookRecall() *HookInitialRecall {
 func defaultTelemetryConfig(configPath string) TelemetryConfig {
 	enabled := true
 	return TelemetryConfig{
-		Enabled:             &enabled,
-		Dir:                 defaultTelemetryDir(configPath),
-		EventsFile:          "events.jsonl",
-		MetricsFile:         "metrics.json",
-		MaxEventFileBytes:   defaultTelemetryMaxEventFileSize,
-		MaxEventFiles:       defaultTelemetryMaxEventFiles,
-		RetentionDays:       defaultTelemetryRetentionDays,
-		QueryPreviewChars:   defaultTelemetryQueryPreview,
-		CaptureQueryPreview: &enabled,
+		Enabled:           &enabled,
+		Dir:               defaultTelemetryDir(configPath),
+		EventsFile:        "events.jsonl",
+		MetricsFile:       "metrics.json",
+		MaxEventFileBytes: defaultTelemetryMaxEventFileSize,
+		MaxEventFiles:     defaultTelemetryMaxEventFiles,
+		RetentionDays:     defaultTelemetryRetentionDays,
+		QueryPreviewChars: defaultTelemetryQueryPreview,
+		// CaptureQueryPreview stays unset so previews default to off.
 	}
 }
 
