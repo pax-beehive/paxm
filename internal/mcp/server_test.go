@@ -2,11 +2,14 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/facade"
@@ -145,6 +148,63 @@ func TestRecallErrorToolResultMarksPartialHits(t *testing.T) {
 	context, ok := structured["paxm_context"].(map[string]any)
 	if !ok || context["kind"] != "recall" || context["mode"] != "active" {
 		t.Fatalf("partial recall error omitted structured provenance: %#v", structured)
+	}
+}
+
+func TestServerCachesAndReloadsRuntime(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(configPath, config.DefaultConfig(configPath)); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Options{ConfigPath: configPath})
+
+	first, err := server.runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := server.runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("expected runtime to be cached across calls")
+	}
+
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(configPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := server.runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded == first {
+		t.Fatal("expected runtime reload after config change")
+	}
+
+	server.closeRuntime()
+	if server.rt != nil {
+		t.Fatal("expected closeRuntime to release the cached runtime")
+	}
+}
+
+func TestServerClosesRuntimeAfterServe(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(configPath, config.DefaultConfig(configPath)); err != nil {
+		t.Fatal(err)
+	}
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"paxm_recall","arguments":{"query":"anything"}}}` + "\n"
+	var stdout bytes.Buffer
+	server := NewServer(Options{
+		ConfigPath: configPath,
+		Stdin:      strings.NewReader(input),
+		Stdout:     &stdout,
+	})
+	if err := server.Serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if server.rt != nil {
+		t.Fatal("expected cached runtime to be closed after Serve returned")
 	}
 }
 

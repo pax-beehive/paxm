@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -35,6 +36,12 @@ type Server struct {
 	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
+
+	// rt caches the loaded runtime so each tool call does not reopen every
+	// provider (and leak a SQLite handle). It is rebuilt when the config file
+	// changes. Access is single-goroutine via Serve's request loop.
+	rt        *paxruntime.Runtime
+	rtModTime time.Time
 }
 
 func Serve(opts Options) error {
@@ -70,6 +77,7 @@ func NewServer(opts Options) *Server {
 }
 
 func (s *Server) Serve(ctx context.Context) error {
+	defer s.closeRuntime()
 	scanner := bufio.NewScanner(s.stdin)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	encoder := json.NewEncoder(s.stdout)
@@ -93,6 +101,41 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// runtime returns the cached runtime, reloading it when the config file has
+// changed since the last load. A failed reload keeps no stale state: the next
+// call retries the load.
+func (s *Server) runtime() (*paxruntime.Runtime, error) {
+	modTime := s.configModTime()
+	if s.rt != nil && modTime.Equal(s.rtModTime) {
+		return s.rt, nil
+	}
+	rt, err := paxruntime.Load(s.configPath)
+	if err != nil {
+		return nil, err
+	}
+	if s.rt != nil {
+		_ = s.rt.Close()
+	}
+	s.rt = rt
+	s.rtModTime = modTime
+	return rt, nil
+}
+
+func (s *Server) configModTime() time.Time {
+	info, err := os.Stat(paxruntime.ConfigFile(s.configPath))
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
+func (s *Server) closeRuntime() {
+	if s.rt != nil {
+		_ = s.rt.Close()
+		s.rt = nil
+	}
 }
 
 type request struct {
@@ -310,7 +353,7 @@ func (s *Server) callRecall(ctx context.Context, raw json.RawMessage) toolResult
 		}
 		limit = *args.Limit
 	}
-	rt, err := paxruntime.Load(s.configPath)
+	rt, err := s.runtime()
 	if err != nil {
 		return errorToolResult(err)
 	}
@@ -350,7 +393,7 @@ func (s *Server) callRemember(ctx context.Context, raw json.RawMessage) toolResu
 	if source == "" {
 		source = "mcp"
 	}
-	rt, err := paxruntime.Load(s.configPath)
+	rt, err := s.runtime()
 	if err != nil {
 		return errorToolResult(err)
 	}
@@ -406,7 +449,7 @@ func (s *Server) callConfigDoctor(ctx context.Context, raw json.RawMessage) tool
 	if err := decodeToolArgs(raw, &args); err != nil {
 		return errorToolResult(err)
 	}
-	rt, err := paxruntime.Load(s.configPath)
+	rt, err := s.runtime()
 	if err != nil {
 		return errorToolResult(err)
 	}
