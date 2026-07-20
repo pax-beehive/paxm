@@ -41,6 +41,13 @@ func terminalPromptAvailable(input io.Reader, output io.Writer) bool {
 	return term.IsTerminal(in.Fd()) && term.IsTerminal(out.Fd())
 }
 
+func (p *setupPrompter) newForm(fields ...huh.Field) *huh.Form {
+	return huh.NewForm(huh.NewGroup(fields...)).
+		WithInput(p.input).
+		WithOutput(p.output).
+		WithTheme(huh.ThemeFunc(huh.ThemeCharm))
+}
+
 func (p *setupPrompter) multiSelect(question string, options []setupOption, defaults map[string]bool) (map[string]bool, error) {
 	if !p.interactive {
 		return promptMultiSelect(p.reader, p.output, question, options, defaults)
@@ -56,7 +63,7 @@ func (p *setupPrompter) multiSelect(question string, options []setupOption, defa
 		Options(huhOptions...).
 		Height(minInt(len(options)+3, 10)).
 		Value(&selected)
-	if err := huh.NewForm(huh.NewGroup(field)).WithInput(p.input).WithOutput(p.output).Run(); err != nil {
+	if err := p.newForm(field).Run(); err != nil {
 		return nil, normalizePromptError(err)
 	}
 	result := make(map[string]bool, len(options))
@@ -69,6 +76,67 @@ func (p *setupPrompter) multiSelect(question string, options []setupOption, defa
 	return result, nil
 }
 
+func (p *setupPrompter) selectOne(question string, options []setupOption, defaultID string) (string, error) {
+	if !p.interactive {
+		return promptSingleSelect(p.reader, p.output, question, options, defaultID)
+	}
+	if len(options) == 0 {
+		return "", fmt.Errorf("%s has no options", question)
+	}
+	value := defaultID
+	if optionIndex(options, value) == -1 {
+		value = options[0].ID
+	}
+	huhOptions := make([]huh.Option[string], 0, len(options))
+	for _, option := range options {
+		huhOptions = append(huhOptions, huh.NewOption(option.Label, option.ID))
+	}
+	field := huh.NewSelect[string]().
+		Title(question).
+		Options(huhOptions...).
+		Height(minInt(len(options)+3, 10)).
+		Value(&value)
+	if err := p.newForm(field).Run(); err != nil {
+		return "", normalizePromptError(err)
+	}
+	return value, nil
+}
+
+// text asks for a single value. In a TTY it renders a themed huh input;
+// otherwise it falls back to the plain numbered prompt.
+func (p *setupPrompter) text(question, defaultValue string) (string, error) {
+	if !p.interactive {
+		return promptString(p.reader, p.output, question, defaultValue)
+	}
+	value := defaultValue
+	field := huh.NewInput().Title(question).Value(&value)
+	if err := p.newForm(field).Run(); err != nil {
+		return "", normalizePromptError(err)
+	}
+	return value, nil
+}
+
+// secret asks for a credential, masking typed characters in a TTY. An empty
+// answer keeps the existing value.
+func (p *setupPrompter) secret(question, existing string) (string, error) {
+	if !p.interactive {
+		return promptString(p.reader, p.output, question, existing)
+	}
+	value := ""
+	title := question
+	if existing != "" {
+		title += " (leave blank to keep current)"
+	}
+	field := huh.NewInput().Title(title).EchoMode(huh.EchoModePassword).Value(&value)
+	if err := p.newForm(field).Run(); err != nil {
+		return "", normalizePromptError(err)
+	}
+	if strings.TrimSpace(value) == "" {
+		return existing, nil
+	}
+	return value, nil
+}
+
 func (p *setupPrompter) confirm(question string, defaultValue bool) (bool, error) {
 	if !p.interactive {
 		return promptBool(p.reader, p.output, question, defaultValue)
@@ -79,7 +147,7 @@ func (p *setupPrompter) confirm(question string, defaultValue bool) (bool, error
 		Affirmative("Yes").
 		Negative("No").
 		Value(&value)
-	if err := huh.NewForm(huh.NewGroup(field)).WithInput(p.input).WithOutput(p.output).Run(); err != nil {
+	if err := p.newForm(field).Run(); err != nil {
 		return false, normalizePromptError(err)
 	}
 	return value, nil

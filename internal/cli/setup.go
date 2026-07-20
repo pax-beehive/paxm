@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/huh/v2/spinner"
 	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
 	"github.com/pax-beehive/paxm/internal/config"
 )
@@ -34,6 +36,9 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	prompter := newSetupPrompter(r.stdin, r.stdout)
+	if prompter.interactive {
+		writeSetupBanner(r.stdout)
+	}
 	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration, *userID, *teamIDs, providerFlags, agentFlags)
 	if err != nil || !proceed {
 		return err
@@ -60,7 +65,11 @@ func (r runner) runSetup(args []string) error {
 		}
 		_, _ = fmt.Fprintf(r.stdout, "ensured Zep user: %s (%s)\n", zepUserResult.UserID, status)
 	}
-	return r.installSelectedHookIntegrations(path, cfg, selectedHooks)
+	if err := r.installSelectedHookIntegrations(path, cfg, selectedHooks); err != nil {
+		return err
+	}
+	writeSetupNextSteps(r.stdout, prompter.interactive)
+	return nil
 }
 
 func preflightSelectedHookIntegrations(path string, cfg config.Config, selectedHooks map[string]bool) error {
@@ -251,12 +260,25 @@ func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Confi
 		if !selectedProviders[providerName] {
 			continue
 		}
-		if err := promptProviderInstance(prompter.reader, prompter.output, cfg, providerName); err != nil {
+		if err := promptProviderInstance(prompter, cfg, providerName); err != nil {
 			return nil, nil, false, r.finishSetupPrompt(err)
 		}
 	}
 	if !agentsPinned {
-		selectedHooks, err = prompter.multiSelect("Select agents for passive memory", hookOptions(*cfg), selectedHooks)
+		agentOptions := hookOptions(*cfg)
+		if prompter.interactive {
+			// Pre-select and label agents whose CLI or config directory is
+			// present on this machine.
+			for name := range detectInstalledAgents() {
+				selectedHooks[name] = true
+				for i, option := range agentOptions {
+					if option.ID == name {
+						agentOptions[i].Label = option.Label + " (detected)"
+					}
+				}
+			}
+		}
+		selectedHooks, err = prompter.multiSelect("Select agents for passive memory", agentOptions, selectedHooks)
 		if err != nil {
 			return nil, nil, false, r.finishSetupPrompt(err)
 		}
@@ -329,7 +351,13 @@ func enablePassiveWriteStart(cfg *config.Config, name string) {
 }
 
 func (r runner) confirmSetupSummary(prompter *setupPrompter, cfg config.Config, selectedProviders, selectedHooks map[string]bool) (bool, error) {
-	writeSetupSummary(r.stdout, cfg, selectedProviders, selectedHooks)
+	if prompter.interactive {
+		var summary strings.Builder
+		writeSetupSummary(&summary, cfg, selectedProviders, selectedHooks)
+		_, _ = fmt.Fprintln(r.stdout, renderSetupSummaryCard(summary.String()))
+	} else {
+		writeSetupSummary(r.stdout, cfg, selectedProviders, selectedHooks)
+	}
 	apply, err := prompter.confirm("Apply this setup?", true)
 	if err != nil {
 		return false, r.finishSetupPrompt(err)
@@ -342,20 +370,42 @@ func (r runner) confirmSetupSummary(prompter *setupPrompter, cfg config.Config, 
 }
 
 func (r runner) installSelectedHookIntegrations(path string, cfg config.Config, selectedHooks map[string]bool) error {
+	interactive := terminalPromptAvailable(r.stdin, r.stdout)
 	for _, name := range sortedSelected(selectedHooks) {
 		if !selectedHooks[name] {
 			continue
 		}
-		if handled, err := r.reconcilePluginOwnership(path, cfg, name); err != nil {
-			return err
-		} else if handled {
+		if interactive {
+			// Buffer the per-shim log lines so they do not interleave with
+			// the spinner redraws; flush them once the agent is done.
+			var captured bytes.Buffer
+			buffered := r
+			buffered.stdout = &captured
+			err := spinner.New().
+				Title("Installing " + agentDisplayName(name) + " integration").
+				ActionWithErr(func(_ context.Context) error {
+					return buffered.installAgentIntegration(path, cfg, name)
+				}).Run()
+			_, _ = fmt.Fprint(r.stdout, captured.String())
+			if err != nil {
+				return err
+			}
 			continue
 		}
-		if err := r.installAgentHookIntegration(path, cfg.Agents[name], name); err != nil {
+		if err := r.installAgentIntegration(path, cfg, name); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r runner) installAgentIntegration(path string, cfg config.Config, name string) error {
+	if handled, err := r.reconcilePluginOwnership(path, cfg, name); err != nil {
+		return err
+	} else if handled {
+		return nil
+	}
+	return r.installAgentHookIntegration(path, cfg.Agents[name], name)
 }
 
 func (r runner) reconcilePluginOwnership(path string, cfg config.Config, name string) (bool, error) {

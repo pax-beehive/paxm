@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -68,7 +66,7 @@ func providerOptionPriority(providerType string) int {
 	}
 }
 
-func promptProviderInstance(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
+func promptProviderInstance(prompter *setupPrompter, cfg *config.Config, providerName string) error {
 	provider := cfg.Providers[providerName]
 	switch provider.Type {
 	case "sqlite":
@@ -76,24 +74,25 @@ func promptProviderInstance(reader *bufio.Reader, writer io.Writer, cfg *config.
 		// defaults and can be tuned in the config file.
 		return nil
 	case "zep":
-		return promptZepProvider(reader, writer, cfg, providerName)
+		return promptZepProvider(prompter, cfg, providerName)
 	case "mem0", "mem0-cloud":
-		return promptMem0Provider(reader, writer, cfg, providerName)
+		return promptMem0Provider(prompter, cfg, providerName)
 	case "memos", "memos-cloud":
-		return promptMemOSProvider(reader, writer, cfg, providerName)
+		return promptMemOSProvider(prompter, cfg, providerName)
 	case "openviking":
-		return promptOpenVikingProvider(reader, writer, cfg, providerName)
+		return promptOpenVikingProvider(prompter, cfg, providerName)
 	case "jsonrpc":
-		return promptJSONRPCProvider(reader, writer, cfg, providerName)
+		return promptJSONRPCProvider(prompter, cfg, providerName)
 	default:
 		return nil
 	}
 }
 
-func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
+func promptZepProvider(prompter *setupPrompter, cfg *config.Config, providerName string) error {
 	zep := cfg.Providers[providerName]
+	label := providerPromptLabel(providerName, zep)
 	var err error
-	zep.APIKey, err = promptString(reader, writer, providerPromptLabel(providerName, zep)+" API key", zep.APIKey)
+	zep.APIKey, err = prompter.secret(label+" API key", zep.APIKey)
 	if err != nil {
 		return err
 	}
@@ -104,7 +103,7 @@ func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Confi
 	if zep.GraphID != "" {
 		targetDefault = "graph"
 	}
-	target, err := promptSingleSelect(reader, writer, providerPromptLabel(providerName, zep)+" memory target", []setupOption{
+	target, err := prompter.selectOne(label+" memory target", []setupOption{
 		{ID: "user", Label: "user graph"},
 		{ID: "graph", Label: "named graph"},
 	}, targetDefault)
@@ -112,7 +111,7 @@ func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Confi
 		return err
 	}
 	if target == "user" {
-		zep.UserID, err = promptString(reader, writer, providerPromptLabel(providerName, zep)+" user ID", zep.UserID)
+		zep.UserID, err = prompter.text(label+" user ID", zep.UserID)
 		if err != nil {
 			return err
 		}
@@ -121,7 +120,7 @@ func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Confi
 			return errors.New("zep setup requires a user ID")
 		}
 	} else {
-		zep.GraphID, err = promptString(reader, writer, providerPromptLabel(providerName, zep)+" graph ID", zep.GraphID)
+		zep.GraphID, err = prompter.text(label+" graph ID", zep.GraphID)
 		if err != nil {
 			return err
 		}
@@ -134,7 +133,7 @@ func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Confi
 	return nil
 }
 
-func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
+func promptMem0Provider(prompter *setupPrompter, cfg *config.Config, providerName string) error {
 	mem0 := cfg.Providers[providerName]
 	label := providerPromptLabel(providerName, mem0)
 	defaultBaseURL := config.DefaultMem0BaseURL()
@@ -142,21 +141,21 @@ func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Conf
 		defaultBaseURL = config.DefaultMem0CloudBaseURL()
 	}
 	var err error
-	mem0.BaseURL, err = promptString(reader, writer, label+" base URL", firstNonEmpty(mem0.BaseURL, defaultBaseURL))
+	mem0.BaseURL, err = prompter.text(label+" base URL", firstNonEmpty(mem0.BaseURL, defaultBaseURL))
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(mem0.BaseURL) == "" {
 		return errors.New("mem0 setup requires a base URL")
 	}
-	mem0.APIKey, err = promptString(reader, writer, label+" API key (blank if auth is disabled)", mem0.APIKey)
+	mem0.APIKey, err = prompter.secret(label+" API key (blank if auth is disabled)", mem0.APIKey)
 	if err != nil {
 		return err
 	}
 	if mem0.Type == "mem0-cloud" && strings.TrimSpace(mem0.APIKey) == "" {
 		return errors.New("mem0 cloud setup requires an API key")
 	}
-	target, err := promptSingleSelect(reader, writer, label+" memory target", []setupOption{
+	target, err := prompter.selectOne(label+" memory target", []setupOption{
 		{ID: "user", Label: "user_id"},
 		{ID: "agent", Label: "agent_id"},
 		{ID: "run", Label: "run_id"},
@@ -166,7 +165,7 @@ func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Conf
 	}
 	switch target {
 	case "agent":
-		mem0.AgentID, err = promptString(reader, writer, label+" agent ID", mem0.AgentID)
+		mem0.AgentID, err = prompter.text(label+" agent ID", mem0.AgentID)
 		if err != nil {
 			return err
 		}
@@ -176,7 +175,7 @@ func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Conf
 			return errors.New("mem0 setup requires an agent ID")
 		}
 	case "run":
-		mem0.RunID, err = promptString(reader, writer, label+" run ID", mem0.RunID)
+		mem0.RunID, err = prompter.text(label+" run ID", mem0.RunID)
 		if err != nil {
 			return err
 		}
@@ -186,7 +185,7 @@ func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Conf
 			return errors.New("mem0 setup requires a run ID")
 		}
 	default:
-		mem0.UserID, err = promptString(reader, writer, label+" user ID", mem0.UserID)
+		mem0.UserID, err = prompter.text(label+" user ID", mem0.UserID)
 		if err != nil {
 			return err
 		}
@@ -200,18 +199,18 @@ func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Conf
 	return nil
 }
 
-func promptJSONRPCProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
+func promptJSONRPCProvider(prompter *setupPrompter, cfg *config.Config, providerName string) error {
 	provider := cfg.Providers[providerName]
 	label := providerPromptLabel(providerName, provider)
 	var err error
-	provider.Command, err = promptString(reader, writer, label+" command", provider.Command)
+	provider.Command, err = prompter.text(label+" command", provider.Command)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(provider.Command) == "" {
 		return errors.New("jsonrpc setup requires a command")
 	}
-	argsText, err := promptString(reader, writer, label+" args (space-separated)", strings.Join(provider.Args, " "))
+	argsText, err := prompter.text(label+" args (space-separated)", strings.Join(provider.Args, " "))
 	if err != nil {
 		return err
 	}
@@ -220,7 +219,7 @@ func promptJSONRPCProvider(reader *bufio.Reader, writer io.Writer, cfg *config.C
 	return nil
 }
 
-func promptMemOSProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
+func promptMemOSProvider(prompter *setupPrompter, cfg *config.Config, providerName string) error {
 	provider := cfg.Providers[providerName]
 	label := providerPromptLabel(providerName, provider)
 	defaultURL := config.DefaultMemOSBaseURL()
@@ -228,18 +227,18 @@ func promptMemOSProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Con
 		defaultURL = config.DefaultMemOSCloudBaseURL()
 	}
 	var err error
-	provider.BaseURL, err = promptString(reader, writer, label+" base URL", firstNonEmpty(provider.BaseURL, defaultURL))
+	provider.BaseURL, err = prompter.text(label+" base URL", firstNonEmpty(provider.BaseURL, defaultURL))
 	if err != nil {
 		return err
 	}
-	provider.APIKey, err = promptString(reader, writer, label+" API key (blank if self-hosted auth is disabled)", provider.APIKey)
+	provider.APIKey, err = prompter.secret(label+" API key (blank if self-hosted auth is disabled)", provider.APIKey)
 	if err != nil {
 		return err
 	}
 	if provider.Type == "memos-cloud" && strings.TrimSpace(provider.APIKey) == "" {
 		return errors.New("memos cloud setup requires an API key")
 	}
-	provider.UserID, err = promptString(reader, writer, label+" user ID", provider.UserID)
+	provider.UserID, err = prompter.text(label+" user ID", provider.UserID)
 	if err != nil {
 		return err
 	}
@@ -247,7 +246,7 @@ func promptMemOSProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Con
 		return errors.New("memos setup requires a user ID")
 	}
 	if provider.Type == "memos" {
-		provider.MemCubeID, err = promptString(reader, writer, label+" memory cube ID", provider.MemCubeID)
+		provider.MemCubeID, err = prompter.text(label+" memory cube ID", provider.MemCubeID)
 		if err != nil {
 			return err
 		}
@@ -259,18 +258,18 @@ func promptMemOSProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Con
 	return nil
 }
 
-func promptOpenVikingProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
+func promptOpenVikingProvider(prompter *setupPrompter, cfg *config.Config, providerName string) error {
 	provider := cfg.Providers[providerName]
 	label := providerPromptLabel(providerName, provider)
 	var err error
-	provider.BaseURL, err = promptString(reader, writer, label+" base URL", firstNonEmpty(provider.BaseURL, config.DefaultOpenVikingBaseURL()))
+	provider.BaseURL, err = prompter.text(label+" base URL", firstNonEmpty(provider.BaseURL, config.DefaultOpenVikingBaseURL()))
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(provider.BaseURL) == "" {
 		return errors.New("openviking setup requires a base URL")
 	}
-	provider.APIKey, err = promptString(reader, writer, label+" API key (blank for trusted local development)", provider.APIKey)
+	provider.APIKey, err = prompter.secret(label+" API key (blank for trusted local development)", provider.APIKey)
 	if err != nil {
 		return err
 	}

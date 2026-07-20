@@ -839,7 +839,9 @@ storage cleanup runs.
 
 In a TTY, multi-select prompts use up/down, space, and enter. Interactive
 setup asks only which providers to enable and which agents get passive memory;
-cloud providers then prompt for their credentials. Everything else uses the
+agents whose CLI or config directory is found on the machine are pre-selected
+and marked `(detected)`. Cloud providers then prompt for their credentials,
+masking API keys as they are typed. Everything else uses the
 defaults: identity comes from `$USER` (override with `--user-id`), agent IDs
 derive as `<agent>-<user_id>`, new providers route read/write as required, and
 agents get the default passive recall/write hooks. Fine-tuning (paths,

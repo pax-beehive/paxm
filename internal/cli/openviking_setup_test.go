@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"strings"
 	"testing"
@@ -14,8 +13,8 @@ func TestPromptOpenVikingProvider(t *testing.T) {
 
 	cfg := config.DefaultConfig(t.TempDir() + "/config.yaml")
 	var output bytes.Buffer
-	input := strings.NewReader("\nsecret\n")
-	if err := promptOpenVikingProvider(bufio.NewReader(input), &output, &cfg, "openviking"); err != nil {
+	prompter := newSetupPrompter(strings.NewReader("\nsecret\n"), &output)
+	if err := promptOpenVikingProvider(prompter, &cfg, "openviking"); err != nil {
 		t.Fatal(err)
 	}
 	provider := cfg.Providers["openviking"]

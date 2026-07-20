@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"strings"
 	"testing"
@@ -46,7 +45,8 @@ func TestPromptMemOSProviders(t *testing.T) {
 			}
 			cfg.Providers[name] = test.provider
 			var output bytes.Buffer
-			err := promptMemOSProvider(bufio.NewReader(strings.NewReader(test.input)), &output, &cfg, name)
+			prompter := newSetupPrompter(strings.NewReader(test.input), &output)
+			err := promptMemOSProvider(prompter, &cfg, name)
 			if err != nil {
 				t.Fatal(err)
 			}
