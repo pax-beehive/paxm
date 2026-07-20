@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"bufio"
-	"io"
 	"sort"
 
 	"github.com/pax-beehive/paxm/internal/config"
@@ -107,52 +105,6 @@ func cfgHookEnabled(cfg config.Config) map[string]bool {
 		}
 	}
 	return selected
-}
-
-func promptProviderRouting(reader *bufio.Reader, writer io.Writer, cfg *config.Config, provider, label string) error {
-	mode, err := promptSingleSelect(reader, writer, label+" provider mode", []setupOption{
-		{ID: "read_write", Label: "read and write"},
-		{ID: "read_only", Label: "read only"},
-		{ID: "write_only", Label: "write only"},
-	}, currentProviderMode(*cfg, provider))
-	if err != nil {
-		return err
-	}
-	policy, err := promptSingleSelect(reader, writer, label+" provider failure policy", []setupOption{
-		{ID: "required", Label: "required"},
-		{ID: "best_effort", Label: "best effort"},
-	}, currentProviderPolicy(*cfg, provider))
-	if err != nil {
-		return err
-	}
-	setDefaultProviderMode(cfg, provider, mode, policy == "required")
-	return nil
-}
-
-func currentProviderMode(cfg config.Config, provider string) string {
-	canRead := recallProfileHasProvider(cfg.RecallProfiles["default"], provider)
-	canWrite := writeProfileHasProvider(cfg.WriteProfiles["default"], provider)
-	switch {
-	case canRead && canWrite:
-		return "read_write"
-	case canRead:
-		return "read_only"
-	case canWrite:
-		return "write_only"
-	default:
-		return "read_write"
-	}
-}
-
-func currentProviderPolicy(cfg config.Config, provider string) string {
-	required, ok := config.ProviderRouteRequired(cfg.RecallProfiles["default"].Providers, provider)
-	if !ok {
-		required, ok = config.ProviderRouteRequired(cfg.WriteProfiles["default"].Providers, provider)
-	}
-	if ok && !required {
-		return "best_effort"
-	}
-	return "required"
 }
 
 func setDefaultProviderMode(cfg *config.Config, provider, mode string, required bool) {

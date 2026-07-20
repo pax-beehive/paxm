@@ -69,32 +69,6 @@ func (p *setupPrompter) multiSelect(question string, options []setupOption, defa
 	return result, nil
 }
 
-func (p *setupPrompter) selectOne(question string, options []setupOption, defaultID string) (string, error) {
-	if !p.interactive {
-		return promptSingleSelect(p.reader, p.output, question, options, defaultID)
-	}
-	if len(options) == 0 {
-		return "", fmt.Errorf("%s has no options", question)
-	}
-	value := defaultID
-	if optionIndex(options, value) == -1 {
-		value = options[0].ID
-	}
-	huhOptions := make([]huh.Option[string], 0, len(options))
-	for _, option := range options {
-		huhOptions = append(huhOptions, huh.NewOption(option.Label, option.ID))
-	}
-	field := huh.NewSelect[string]().
-		Title(question).
-		Options(huhOptions...).
-		Height(minInt(len(options)+3, 10)).
-		Value(&value)
-	if err := huh.NewForm(huh.NewGroup(field)).WithInput(p.input).WithOutput(p.output).Run(); err != nil {
-		return "", normalizePromptError(err)
-	}
-	return value, nil
-}
-
 func (p *setupPrompter) confirm(question string, defaultValue bool) (bool, error) {
 	if !p.interactive {
 		return promptBool(p.reader, p.output, question, defaultValue)
@@ -107,18 +81,6 @@ func (p *setupPrompter) confirm(question string, defaultValue bool) (bool, error
 		Value(&value)
 	if err := huh.NewForm(huh.NewGroup(field)).WithInput(p.input).WithOutput(p.output).Run(); err != nil {
 		return false, normalizePromptError(err)
-	}
-	return value, nil
-}
-
-func (p *setupPrompter) text(question, defaultValue string) (string, error) {
-	if !p.interactive {
-		return promptString(p.reader, p.output, question, defaultValue)
-	}
-	value := defaultValue
-	field := huh.NewInput().Title(question).Value(&value)
-	if err := huh.NewForm(huh.NewGroup(field)).WithInput(p.input).WithOutput(p.output).Run(); err != nil {
-		return "", normalizePromptError(err)
 	}
 	return value, nil
 }

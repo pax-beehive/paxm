@@ -7,7 +7,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/pax-beehive/paxm/internal/config"
 )
@@ -73,7 +72,9 @@ func promptProviderInstance(reader *bufio.Reader, writer io.Writer, cfg *config.
 	provider := cfg.Providers[providerName]
 	switch provider.Type {
 	case "sqlite":
-		return promptSQLiteProvider(reader, writer, cfg, providerName)
+		// SQLite works out of the box; path and routing stay at their
+		// defaults and can be tuned in the config file.
+		return nil
 	case "zep":
 		return promptZepProvider(reader, writer, cfg, providerName)
 	case "mem0", "mem0-cloud":
@@ -85,19 +86,8 @@ func promptProviderInstance(reader *bufio.Reader, writer io.Writer, cfg *config.
 	case "jsonrpc":
 		return promptJSONRPCProvider(reader, writer, cfg, providerName)
 	default:
-		return promptProviderRouting(reader, writer, cfg, providerName, providerPromptLabel(providerName, provider))
+		return nil
 	}
-}
-
-func promptSQLiteProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
-	provider := cfg.Providers[providerName]
-	var err error
-	provider.Path, err = promptString(reader, writer, providerPromptLabel(providerName, provider)+" memory path", provider.Path)
-	if err != nil {
-		return err
-	}
-	cfg.Providers[providerName] = provider
-	return promptProviderRouting(reader, writer, cfg, providerName, providerPromptLabel(providerName, provider))
 }
 
 func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
@@ -140,19 +130,8 @@ func promptZepProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Confi
 			return errors.New("zep setup requires a graph ID")
 		}
 	}
-	zep.SearchScope, err = promptSingleSelect(reader, writer, providerPromptLabel(providerName, zep)+" search scope", []setupOption{
-		{ID: "episodes", Label: "episodes"},
-		{ID: "edges", Label: "edges"},
-		{ID: "nodes", Label: "nodes"},
-		{ID: "observations", Label: "observations"},
-		{ID: "thread_summaries", Label: "thread summaries"},
-		{ID: "auto", Label: "auto"},
-	}, firstNonEmpty(zep.SearchScope, "episodes"))
-	if err != nil {
-		return err
-	}
 	cfg.Providers[providerName] = zep
-	return promptProviderRouting(reader, writer, cfg, providerName, providerPromptLabel(providerName, zep))
+	return nil
 }
 
 func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
@@ -218,19 +197,13 @@ func promptMem0Provider(reader *bufio.Reader, writer io.Writer, cfg *config.Conf
 		}
 	}
 	cfg.Providers[providerName] = mem0
-	return promptProviderRouting(reader, writer, cfg, providerName, label)
+	return nil
 }
 
 func promptJSONRPCProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
 	provider := cfg.Providers[providerName]
 	label := providerPromptLabel(providerName, provider)
 	var err error
-	provider.Transport, err = promptSingleSelect(reader, writer, label+" transport", []setupOption{
-		{ID: "stdio", Label: "stdio"},
-	}, firstNonEmpty(provider.Transport, "stdio"))
-	if err != nil {
-		return err
-	}
 	provider.Command, err = promptString(reader, writer, label+" command", provider.Command)
 	if err != nil {
 		return err
@@ -243,15 +216,8 @@ func promptJSONRPCProvider(reader *bufio.Reader, writer io.Writer, cfg *config.C
 		return err
 	}
 	provider.Args = strings.Fields(argsText)
-	provider.Timeout, err = promptString(reader, writer, label+" timeout", firstNonEmpty(provider.Timeout, "30s"))
-	if err != nil {
-		return err
-	}
-	if _, err := time.ParseDuration(provider.Timeout); err != nil {
-		return fmt.Errorf("jsonrpc setup timeout: %w", err)
-	}
 	cfg.Providers[providerName] = provider
-	return promptProviderRouting(reader, writer, cfg, providerName, label)
+	return nil
 }
 
 func promptMemOSProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
@@ -288,18 +254,9 @@ func promptMemOSProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Con
 		if strings.TrimSpace(provider.MemCubeID) == "" {
 			return errors.New("memos setup requires a memory cube ID")
 		}
-		provider.SearchMode, err = promptSingleSelect(reader, writer, label+" search mode", []setupOption{{ID: "fast", Label: "fast"}, {ID: "fine", Label: "fine"}, {ID: "mixture", Label: "mixture"}}, firstNonEmpty(provider.SearchMode, "fast"))
-		if err != nil {
-			return err
-		}
-	} else {
-		provider.AgentID, err = promptString(reader, writer, label+" agent ID (optional isolation scope)", provider.AgentID)
-		if err != nil {
-			return err
-		}
 	}
 	cfg.Providers[providerName] = provider
-	return promptProviderRouting(reader, writer, cfg, providerName, label)
+	return nil
 }
 
 func promptOpenVikingProvider(reader *bufio.Reader, writer io.Writer, cfg *config.Config, providerName string) error {
@@ -318,7 +275,7 @@ func promptOpenVikingProvider(reader *bufio.Reader, writer io.Writer, cfg *confi
 		return err
 	}
 	cfg.Providers[providerName] = provider
-	return promptProviderRouting(reader, writer, cfg, providerName, label)
+	return nil
 }
 
 func providerPromptLabel(providerName string, provider config.ProviderConfig) string {

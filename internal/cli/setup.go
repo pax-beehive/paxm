@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +22,9 @@ func (r runner) runSetup(args []string) error {
 	userID := fs.String("user-id", "", "stable user identity")
 	teamIDs := fs.String("team-id", "", "comma-separated team scope IDs")
 	integration := fs.String("integration", config.IntegrationOwnerPaxm, "hook owner: paxm, codex-plugin, or claude-plugin")
+	var providerFlags, agentFlags stringListFlag
+	fs.Var(&providerFlags, "provider", "memory provider to enable; repeat as needed, skips the provider prompt")
+	fs.Var(&agentFlags, "agent", "agent to enable for passive memory; repeat as needed, skips the agent prompt")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -32,7 +34,7 @@ func (r runner) runSetup(args []string) error {
 
 	path := r.configFile()
 	prompter := newSetupPrompter(r.stdin, r.stdout)
-	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration, *userID, *teamIDs)
+	selection, proceed, err := r.prepareSetup(path, prompter, *force, *yes, *integration, *userID, *teamIDs, providerFlags, agentFlags)
 	if err != nil || !proceed {
 		return err
 	}
@@ -81,7 +83,7 @@ type setupSelection struct {
 	selectedHooks map[string]bool
 }
 
-func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration, userID, teamIDs string) (setupSelection, bool, error) {
+func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration, userID, teamIDs string, providerFlags, agentFlags []string) (setupSelection, bool, error) {
 	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, force, yes)
 	if err != nil || !proceed {
 		return setupSelection{}, false, err
@@ -107,8 +109,23 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 		}
 	}
 	constrainPluginHooks(selectedHooks, pluginTarget)
+	providersPinned := len(providerFlags) > 0
+	if providersPinned {
+		selectedProviders, err = pinnedSelections(providerFlags, providerOptions(cfg), "provider")
+		if err != nil {
+			return setupSelection{}, false, err
+		}
+	}
+	agentsPinned := len(agentFlags) > 0
+	if agentsPinned {
+		selectedHooks, err = pinnedSelections(agentFlags, hookOptions(cfg), "agent")
+		if err != nil {
+			return setupSelection{}, false, err
+		}
+		constrainPluginHooks(selectedHooks, pluginTarget)
+	}
 	if !yes {
-		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks)
+		selectedProviders, selectedHooks, proceed, err = r.promptSetupSelections(prompter, &cfg, selectedProviders, selectedHooks, providersPinned, agentsPinned)
 		if err != nil || !proceed {
 			return setupSelection{}, false, err
 		}
@@ -117,7 +134,7 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	if !anySelected(selectedProviders) {
 		return setupSelection{}, false, errors.New("setup requires at least one memory provider")
 	}
-	applySetupSelections(&cfg, selectedProviders, selectedHooks, yes)
+	applySetupSelections(&cfg, selectedProviders, selectedHooks)
 	applySetupIntegration(&cfg, integration, pluginTarget, previousEnabled)
 	if !yes {
 		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
@@ -126,6 +143,30 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 		}
 	}
 	return setupSelection{cfg: cfg, selectedHooks: selectedHooks}, true, nil
+}
+
+// pinnedSelections converts --provider/--agent flag values into a selection
+// map, rejecting unknown names with the list of valid options.
+func pinnedSelections(names []string, options []setupOption, flagName string) (map[string]bool, error) {
+	selected := make(map[string]bool, len(options))
+	for _, option := range options {
+		selected[option.ID] = false
+	}
+	for _, name := range names {
+		if optionIndex(options, name) == -1 {
+			return nil, fmt.Errorf("unknown setup %s %q (options: %s)", flagName, name, strings.Join(optionIDs(options), ", "))
+		}
+		selected[name] = true
+	}
+	return selected, nil
+}
+
+func optionIDs(options []setupOption) []string {
+	ids := make([]string, 0, len(options))
+	for _, option := range options {
+		ids = append(ids, option.ID)
+	}
+	return ids
 }
 
 func setupPluginTarget(integration string) string {
@@ -198,16 +239,13 @@ func (r runner) confirmSetupOverwrite(path string, prompter *setupPrompter, forc
 	return configExists, true, nil
 }
 
-func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Config, selectedProviders, selectedHooks map[string]bool) (map[string]bool, map[string]bool, bool, error) {
+func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Config, selectedProviders, selectedHooks map[string]bool, providersPinned, agentsPinned bool) (map[string]bool, map[string]bool, bool, error) {
 	var err error
-	if prompter.interactive {
-		if err := promptSetupIdentity(prompter, cfg); err != nil {
+	if !providersPinned {
+		selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(*cfg), selectedProviders)
+		if err != nil {
 			return nil, nil, false, r.finishSetupPrompt(err)
 		}
-	}
-	selectedProviders, err = prompter.multiSelect("Select memory providers to enable", providerOptions(*cfg), selectedProviders)
-	if err != nil {
-		return nil, nil, false, r.finishSetupPrompt(err)
 	}
 	for _, providerName := range providerOptionIDs(*cfg) {
 		if !selectedProviders[providerName] {
@@ -217,12 +255,11 @@ func (r runner) promptSetupSelections(prompter *setupPrompter, cfg *config.Confi
 			return nil, nil, false, r.finishSetupPrompt(err)
 		}
 	}
-	selectedHooks, err = prompter.multiSelect("Select agents for passive memory", hookOptions(*cfg), selectedHooks)
-	if err != nil {
-		return nil, nil, false, r.finishSetupPrompt(err)
-	}
-	if err := configureSelectedAgents(prompter, cfg, selectedHooks); err != nil {
-		return nil, nil, false, r.finishSetupPrompt(err)
+	if !agentsPinned {
+		selectedHooks, err = prompter.multiSelect("Select agents for passive memory", hookOptions(*cfg), selectedHooks)
+		if err != nil {
+			return nil, nil, false, r.finishSetupPrompt(err)
+		}
 	}
 	return selectedProviders, selectedHooks, true, nil
 }
@@ -231,27 +268,6 @@ func ensureSetupIdentity(cfg *config.Config) {
 	if strings.TrimSpace(cfg.Identity.UserID) == "" {
 		cfg.Identity.UserID = config.SlugID(firstNonEmpty(os.Getenv("USER"), "user"))
 	}
-}
-
-func promptSetupIdentity(prompter *setupPrompter, cfg *config.Config) error {
-	ensureSetupIdentity(cfg)
-	userID, err := prompter.text("User ID", cfg.Identity.UserID)
-	if err != nil {
-		return err
-	}
-	userID = config.SlugID(userID)
-	if userID == "" {
-		return errors.New("setup requires a user ID")
-	}
-	cfg.Identity.UserID = userID
-	teamIDs, err := prompter.text("Team IDs (comma-separated, optional)", configuredTeamIDs(*cfg))
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(teamIDs) == "" {
-		return nil
-	}
-	return configureTeamWriteProfiles(cfg, teamIDs)
 }
 
 func configureTeamWriteProfiles(cfg *config.Config, values string) error {
@@ -278,36 +294,28 @@ func configureTeamWriteProfiles(cfg *config.Config, values string) error {
 	return nil
 }
 
-func configuredTeamIDs(cfg config.Config) string {
-	var ids []string
-	seen := make(map[string]bool)
-	for _, profile := range cfg.WriteProfiles {
-		if profile.Scope.Type == "team" && profile.Scope.ID != "" && !seen[profile.Scope.ID] {
-			ids = append(ids, profile.Scope.ID)
-			seen[profile.Scope.ID] = true
-		}
-	}
-	sort.Strings(ids)
-	return strings.Join(ids, ",")
-}
-
-func applySetupSelections(cfg *config.Config, selectedProviders, selectedHooks map[string]bool, yes bool) {
+func applySetupSelections(cfg *config.Config, selectedProviders, selectedHooks map[string]bool) {
 	for name, provider := range cfg.Providers {
+		wasEnabled := provider.Enabled
 		provider.Enabled = selectedProviders[name]
 		cfg.Providers[name] = provider
-		if !provider.Enabled {
+		switch {
+		case !provider.Enabled:
 			removeProviderFromDefaultProfiles(cfg, name)
+		case !wasEnabled:
+			// Newly enabled providers get the default routing (read+write,
+			// required); custom routing for already-enabled providers is
+			// left untouched.
+			setDefaultProviderMode(cfg, name, "read_write", true)
 		}
+	}
+	for name, agent := range cfg.Agents {
+		agent.Enabled = selectedHooks[name]
+		cfg.Agents[name] = agent
 	}
 	for name, selected := range selectedHooks {
 		if selected {
 			enablePassiveWriteStart(cfg, name)
-		}
-	}
-	if yes {
-		for name, agent := range cfg.Agents {
-			agent.Enabled = selectedHooks[name]
-			cfg.Agents[name] = agent
 		}
 	}
 }

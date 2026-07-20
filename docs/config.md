@@ -13,12 +13,12 @@ YAML unless an explicit `.json` path is provided.
 
 `identity.user_id` is the stable user identity attached to paxm writes. Each
 configured agent also has an `agent_id`. Setup derives the default as
-`<agent>-<user_id>` (for example, `codex-todd`) and lets an interactive user
-override it. IDs are normalized to lower-case slugs. Existing explicit agent
-IDs remain stable when the user ID later changes.
+`<agent>-<user_id>` (for example, `codex-todd`); set the field explicitly in
+this file to override it. IDs are normalized to lower-case slugs. Existing
+explicit agent IDs remain stable when the user ID later changes.
 
-Interactive setup also accepts optional team IDs. Non-interactive setup can use
-`--user-id todd --team-id pax-core`; each team ID creates a durable
+The user ID defaults to `$USER`; non-interactive setup can use
+`--user-id todd --team-id pax-core`. Each team ID creates a durable
 `team-<id>` write profile with matching team provenance.
 
 These fields describe who produced a memory. They do not implement access
@@ -837,11 +837,16 @@ storage cleanup runs.
 
 ## Setup And Uninstall
 
-In a TTY, multi-select prompts use up/down, space, and enter. After selecting
-agents, setup configures each one in the fixed order Codex, Claude Code, Pi,
-OpenCode, Cursor, TRAE, TRAE CN, Kimi Code, ZCode, Kiro, and Cline.
-Per-agent setup controls only passive recall, passive write, profiles, and write
-events. Non-TTY input retains the numbered selector for scripts and tests.
+In a TTY, multi-select prompts use up/down, space, and enter. Interactive
+setup asks only which providers to enable and which agents get passive memory;
+cloud providers then prompt for their credentials. Everything else uses the
+defaults: identity comes from `$USER` (override with `--user-id`), agent IDs
+derive as `<agent>-<user_id>`, new providers route read/write as required, and
+agents get the default passive recall/write hooks. Fine-tuning (paths,
+profiles, routing policy, per-hook behavior) is done by editing this config
+file. Non-TTY input retains the numbered selector for scripts and tests, and
+the repeatable `--provider <name>` / `--agent <name>` flags pin selections and
+skip the corresponding prompts in any mode.
 
 `paxm uninstall` removes every built-in passive integration. Pass `--agent`
 with `codex`, `claude`, `pi`, `opencode`, `cursor`, `trae`, `trae-cn`, `kimi`,
