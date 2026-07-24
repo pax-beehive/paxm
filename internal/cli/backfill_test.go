@@ -62,6 +62,45 @@ func TestCLIBackfillRequiresExplicitCutoffForExistingAgentConfig(t *testing.T) {
 	}
 }
 
+func TestCLIBackfillScanAfterOverridesIntegrationCutoff(t *testing.T) {
+	configPath, sessionDir := writeBackfillFixture(t, true)
+	t.Setenv("PAXM_CODEX_SESSIONS", sessionDir)
+	recent := `{"type":"session_meta","timestamp":"2026-07-04T10:00:00Z","payload":{"id":"recent-session","cwd":"/repo"}}
+{"type":"event_msg","timestamp":"2026-07-04T10:01:00Z","payload":{"type":"user_message","message":"recent question"}}
+{"type":"event_msg","timestamp":"2026-07-04T10:02:00Z","payload":{"type":"agent_message","phase":"final_answer","message":"recent answer"}}
+`
+	if err := os.WriteFile(filepath.Join(sessionDir, "recent.jsonl"), []byte(recent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{
+		"--config", configPath, "backfill", "scan", "--agent", "codex",
+		"--after", "2026-07-03", "--json",
+	}, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("scan failed with code %d: %s", code, stderr.String())
+	}
+	var result struct {
+		After  time.Time `json:"after"`
+		Before time.Time `json:"before"`
+		Files  int       `json:"files"`
+		Turns  int       `json:"turns"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode scan result: %v\n%s", err, stdout.String())
+	}
+	if !result.After.Equal(time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("after = %s", result.After)
+	}
+	if !result.Before.IsZero() {
+		t.Fatalf("default integration cutoff was not overridden: before=%s", result.Before)
+	}
+	if result.Files != 1 || result.Turns != 1 {
+		t.Fatalf("scan result = files=%d turns=%d, want recent file only", result.Files, result.Turns)
+	}
+}
+
 func TestBackfillAgentAndCutoffHelpersTable(t *testing.T) {
 	t.Parallel()
 
@@ -125,6 +164,39 @@ func TestBackfillAgentAndCutoffHelpersTable(t *testing.T) {
 				}
 				if !got.Equal(tt.want) {
 					t.Fatalf("backfillCutoff() = %s, want %s", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("time ranges", func(t *testing.T) {
+		agent := config.AgentConfig{PassiveWriteStartedAt: "2026-07-02T00:00:00Z"}
+		afterOnly, err := backfillTimeRange("2026-07-03", "", agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !afterOnly.After.Equal(time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)) || !afterOnly.Before.IsZero() {
+			t.Fatalf("after-only range = %#v", afterOnly)
+		}
+		bounded, err := backfillTimeRange("2026-07-01", "2026-07-03", agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bounded.After.IsZero() || bounded.Before.IsZero() {
+			t.Fatalf("bounded range = %#v", bounded)
+		}
+		for _, tt := range []struct {
+			name   string
+			after  string
+			before string
+			want   string
+		}{
+			{name: "invalid after", after: "July 1", want: "invalid --after"},
+			{name: "reversed", after: "2026-07-03", before: "2026-07-02", want: "--after must be earlier"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				if _, err := backfillTimeRange(tt.after, tt.before, agent); err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("backfillTimeRange() error = %v, want %q", err, tt.want)
 				}
 			})
 		}

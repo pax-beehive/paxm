@@ -867,10 +867,13 @@ agents:
     passive_write_started_at: "2026-07-09T18:30:00Z"
 ```
 
-`passive_write_started_at` is the default exclusive cutoff for `paxm backfill`. Setup does
-not replace an existing value when an integration is reconfigured. Configs
-created before this field was introduced must pass `--before` to `backfill
-scan` and `backfill run`.
+`passive_write_started_at` is the default exclusive cutoff for `paxm backfill`.
+Setup does not replace an existing value when an integration is reconfigured.
+`--after` is an inclusive lower bound and `--before` is an exclusive upper
+bound. An explicit `--after` without `--before` overrides the default
+integration cutoff so a known passive-capture gap can be repaired through the
+latest history. Configs created before this field was introduced must pass
+either bound to `backfill scan` and `backfill run`.
 
 Backfill targets one exact enabled provider instance with `--provider`; it does
 not fan out through a write profile. Foreground mode displays progress, speed,
@@ -879,6 +882,10 @@ per-agent/provider process lock and persistent success ledger, so concurrent or
 repeated commands do not upload already completed items again. Runtime status,
 the lock, the background log, and `backfill.sqlite` are stored below
 `<telemetry.dir>/backfill/`.
+
+The runtime also stores `session-sequences.sqlite` directly below
+`<telemetry.dir>`. It atomically reserves monotonic sequence values for
+session-scoped writes that do not already carry an explicit source sequence.
 
 ## Telemetry
 

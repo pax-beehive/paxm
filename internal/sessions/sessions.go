@@ -18,12 +18,27 @@ import (
 
 type Turn struct {
 	ID        string
+	Sequence  int64
 	Agent     string
 	SessionID string
 	Workspace string
 	User      string
 	Assistant string
 	CreatedAt time.Time
+}
+
+// TimeRange selects turns at or after After and strictly before Before.
+// A zero boundary is unbounded.
+type TimeRange struct {
+	After  time.Time
+	Before time.Time
+}
+
+func (r TimeRange) Includes(value time.Time) bool {
+	if !r.After.IsZero() && value.Before(r.After) {
+		return false
+	}
+	return r.Before.IsZero() || value.Before(r.Before)
 }
 
 type File struct {
@@ -123,7 +138,7 @@ func Root(agent string) (string, error) {
 	}
 }
 
-func ReadFile(agent, path string, cutoff time.Time) ([]Turn, error) {
+func ReadFile(agent, path string, window TimeRange) ([]Turn, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -155,11 +170,11 @@ func ReadFile(agent, path string, cutoff time.Time) ([]Turn, error) {
 	}
 	switch normalizeAgent(agent) {
 	case "codex":
-		return readCodex(records, cutoff, fallback), nil
+		return readCodex(records, window, fallback), nil
 	case "claude":
-		return readMessages("claude", records, cutoff, fallback), nil
+		return readMessages("claude", records, window, fallback), nil
 	case "pi":
-		return readMessages("pi", records, cutoff, fallback), nil
+		return readMessages("pi", records, window, fallback), nil
 	default:
 		return nil, fmt.Errorf("unsupported session agent %q", agent)
 	}
@@ -200,10 +215,11 @@ func compactRecord(agent string, entry record) (record, bool) {
 	return entry, true
 }
 
-func readCodex(records []record, cutoff, fallback time.Time) []Turn {
+func readCodex(records []record, window TimeRange, fallback time.Time) []Turn {
 	var sessionID, workspace string
 	var pending *Turn
 	var turns []Turn
+	sequences := map[string]int64{}
 	for _, entry := range records {
 		var payload codexPayload
 		if len(entry.Payload) == 0 || json.Unmarshal(entry.Payload, &payload) != nil {
@@ -228,15 +244,15 @@ func readCodex(records []record, cutoff, fallback time.Time) []Turn {
 				continue
 			}
 			pending.Assistant = strings.TrimSpace(payload.Message)
-			appendTurn(&turns, *pending, cutoff)
+			appendTurn(&turns, *pending, window, sequences)
 			pending = nil
 		}
 	}
 	return turns
 }
 
-func readMessages(agent string, records []record, cutoff, fallback time.Time) []Turn {
-	reader := messageReader{agent: agent, cutoff: cutoff, fallback: fallback}
+func readMessages(agent string, records []record, window TimeRange, fallback time.Time) []Turn {
+	reader := messageReader{agent: agent, window: window, fallback: fallback, sequences: map[string]int64{}}
 	for _, entry := range records {
 		reader.observe(entry)
 	}
@@ -249,8 +265,9 @@ type messageReader struct {
 	workspace string
 	pending   *Turn
 	turns     []Turn
-	cutoff    time.Time
+	window    TimeRange
 	fallback  time.Time
+	sequences map[string]int64
 }
 
 func (r *messageReader) observe(entry record) {
@@ -297,7 +314,7 @@ func (r *messageReader) updateContext(entry record) {
 
 func (r *messageReader) startUserTurn(text, timestamp string) {
 	if r.pending != nil {
-		appendTurn(&r.turns, *r.pending, r.cutoff)
+		appendTurn(&r.turns, *r.pending, r.window, r.sequences)
 	}
 	r.pending = &Turn{Agent: r.agent, SessionID: r.sessionID, Workspace: r.workspace, User: text, CreatedAt: parseTime(timestamp, r.fallback)}
 }
@@ -315,7 +332,7 @@ func (r *messageReader) appendAssistant(text string) {
 
 func (r *messageReader) finish() []Turn {
 	if r.pending != nil {
-		appendTurn(&r.turns, *r.pending, r.cutoff)
+		appendTurn(&r.turns, *r.pending, r.window, r.sequences)
 	}
 	return r.turns
 }
@@ -341,11 +358,13 @@ func extractText(raw json.RawMessage) string {
 	return strings.Join(parts, "\n")
 }
 
-func appendTurn(turns *[]Turn, turn Turn, cutoff time.Time) {
+func appendTurn(turns *[]Turn, turn Turn, window TimeRange, sequences map[string]int64) {
 	if strings.TrimSpace(turn.User) == "" || strings.TrimSpace(turn.Assistant) == "" {
 		return
 	}
-	if !cutoff.IsZero() && !turn.CreatedAt.Before(cutoff) {
+	sequences[turn.SessionID]++
+	turn.Sequence = sequences[turn.SessionID]
+	if !window.Includes(turn.CreatedAt) {
 		return
 	}
 	hash := sha256.Sum256([]byte(strings.Join([]string{turn.Agent, turn.SessionID, turn.CreatedAt.UTC().Format(time.RFC3339Nano), turn.User, turn.Assistant}, "\x00")))

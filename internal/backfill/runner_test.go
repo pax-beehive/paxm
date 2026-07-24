@@ -57,8 +57,8 @@ func TestRunnerPreservesAnUnboundedTurnWhenProviderSupportsIt(t *testing.T) {
 	runner := Runner{Store: store, Service: facade.New(config.Config{Version: 1}, router).Tools()}
 	status, err := runner.Run(context.Background(), RunOptions{
 		Scope: "scope", RunID: "run", Agent: "codex", Provider: "target",
-		Files:  []sessions.File{{Path: sessionPath, Size: int64(len(content))}},
-		Cutoff: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+		Files:     []sessions.File{{Path: sessionPath, Size: int64(len(content))}},
+		TimeRange: sessions.TimeRange{Before: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -93,12 +93,12 @@ func TestRunnerResumesWithoutUploadingSucceededTurnsAgain(t *testing.T) {
 	defer store.Close()
 	runner := Runner{Store: store, Service: service}
 	options := RunOptions{
-		Scope:    Scope("config", "codex", "target"),
-		RunID:    "first",
-		Agent:    "codex",
-		Provider: "target",
-		Files:    []sessions.File{{Path: sessionPath, Size: 100}},
-		Cutoff:   time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+		Scope:     Scope("config", "codex", "target"),
+		RunID:     "first",
+		Agent:     "codex",
+		Provider:  "target",
+		Files:     []sessions.File{{Path: sessionPath, Size: 100}},
+		TimeRange: sessions.TimeRange{Before: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)},
 	}
 
 	first, err := runner.Run(context.Background(), options)
@@ -196,6 +196,7 @@ func TestTurnItemsAndSplitUTF8Table(t *testing.T) {
 		createdAt := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
 		turn := sessions.Turn{
 			ID:        "turn-1",
+			Sequence:  7,
 			Agent:     "codex",
 			SessionID: "session-1",
 			Workspace: "/repo",
@@ -211,7 +212,7 @@ func TestTurnItemsAndSplitUTF8Table(t *testing.T) {
 		if item.ID != "turn-1" || item.Source != "backfill:codex" || !item.CreatedAt.Equal(createdAt) {
 			t.Fatalf("unexpected item identity: %#v", item)
 		}
-		for key, want := range map[string]string{"backfill": "true", "agent": "codex", "session_id": "session-1", "workspace": "/repo"} {
+		for key, want := range map[string]string{"backfill": "true", "agent": "codex", "session_id": "session-1", "workspace": "/repo", "sequence": "6291457"} {
 			if item.Metadata[key] != want {
 				t.Fatalf("metadata[%s] = %q, want %q: %#v", key, item.Metadata[key], want, item.Metadata)
 			}
@@ -221,6 +222,7 @@ func TestTurnItemsAndSplitUTF8Table(t *testing.T) {
 	t.Run("turn item multipart", func(t *testing.T) {
 		turn := sessions.Turn{
 			ID:        "large",
+			Sequence:  1,
 			Agent:     "pi",
 			SessionID: "session",
 			User:      strings.Repeat("界", 9000),
@@ -232,6 +234,12 @@ func TestTurnItemsAndSplitUTF8Table(t *testing.T) {
 		}
 		if items[0].ID != "large-part-1" || items[0].Metadata["part"] != "1" || items[0].Metadata["parts"] == "" {
 			t.Fatalf("multipart metadata missing: %#v", items[0])
+		}
+		for index, item := range items {
+			wantSequence := fmt.Sprintf("%d", index+1)
+			if item.Metadata["sequence"] != wantSequence {
+				t.Fatalf("part %d sequence = %q, want %q", index+1, item.Metadata["sequence"], wantSequence)
+			}
 		}
 	})
 

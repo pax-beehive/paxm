@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/pax-beehive/paxm/internal/adapters"
 	"github.com/pax-beehive/paxm/internal/capture"
@@ -11,6 +13,7 @@ import (
 	"github.com/pax-beehive/paxm/internal/facade"
 	"github.com/pax-beehive/paxm/internal/memory"
 	"github.com/pax-beehive/paxm/internal/operator"
+	"github.com/pax-beehive/paxm/internal/sessionsequence"
 	"github.com/pax-beehive/paxm/internal/tools"
 )
 
@@ -45,8 +48,13 @@ func LoadWithClock(configPath string, clock memory.Clock) (*Runtime, error) {
 		}
 		return nil, err
 	}
-	router, err := adapters.DefaultRegistry().BuildRouterWithClock(cfg, clock)
+	sequenceStore, err := sessionsequence.Open(sessionSequenceStorePath(path, cfg))
 	if err != nil {
+		return nil, err
+	}
+	router, err := adapters.DefaultRegistry().BuildRouterWithClock(cfg, clock, memory.WithSequenceAllocator(sequenceStore))
+	if err != nil {
+		_ = sequenceStore.Close()
 		return nil, err
 	}
 	core := facade.NewWithClock(cfg, router, clock)
@@ -59,6 +67,18 @@ func LoadWithClock(configPath string, clock memory.Clock) (*Runtime, error) {
 		Operator:   operator.New(path, cfg, engine, router),
 		router:     router,
 	}, nil
+}
+
+func sessionSequenceStorePath(configPath string, cfg config.Config) string {
+	stateDir := strings.TrimSpace(cfg.Telemetry.Dir)
+	if stateDir == "" {
+		if config.ExpandPath(configPath) == config.DefaultConfigPath() {
+			stateDir = config.DefaultStateDir()
+		} else {
+			stateDir = filepath.Join(filepath.Dir(config.ExpandPath(configPath)), "state")
+		}
+	}
+	return filepath.Join(config.ExpandPath(stateDir), "session-sequences.sqlite")
 }
 
 func (r *Runtime) Health(ctx context.Context) ([]memory.ProviderHealth, error) {

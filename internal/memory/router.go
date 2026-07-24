@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,10 +65,27 @@ func WithClock(clock Clock) RouterOption {
 	}
 }
 
+// SequenceAllocator reserves monotonically increasing sequence values across
+// runtime lifetimes for session-scoped writes.
+type SequenceAllocator interface {
+	Next(sessionID string, floor int64) (int64, error)
+	Close() error
+}
+
+// WithSequenceAllocator persists automatically assigned session sequences.
+func WithSequenceAllocator(allocator SequenceAllocator) RouterOption {
+	return func(r *Router) {
+		r.sequenceAllocator = allocator
+	}
+}
+
 type Router struct {
-	providers []ProviderBinding
-	byName    map[string]ProviderBinding
-	clock     Clock
+	providers         []ProviderBinding
+	byName            map[string]ProviderBinding
+	clock             Clock
+	sequenceMu        sync.Mutex
+	sessionSequences  map[string]int64
+	sequenceAllocator SequenceAllocator
 }
 
 func (r *Router) nowUTC() time.Time {
@@ -86,6 +104,11 @@ func (r *Router) Close() error {
 		}
 		if err := closer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", binding.Provider.Name(), err))
+		}
+	}
+	if r.sequenceAllocator != nil {
+		if err := r.sequenceAllocator.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close session sequence allocator: %w", err))
 		}
 	}
 	return errors.Join(errs...)
@@ -110,7 +133,7 @@ func NewRouter(providers []ProviderBinding, opts ...RouterOption) (*Router, erro
 		byName[name] = binding
 		normalized = append(normalized, binding)
 	}
-	router := &Router{providers: normalized, byName: byName}
+	router := &Router{providers: normalized, byName: byName, sessionSequences: map[string]int64{}}
 	for _, opt := range opts {
 		opt(router)
 	}
@@ -408,7 +431,43 @@ func (r *Router) PutBatchWithPolicy(ctx context.Context, items []MemoryItem, pol
 		items[i] = PrepareProviderItem(items[i])
 	}
 	items = admitLongTermMemories(items, now)
+	if err := r.assignSessionSequences(items); err != nil {
+		return PutResult{}, err
+	}
 	return collectPutResponses(putProviders(ctx, writable, items))
+}
+
+func (r *Router) assignSessionSequences(items []MemoryItem) error {
+	r.sequenceMu.Lock()
+	defer r.sequenceMu.Unlock()
+	for index := range items {
+		item := &items[index]
+		if strings.TrimSpace(item.Metadata[MetadataSequence]) != "" {
+			continue
+		}
+		sessionID := strings.TrimSpace(item.Origin.SessionID)
+		if sessionID == "" {
+			continue
+		}
+		sequence := item.CreatedAt.UTC().UnixNano()
+		if sequence < 1 {
+			sequence = 1
+		}
+		var err error
+		if r.sequenceAllocator != nil {
+			sequence, err = r.sequenceAllocator.Next(sessionID, sequence)
+			if err != nil {
+				return fmt.Errorf("allocate session sequence: %w", err)
+			}
+		} else if previous := r.sessionSequences[sessionID]; sequence <= previous {
+			sequence = previous + 1
+		}
+		metadata := cloneMetadata(item.Metadata)
+		metadata[MetadataSequence] = strconv.FormatInt(sequence, 10)
+		item.Metadata = metadata
+		r.sessionSequences[sessionID] = sequence
+	}
+	return nil
 }
 
 func (r *Router) writableBindings(policy PutPolicy) ([]ProviderBinding, error) {

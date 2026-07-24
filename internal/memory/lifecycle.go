@@ -19,6 +19,7 @@ const (
 	MetadataScopeID     = "paxm_scope_id"
 	MetadataSessionID   = "paxm_session_id"
 	MetadataTurnID      = "paxm_turn_id"
+	MetadataSequence    = "sequence"
 )
 
 func ApplyProvenance(item MemoryItem, provenance Provenance) MemoryItem {

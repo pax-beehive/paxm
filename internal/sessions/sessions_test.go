@@ -16,7 +16,7 @@ func TestReadCodexTurns(t *testing.T) {
 {"type":"response_item","timestamp":"2026-07-01T10:02:00Z","payload":{"type":"message","role":"assistant","content":"duplicate"}}
 `)
 
-	turns, err := ReadFile("codex", path, time.Time{})
+	turns, err := ReadFile("codex", path, TimeRange{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,27 +30,57 @@ func TestReadClaudeTurnsExcludesSidechainsAndToolResults(t *testing.T) {
 {"type":"assistant","uuid":"side","parentUuid":"u1","sessionId":"claude-session","cwd":"/repo","isSidechain":true,"timestamp":"2026-07-01T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"ignore me"}]}}
 `)
 
-	turns, err := ReadFile("claude", path, time.Time{})
+	turns, err := ReadFile("claude", path, TimeRange{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertTurn(t, turns, "claude-session", "/repo", "implement it", "done")
 }
 
-func TestReadPiTurnsAndCutoff(t *testing.T) {
+func TestReadClaudeTurnsAssignsStableSequenceForMatchingTimestamps(t *testing.T) {
+	path := writeSessionFile(t, `{"type":"user","uuid":"u1","sessionId":"claude-session","cwd":"/repo","timestamp":"2026-07-03T03:55:16.243Z","message":{"role":"user","content":"first"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"claude-session","cwd":"/repo","timestamp":"2026-07-03T03:55:16.243Z","message":{"role":"assistant","content":"answer one"}}
+{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"claude-session","cwd":"/repo","timestamp":"2026-07-03T03:55:16.243Z","message":{"role":"user","content":"second"}}
+{"type":"assistant","uuid":"a2","parentUuid":"u2","sessionId":"claude-session","cwd":"/repo","timestamp":"2026-07-03T03:55:16.243Z","message":{"role":"assistant","content":"answer two"}}
+`)
+
+	turns, err := ReadFile("claude", path, TimeRange{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns = %#v", turns)
+	}
+	if !turns[0].CreatedAt.Equal(turns[1].CreatedAt) {
+		t.Fatalf("fixture timestamps differ: %s != %s", turns[0].CreatedAt, turns[1].CreatedAt)
+	}
+	if turns[0].Sequence != 1 || turns[1].Sequence != 2 {
+		t.Fatalf("sequences = %d, %d; want 1, 2", turns[0].Sequence, turns[1].Sequence)
+	}
+}
+
+func TestReadPiTurnsAndTimeRange(t *testing.T) {
 	path := writeSessionFile(t, `{"type":"session","id":"pi-session","cwd":"/repo","timestamp":"2026-07-01T10:00:00Z"}
 {"type":"message","id":"u1","parentId":null,"timestamp":"2026-07-01T10:01:00Z","message":{"role":"user","content":"first"}}
 {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-07-01T10:02:00Z","message":{"role":"assistant","content":[{"type":"text","text":"answer one"},{"type":"thinking","thinking":"hidden"}]}}
 {"type":"message","id":"u2","parentId":"a1","timestamp":"2026-07-02T10:01:00Z","message":{"role":"user","content":"too late"}}
 {"type":"message","id":"a2","parentId":"u2","timestamp":"2026-07-02T10:02:00Z","message":{"role":"assistant","content":[{"type":"text","text":"answer two"}]}}
+{"type":"message","id":"u3","parentId":"a2","timestamp":"2026-07-03T10:01:00Z","message":{"role":"user","content":"third"}}
+{"type":"message","id":"a3","parentId":"u3","timestamp":"2026-07-03T10:02:00Z","message":{"role":"assistant","content":[{"type":"text","text":"answer three"}]}}
 `)
 
-	cutoff := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)
-	turns, err := ReadFile("pi", path, cutoff)
+	window := TimeRange{
+		After:  time.Date(2026, 7, 2, 10, 1, 0, 0, time.UTC),
+		Before: time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC),
+	}
+	turns, err := ReadFile("pi", path, window)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertTurn(t, turns, "pi-session", "/repo", "first", "answer one")
+	assertTurn(t, turns, "pi-session", "/repo", "too late", "answer two")
+	if turns[0].Sequence != 2 {
+		t.Fatalf("sequence = %d, want stable source sequence 2", turns[0].Sequence)
+	}
 }
 
 func TestRootAndDiscoverTables(t *testing.T) {

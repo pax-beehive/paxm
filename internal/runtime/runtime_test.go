@@ -106,6 +106,36 @@ func TestConfigFileTable(t *testing.T) {
 	}
 }
 
+func TestSessionSequenceStorePathTable(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	tests := []struct {
+		name string
+		cfg  config.Config
+		want string
+	}{
+		{
+			name: "configured telemetry directory",
+			cfg:  config.Config{Telemetry: config.TelemetryConfig{Dir: filepath.Join(dir, "telemetry")}},
+			want: filepath.Join(dir, "telemetry", "session-sequences.sqlite"),
+		},
+		{
+			name: "custom config fallback is stable",
+			cfg:  config.Config{},
+			want: filepath.Join(dir, "state", "session-sequences.sqlite"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sessionSequenceStorePath(configPath, tt.cfg); got != tt.want {
+				t.Fatalf("sessionSequenceStorePath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStableActiveSessionIDScopesWorkspace(t *testing.T) {
 	t.Parallel()
 

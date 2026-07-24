@@ -16,7 +16,10 @@ import (
 	"github.com/pax-beehive/paxm/internal/tools"
 )
 
-const maxItemBytes = 24 * 1024
+const (
+	maxItemBytes           = 24 * 1024
+	backfillSequenceStride = int64(1 << 20)
+)
 
 type Runner struct {
 	Store   *Store
@@ -34,7 +37,7 @@ type RunOptions struct {
 	Agent        string
 	Provider     string
 	Files        []sessions.File
-	Cutoff       time.Time
+	TimeRange    sessions.TimeRange
 	RateInterval time.Duration
 	Progress     func(Status)
 	Started      func(Status)
@@ -121,7 +124,7 @@ func (r Runner) processBackfillFile(ctx context.Context, options RunOptions, sta
 	if err := ctx.Err(); err != nil {
 		return nil, r.pauseBackfill(options, status, err)
 	}
-	turns, readErr := sessions.ReadFile(options.Agent, file.Path, options.Cutoff)
+	turns, readErr := sessions.ReadFile(options.Agent, file.Path, options.TimeRange)
 	fileStartBytes := status.ProcessedBytes
 	if readErr != nil {
 		status.Failed++
@@ -305,6 +308,7 @@ func turnItems(turn sessions.Turn, preserve bool) []tools.RememberInput {
 			"backfill":   "true",
 			"agent":      turn.Agent,
 			"session_id": turn.SessionID,
+			"sequence":   strconv.FormatInt(backfillSequence(turn.Sequence, index), 10),
 			"workspace":  turn.Workspace,
 		}
 		if len(parts) > 1 {
@@ -327,6 +331,13 @@ func turnItems(turn sessions.Turn, preserve bool) []tools.RememberInput {
 		})
 	}
 	return items
+}
+
+func backfillSequence(turnSequence int64, partIndex int) int64 {
+	if turnSequence < 1 {
+		turnSequence = 1
+	}
+	return (turnSequence-1)*backfillSequenceStride + int64(partIndex+1)
 }
 
 func splitUTF8(value string, size int) []string {

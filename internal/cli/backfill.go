@@ -29,6 +29,7 @@ type backfillStartResult struct {
 type backfillRunArgs struct {
 	agentName        string
 	providerName     string
+	after            string
 	before           string
 	rate             string
 	maxDuration      time.Duration
@@ -58,6 +59,7 @@ func (r runner) runBackfillScan(args []string) error {
 	flags := flag.NewFlagSet("backfill scan", flag.ContinueOnError)
 	flags.SetOutput(r.stderr)
 	agentName := flags.String("agent", "", "agent session source")
+	after := flags.String("after", "", "only include turns at or after this RFC3339 timestamp or date")
 	before := flags.String("before", "", "only include turns before this RFC3339 timestamp or date")
 	jsonOut := flags.Bool("json", false, "write JSON")
 	if err := flags.Parse(args); err != nil {
@@ -74,7 +76,7 @@ func (r runner) runBackfillScan(args []string) error {
 	if err != nil {
 		return err
 	}
-	cutoff, err := backfillCutoff(*before, cfg.Agents[agent])
+	window, err := backfillTimeRange(*after, *before, cfg.Agents[agent])
 	if err != nil {
 		return err
 	}
@@ -83,26 +85,40 @@ func (r runner) runBackfillScan(args []string) error {
 		return err
 	}
 	result := struct {
-		Agent  string    `json:"agent"`
-		Root   string    `json:"root"`
-		Before time.Time `json:"before"`
-		Files  int       `json:"files"`
-		Bytes  int64     `json:"bytes"`
-		Turns  int       `json:"turns"`
-	}{Agent: agent, Before: cutoff, Files: len(files)}
+		Agent  string     `json:"agent"`
+		Root   string     `json:"root"`
+		After  *time.Time `json:"after,omitempty"`
+		Before *time.Time `json:"before,omitempty"`
+		Files  int        `json:"files"`
+		Bytes  int64      `json:"bytes"`
+		Turns  int        `json:"turns"`
+	}{Agent: agent, After: optionalTime(window.After), Before: optionalTime(window.Before)}
 	result.Root, _ = sessions.Root(agent)
 	for _, file := range files {
-		result.Bytes += file.Size
-		turns, readErr := sessions.ReadFile(agent, file.Path, cutoff)
+		turns, readErr := sessions.ReadFile(agent, file.Path, window)
 		if readErr != nil {
 			return readErr
 		}
+		if len(turns) == 0 {
+			continue
+		}
+		result.Files++
+		result.Bytes += file.Size
 		result.Turns += len(turns)
 	}
 	if *jsonOut {
 		return writeJSON(r.stdout, result)
 	}
-	_, _ = fmt.Fprintf(r.stdout, "Backfill scan: agent=%s files=%d turns=%d size=%s before=%s\n", result.Agent, result.Files, result.Turns, formatBytes(result.Bytes), cutoff.Format(time.RFC3339))
+	_, _ = fmt.Fprintf(
+		r.stdout,
+		"Backfill scan: agent=%s files=%d turns=%d size=%s after=%s before=%s\n",
+		result.Agent,
+		result.Files,
+		result.Turns,
+		formatBytes(result.Bytes),
+		formatBackfillBoundary(window.After),
+		formatBackfillBoundary(window.Before),
+	)
 	return nil
 }
 
@@ -132,12 +148,12 @@ func (r runner) runBackfillRun(args []string) error {
 	if !ok || !providerCfg.Enabled {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, fmt.Errorf("provider %q is not enabled", provider))
 	}
-	cutoff, err := backfillCutoff(runArgs.before, cfg.Agents[agent])
+	window, err := backfillTimeRange(runArgs.after, runArgs.before, cfg.Agents[agent])
 	if err != nil {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
 	}
 	if runArgs.backgroundMode && !runArgs.backgroundWorker {
-		return r.startBackgroundBackfill(agent, provider, cutoff, runArgs.rate, runArgs.maxDuration)
+		return r.startBackgroundBackfill(agent, provider, window, runArgs.rate, runArgs.maxDuration)
 	}
 	files, err := sessions.Discover(agent)
 	if err != nil {
@@ -148,7 +164,7 @@ func (r runner) runBackfillRun(args []string) error {
 		return r.finishBackfillWorkerStart(runArgs.startResultPath, err)
 	}
 	defer func() { _ = store.Close() }()
-	options := r.backfillRunOptions(runArgs, agent, provider, files, cutoff, interval)
+	options := r.backfillRunOptions(runArgs, agent, provider, files, window, interval)
 	ctx, cleanup := backfillRunContext(runArgs.maxDuration)
 	defer cleanup()
 	status, runErr := (backfill.Runner{Store: store, Service: rt.Operator}).Run(ctx, options)
@@ -160,6 +176,7 @@ func (r runner) parseBackfillRunArgs(args []string) (backfillRunArgs, error) {
 	flags.SetOutput(r.stderr)
 	agentName := flags.String("agent", "", "agent session source")
 	providerName := flags.String("provider", "", "exact target provider instance")
+	after := flags.String("after", "", "only include turns at or after this RFC3339 timestamp or date")
 	before := flags.String("before", "", "only include turns before this RFC3339 timestamp or date")
 	rate := flags.String("rate", "30/m", "maximum upload rate, for example 30/m or 1/s")
 	maxDuration := flags.Duration("max-duration", 0, "pause after this duration")
@@ -176,6 +193,7 @@ func (r runner) parseBackfillRunArgs(args []string) (backfillRunArgs, error) {
 	return backfillRunArgs{
 		agentName:        *agentName,
 		providerName:     *providerName,
+		after:            *after,
 		before:           *before,
 		rate:             *rate,
 		maxDuration:      *maxDuration,
@@ -198,7 +216,7 @@ func backfillRunContext(maxDuration time.Duration) (context.Context, func()) {
 	}
 }
 
-func (r runner) backfillRunOptions(args backfillRunArgs, agent, provider string, files []sessions.File, cutoff time.Time, interval time.Duration) backfill.RunOptions {
+func (r runner) backfillRunOptions(args backfillRunArgs, agent, provider string, files []sessions.File, window sessions.TimeRange, interval time.Duration) backfill.RunOptions {
 	runID := args.runID
 	if runID == "" {
 		runID = backfill.NewRunID()
@@ -214,7 +232,7 @@ func (r runner) backfillRunOptions(args backfillRunArgs, agent, provider string,
 		Agent:        agent,
 		Provider:     provider,
 		Files:        files,
-		Cutoff:       cutoff,
+		TimeRange:    window,
 		RateInterval: interval,
 	}
 	if args.backgroundWorker {
@@ -286,7 +304,7 @@ func (r runner) runBackfillStatus(args []string) error {
 	return nil
 }
 
-func (r runner) startBackgroundBackfill(agent, provider string, cutoff time.Time, rate string, maxDuration time.Duration) error {
+func (r runner) startBackgroundBackfill(agent, provider string, window sessions.TimeRange, rate string, maxDuration time.Duration) error {
 	cfg, err := config.Load(r.configFile())
 	if err != nil {
 		return err
@@ -307,11 +325,16 @@ func (r runner) startBackgroundBackfill(agent, provider string, cutoff time.Time
 		"--config", r.configFile(), "backfill", "run",
 		"--agent", agent,
 		"--provider", provider,
-		"--before", cutoff.Format(time.RFC3339Nano),
 		"--rate", rate,
 		"--background-worker",
 		"--run-id", runID,
 		"--start-result", startResultPath,
+	}
+	if !window.After.IsZero() {
+		commandArgs = append(commandArgs, "--after", window.After.Format(time.RFC3339Nano))
+	}
+	if !window.Before.IsZero() {
+		commandArgs = append(commandArgs, "--before", window.Before.Format(time.RFC3339Nano))
 	}
 	if maxDuration > 0 {
 		commandArgs = append(commandArgs, "--max-duration", maxDuration.String())
@@ -387,20 +410,57 @@ func validateBackfillAgent(value string) (string, error) {
 }
 
 func backfillCutoff(value string, agent config.AgentConfig) (time.Time, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		value = strings.TrimSpace(agent.PassiveWriteStartedAt)
-		if value == "" {
-			return time.Time{}, errors.New("backfill requires --before because this agent has no recorded integration time")
+	window, err := backfillTimeRange("", value, agent)
+	return window.Before, err
+}
+
+func backfillTimeRange(afterValue, beforeValue string, agent config.AgentConfig) (sessions.TimeRange, error) {
+	after, err := parseBackfillBoundary("--after", afterValue)
+	if err != nil {
+		return sessions.TimeRange{}, err
+	}
+	explicitBefore := strings.TrimSpace(beforeValue) != ""
+	if !explicitBefore && after.IsZero() {
+		beforeValue = strings.TrimSpace(agent.PassiveWriteStartedAt)
+		if beforeValue == "" {
+			return sessions.TimeRange{}, errors.New("backfill requires --before or --after because this agent has no recorded integration time")
 		}
 	}
-	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return parsed.UTC(), nil
+	before, err := parseBackfillBoundary("--before", beforeValue)
+	if err != nil {
+		return sessions.TimeRange{}, err
 	}
-	if parsed, err := time.Parse("2006-01-02", value); err == nil {
-		return parsed.UTC(), nil
+	if !after.IsZero() && !before.IsZero() && !after.Before(before) {
+		return sessions.TimeRange{}, errors.New("--after must be earlier than --before")
 	}
-	return time.Time{}, fmt.Errorf("invalid --before %q; use RFC3339 or YYYY-MM-DD", value)
+	return sessions.TimeRange{After: after, Before: before}, nil
+}
+
+func parseBackfillBoundary(flagName, value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid %s %q; use RFC3339 or YYYY-MM-DD", flagName, value)
+}
+
+func formatBackfillBoundary(value time.Time) string {
+	if value.IsZero() {
+		return "none"
+	}
+	return value.Format(time.RFC3339)
+}
+
+func optionalTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	return &value
 }
 
 func parseBackfillRate(value string) (time.Duration, error) {

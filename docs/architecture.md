@@ -284,8 +284,8 @@ paxm [--config PATH] recall --query TEXT [--limit N] [--json]
 paxm [--config PATH] remember [--profile stm|ltm] --text TEXT
 paxm [--config PATH] history [--days N] [--json]
 paxm [--config PATH] logs [--tail N] [--follow] [--json]
-paxm [--config PATH] backfill scan --agent AGENT [--before TIME]
-paxm [--config PATH] backfill run --agent AGENT --provider NAME [--background]
+paxm [--config PATH] backfill scan --agent AGENT [--after TIME] [--before TIME]
+paxm [--config PATH] backfill run --agent AGENT --provider NAME [--after TIME] [--before TIME] [--background]
 paxm [--config PATH] backfill status --agent AGENT --provider NAME
 paxm eval run [--suite PATH] [--gate quality|adapter|none] [--json] [--compare RESULT.json] [--budget BUDGET.json] [--output RESULT.json]
 paxm eval run locomo --dataset PATH --agent NAME --model PROVIDER/MODEL --provider NAME (--max-questions N | --all) [--arms control,passive,active] [--json] [--output RESULT.json]
@@ -394,9 +394,19 @@ Backfill readers normalize Codex, Claude Code, and Pi JSONL histories into
 user/assistant turns. They discard system instructions, hidden reasoning, tool
 traffic, sidechains, and attachments. Each normalized turn receives a
 deterministic item ID, original timestamp, session ID, workspace, agent, and
-`backfill:<agent>` source. SQLite preserves each historical turn as one
+`backfill:<agent>` source. Items also receive a stable sequence derived from
+their source turn order; multipart items use distinct ordered sequences even
+when adjacent source turns have identical timestamps. SQLite preserves each historical turn as one
 unbounded item. Other providers retain bounded deterministic splitting for
 oversized turns to respect their transport constraints.
+
+All session-scoped writes without an explicit sequence reserve one through the
+runtime's persistent sequence allocator. The allocator uses the original
+timestamp as a floor and atomically advances the last value for that session,
+so same-timestamp remember calls remain unique across paxm process lifetimes.
+Provider-facing metadata carries the reserved value as `sequence`. Explicit
+source sequences, including historical backfill sequences, remain authoritative
+and bypass allocation.
 
 The target is an exact enabled provider name rather than a write profile. This
 keeps multiple Mem0 or custom provider instances unambiguous. Extraction rules
@@ -415,9 +425,12 @@ an idempotent client ID can still duplicate one item if the process dies after
 the remote write succeeds but before the local ledger transaction commits.
 
 Setup records an immutable first `passive_write_started_at` timestamp when an
-agent first enables passive write. Backfill excludes turns at or after that cutoff. Older configs without a
-recorded timestamp require an explicit `--before` value rather than guessing
-and risking overlap with passive writes.
+agent first enables passive write. Without an explicit time range, backfill
+excludes turns at or after that cutoff. `--after` is inclusive and `--before`
+is exclusive. Supplying `--after` without `--before` deliberately removes the
+default integration upper bound, allowing operators to repair a known passive
+capture gap. Older configs without a recorded timestamp require either
+`--before` or `--after` rather than guessing a range.
 
 TTY setup uses terminal checkbox/select controls. Provider instances are
 configured first, then selected agents are configured in stable order. Agent

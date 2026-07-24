@@ -393,6 +393,8 @@ event mappings, profile settings, and uninstall behavior.
 - Write-provider routes default to a 30-second timeout; optional failures remain
   isolated while required-provider failures are returned to the caller.
 - Recall provenance is stripped before passive writes to prevent memory echo.
+- Session-scoped writes receive a persisted monotonic sequence, preventing
+  same-timestamp events from colliding across paxm processes.
 - Exact LTM consolidation limits duplicate accumulation.
 - SQLite preserves completed agent turns with explicit session, turn, and time
   boundaries.
@@ -401,10 +403,14 @@ event mappings, profile settings, and uninstall behavior.
 Historical imports are also resumable:
 
 ```bash
-paxm backfill scan --agent codex --before 2026-07-09
-paxm backfill run --agent codex --provider mem0-company --background
+paxm backfill scan --agent codex --after 2026-07-21
+paxm backfill run --agent codex --provider mem0-company --after 2026-07-21 --background
 paxm backfill status --agent codex --provider mem0-company
 ```
+
+`--after` is inclusive and `--before` is exclusive. Supplying `--after`
+without `--before` intentionally scans through the latest session history,
+including turns after passive capture was enabled.
 
 ## Performance
 
