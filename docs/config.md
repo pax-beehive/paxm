@@ -883,6 +883,10 @@ repeated commands do not upload already completed items again. Runtime status,
 the lock, the background log, and `backfill.sqlite` are stored below
 `<telemetry.dir>/backfill/`.
 
+The runtime also stores `session-sequences.sqlite` directly below
+`<telemetry.dir>`. It atomically reserves monotonic sequence values for
+session-scoped writes that do not already carry an explicit source sequence.
+
 ## Telemetry
 
 `telemetry` controls local debug logs and metrics used by `paxm history`.

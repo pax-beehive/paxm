@@ -393,6 +393,8 @@ event mappings, profile settings, and uninstall behavior.
 - Write-provider routes default to a 30-second timeout; optional failures remain
   isolated while required-provider failures are returned to the caller.
 - Recall provenance is stripped before passive writes to prevent memory echo.
+- Session-scoped writes receive a persisted monotonic sequence, preventing
+  same-timestamp events from colliding across paxm processes.
 - Exact LTM consolidation limits duplicate accumulation.
 - SQLite preserves completed agent turns with explicit session, turn, and time
   boundaries.

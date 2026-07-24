@@ -400,6 +400,14 @@ when adjacent source turns have identical timestamps. SQLite preserves each hist
 unbounded item. Other providers retain bounded deterministic splitting for
 oversized turns to respect their transport constraints.
 
+All session-scoped writes without an explicit sequence reserve one through the
+runtime's persistent sequence allocator. The allocator uses the original
+timestamp as a floor and atomically advances the last value for that session,
+so same-timestamp remember calls remain unique across paxm process lifetimes.
+Provider-facing metadata carries the reserved value as `sequence`. Explicit
+source sequences, including historical backfill sequences, remain authoritative
+and bypass allocation.
+
 The target is an exact enabled provider name rather than a write profile. This
 keeps multiple Mem0 or custom provider instances unambiguous. Extraction rules
 do not change: Mem0 and Zep can infer from the text, SQLite stores it directly,

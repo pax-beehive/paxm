@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
+	"github.com/pax-beehive/paxm/internal/sessionsequence"
 )
 
 func TestToolInputsDoNotExposeInternalSessionContext(t *testing.T) {
@@ -269,6 +271,39 @@ func TestRememberAssignsMonotonicSequenceWithinSession(t *testing.T) {
 	}
 	if second <= first {
 		t.Fatalf("sequences = %d, %d; want increasing values", first, second)
+	}
+
+	sequencePath := filepath.Join(t.TempDir(), "session-sequences.sqlite")
+	separateSequence := func(text string) int64 {
+		t.Helper()
+		separateProvider := &providerStub{}
+		allocator, err := sessionsequence.Open(sequencePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		separateRouter, err := memory.NewRouter(
+			[]memory.ProviderBinding{{Provider: separateProvider, Write: true}},
+			memory.WithSequenceAllocator(allocator),
+		)
+		if err != nil {
+			_ = allocator.Close()
+			t.Fatal(err)
+		}
+		defer separateRouter.Close()
+		separateEngine := New(config.DefaultConfig("config.yaml"), separateRouter)
+		if _, err := separateEngine.Remember(context.Background(), RememberInput{
+			Text: text, SessionID: "same-session", CreatedAt: fixed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		sequence, err := strconv.ParseInt(separateProvider.item.Metadata["sequence"], 10, 64)
+		if err != nil {
+			t.Fatalf("separate sequence = %q: %v", separateProvider.item.Metadata["sequence"], err)
+		}
+		return sequence
+	}
+	if left, right := separateSequence("separate first"), separateSequence("separate second"); right != left+1 {
+		t.Fatalf("separate runtimes sequences = %d, %d; want consecutive values", left, right)
 	}
 }
 
