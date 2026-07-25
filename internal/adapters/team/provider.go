@@ -37,6 +37,13 @@ type Provider struct {
 	automatic        bool
 	generation       uint64
 	provisionTimeout time.Duration
+	refreshing       *refreshAttempt
+}
+
+type refreshAttempt struct {
+	generation uint64
+	done       chan struct{}
+	err        error
 }
 
 type cachedCredential struct {
@@ -220,15 +227,46 @@ func (p *Provider) shouldRefresh(err error) bool {
 
 func (p *Provider) refresh(ctx context.Context, observedGeneration uint64) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.generation != observedGeneration {
+		p.mu.Unlock()
 		return nil
 	}
+	if current := p.refreshing; current != nil && current.generation == observedGeneration {
+		p.mu.Unlock()
+		select {
+		case <-current.done:
+			return current.err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	attempt := &refreshAttempt{generation: observedGeneration, done: make(chan struct{})}
+	p.refreshing = attempt
+	providerName := p.inner.Name()
+	p.mu.Unlock()
+
+	inner, err := p.reprovision(ctx, providerName)
+
+	p.mu.Lock()
+	if err == nil && p.generation == observedGeneration {
+		p.inner = inner
+		p.generation++
+	}
+	attempt.err = err
+	close(attempt.done)
+	if p.refreshing == attempt {
+		p.refreshing = nil
+	}
+	p.mu.Unlock()
+	return err
+}
+
+func (p *Provider) reprovision(ctx context.Context, providerName string) (*jsonrpcadapter.Provider, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.provisionTimeout)
 	defer cancel()
 	provision, err := p.provisioner.ProvisionAgent(ctx, p.agentID)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"team provider credential rejected and re-provision failed; run `paxl device connect onprem ...` first: %w",
 			err,
 		)
@@ -238,17 +276,15 @@ func (p *Provider) refresh(ctx context.Context, observedGeneration uint64) error
 		UserID: provision.UserID, CredentialID: provision.CredentialID,
 	}
 	if err := saveCredential(p.credentialPath, credential); err != nil {
-		return fmt.Errorf("cache re-provisioned team credential: %w", err)
+		return nil, fmt.Errorf("cache re-provisioned team credential: %w", err)
 	}
 	providerConfig := p.baseConfig
 	providerConfig.Env = teamEnvironment(providerConfig.Env, credential)
-	inner, err := jsonrpcadapter.New(p.inner.Name(), providerConfig)
+	inner, err := jsonrpcadapter.New(providerName, providerConfig)
 	if err != nil {
-		return fmt.Errorf("reload team provider credential: %w", err)
+		return nil, fmt.Errorf("reload team provider credential: %w", err)
 	}
-	p.inner = inner
-	p.generation++
-	return nil
+	return inner, nil
 }
 
 func isUnauthorized(err error) bool {

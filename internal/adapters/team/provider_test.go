@@ -32,6 +32,7 @@ type blockingProvisioner struct {
 	mu        sync.Mutex
 	calls     int
 	provision paxlclient.AgentProvision
+	err       error
 	started   chan struct{}
 	release   <-chan struct{}
 	once      sync.Once
@@ -43,7 +44,7 @@ func (p *blockingProvisioner) ProvisionAgent(_ context.Context, _ string) (paxlc
 	p.mu.Unlock()
 	p.once.Do(func() { close(p.started) })
 	<-p.release
-	return p.provision, nil
+	return p.provision, p.err
 }
 
 func (p *blockingProvisioner) callCount() int {
@@ -446,6 +447,72 @@ func TestProviderConcurrentUnauthorizedReprovisionsOnce(t *testing.T) {
 	for range 2 {
 		if searchErr := <-results; searchErr != nil {
 			t.Fatal(searchErr)
+		}
+	}
+	if got := provisioner.callCount(); got != 1 {
+		t.Fatalf("provision calls = %d, want 1", got)
+	}
+}
+
+func TestProviderConcurrentUnauthorizedSharesProvisionFailure(t *testing.T) {
+	cacheDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(cacheDir, "team-paxm-todd.json"),
+		[]byte(`{"url":"https://memory.internal","api_key":"tm_key_stale","agent_id":"paxm-todd","user_id":"usr-1"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	signalPath := filepath.Join(t.TempDir(), "unauthorized.log")
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	provisioner := &blockingProvisioner{
+		err:     errors.New("device unavailable"),
+		started: make(chan struct{}),
+		release: release,
+	}
+	provider, err := New("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: os.Args[0],
+		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_AGENT_ID":                      "paxm-todd",
+			"PAXM_TEAM_PROVIDER_HELPER":          "1",
+			"PAXM_TEAM_HELPER_MODE":              "always-unauthorized",
+			"PAXM_TEAM_UNAUTHORIZED_SIGNAL_FILE": signalPath,
+		},
+		Timeout: "5s",
+	}, Dependencies{Provisioner: provisioner, CredentialDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			_, searchErr := provider.Search(context.Background(), memory.SearchQuery{Text: "concurrent failure"})
+			results <- searchErr
+		}()
+	}
+	close(start)
+	select {
+	case <-provisioner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first refresh did not start")
+	}
+	waitForSignalLines(t, signalPath, 2)
+	close(release)
+	released = true
+	for range 2 {
+		searchErr := <-results
+		if searchErr == nil || !strings.Contains(searchErr.Error(), "re-provision failed") {
+			t.Fatalf("search error = %v, want shared provision failure", searchErr)
 		}
 	}
 	if got := provisioner.callCount(); got != 1 {
