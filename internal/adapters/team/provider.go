@@ -38,6 +38,8 @@ type Provider struct {
 	generation       uint64
 	provisionTimeout time.Duration
 	refreshing       *refreshAttempt
+	lastRefreshGen   uint64
+	lastRefreshErr   error
 }
 
 type refreshAttempt struct {
@@ -228,8 +230,12 @@ func (p *Provider) shouldRefresh(err error) bool {
 func (p *Provider) refresh(ctx context.Context, observedGeneration uint64) error {
 	p.mu.Lock()
 	if p.generation != observedGeneration {
+		var err error
+		if p.lastRefreshGen == observedGeneration {
+			err = p.lastRefreshErr
+		}
 		p.mu.Unlock()
-		return nil
+		return err
 	}
 	if current := p.refreshing; current != nil && current.generation == observedGeneration {
 		p.mu.Unlock()
@@ -248,8 +254,12 @@ func (p *Provider) refresh(ctx context.Context, observedGeneration uint64) error
 	inner, err := p.reprovision(ctx, providerName)
 
 	p.mu.Lock()
-	if err == nil && p.generation == observedGeneration {
-		p.inner = inner
+	if p.generation == observedGeneration {
+		if err == nil {
+			p.inner = inner
+		}
+		p.lastRefreshGen = observedGeneration
+		p.lastRefreshErr = err
 		p.generation++
 	}
 	attempt.err = err
