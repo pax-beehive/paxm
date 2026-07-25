@@ -15,7 +15,10 @@ YAML unless an explicit `.json` path is provided.
 configured agent also has an `agent_id`. Setup derives the default as
 `<agent>-<user_id>` (for example, `codex-todd`); set the field explicitly in
 this file to override it. IDs are normalized to lower-case slugs. Existing
-explicit agent IDs remain stable when the user ID later changes.
+explicit agent IDs remain stable when the user ID later changes. Team Memory
+user IDs in the opaque `usr_<base64url>` format are preserved byte-for-byte in
+`identity.user_id` and personal scopes; this exception does not apply to agent
+IDs or team scope IDs.
 
 The user ID defaults to `$USER`; non-interactive setup can use
 `--user-id todd --team-id pax-core`. Each team ID creates a durable
@@ -447,8 +450,10 @@ The response supplies `TEAM_MEMORY_BASE_URL`, `TEAM_MEMORY_API_KEY`,
 `PAXM_USER_ID`, and `PAXM_AGENT_ID` to the provider process. The secret is
 cached at `~/.config/paxm/credentials/team-<agent-id>.json`; the directory is
 mode `0700` and the file is mode `0600`. It is never copied into this YAML.
-Setup derives an agent ID whose final segment is the selected integration type
-(for example, `paxm-todd-codex`) so paxl can infer the provisioning agent type.
+Setup derives an agent ID whose final segment is a paxl-supported selected
+integration type (for example, `paxm-todd-codex`) so paxl can infer the
+provisioning agent type. Integrations paxl cannot classify use the stable
+`codex` fallback.
 One unauthorized provider response invalidates the cached credential,
 re-provisions once, and retries the operation once. Existing JSON-RPC configs
 whose command basename is `paxm-team-memory-provider` receive the same

@@ -167,7 +167,7 @@ func (r runner) resolveSetupIdentity(cfg *config.Config, teamSelected bool) {
 	if strings.TrimSpace(cfg.Identity.UserID) == "" &&
 		teamSelected && r.paxlOnPremUserID != nil {
 		if discovered, err := r.paxlOnPremUserID(context.Background()); err == nil {
-			cfg.Identity.UserID = config.SlugID(discovered)
+			cfg.Identity.UserID = strings.TrimSpace(discovered)
 		}
 	}
 	ensureSetupIdentity(cfg)
@@ -185,7 +185,7 @@ func configureTeamProviderIdentity(cfg *config.Config, selectedHooks map[string]
 	if strings.TrimSpace(provider.Env["PAXM_AGENT_ID"]) == "" {
 		agentType := "codex"
 		for _, name := range sortedSelected(selectedHooks) {
-			if selectedHooks[name] && isRequestedAgent(name) {
+			if selectedHooks[name] && paxlProvisionAgentType(name) {
 				agentType = name
 				break
 			}
@@ -196,6 +196,15 @@ func configureTeamProviderIdentity(cfg *config.Config, selectedHooks map[string]
 		)
 	}
 	cfg.Providers["team"] = provider
+}
+
+func paxlProvisionAgentType(name string) bool {
+	switch name {
+	case "codex", "claude", "pi", "kiro", "opencode", "kimi":
+		return true
+	default:
+		return false
+	}
 }
 
 // pinnedSelections converts --provider/--agent flag values into a selection

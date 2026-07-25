@@ -41,16 +41,33 @@ func TestNormalizeDerivesAgentIdentityAndPersonalScopes(t *testing.T) {
 	}
 }
 
+func TestNormalizePreservesOpaqueTeamMemoryIdentity(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig("config.yaml")
+	cfg.Identity.UserID = "usr_AbC-01_Z"
+
+	normalized := Normalize(Normalize(cfg))
+
+	if normalized.Identity.UserID != "usr_AbC-01_Z" {
+		t.Fatalf("user_id = %q", normalized.Identity.UserID)
+	}
+	for name, profile := range normalized.WriteProfiles {
+		if profile.Scope != (MemoryScopeConfig{Type: "personal", ID: "usr_AbC-01_Z"}) {
+			t.Fatalf("write profile %q scope = %#v", name, profile.Scope)
+		}
+	}
+}
+
 func TestNormalizePreservesExplicitTeamScope(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultConfig("config.yaml")
 	cfg.Identity.UserID = "todd"
 	profile := cfg.WriteProfiles["ltm"]
-	profile.Scope = MemoryScopeConfig{Type: "TEAM", ID: "PAX Core"}
+	profile.Scope = MemoryScopeConfig{Type: "TEAM", ID: "usr_Project_X"}
 	cfg.WriteProfiles["ltm"] = profile
 
 	normalized := Normalize(cfg)
-	if got := normalized.WriteProfiles["ltm"].Scope; got != (MemoryScopeConfig{Type: "team", ID: "pax-core"}) {
+	if got := normalized.WriteProfiles["ltm"].Scope; got != (MemoryScopeConfig{Type: "team", ID: "usr-project-x"}) {
 		t.Fatalf("team scope = %#v", got)
 	}
 }

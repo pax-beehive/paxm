@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +153,35 @@ func TestProviderCapabilitiesAreOptionalForLegacyPlugins(t *testing.T) {
 	}
 }
 
+func TestProviderDoesNotExposePluginStderr(t *testing.T) {
+	const secret = "tm_key_must_not_escape"
+	provider, err := New("plugin", config.ProviderConfig{
+		Transport: "stdio",
+		Command:   os.Args[0],
+		Args:      []string{"-test.run=TestJSONRPCPluginHelper", "--"},
+		Env: map[string]string{
+			"PAXM_JSONRPC_PLUGIN_HELPER": "1",
+			"PAXM_JSONRPC_PLUGIN_MODE":   "stderr-secret",
+			"TEAM_MEMORY_API_KEY":        secret,
+		},
+		Timeout: "5s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = provider.Search(context.Background(), memory.SearchQuery{Text: "redact"})
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("provider error exposed child secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "diagnostic output omitted") {
+		t.Fatalf("provider error = %v, want redacted diagnostic marker", err)
+	}
+}
+
 func newHelperProvider(t *testing.T, mode string) *Provider {
 	t.Helper()
 
@@ -184,6 +214,15 @@ func TestJSONRPCPluginHelper(t *testing.T) {
 		JSONRPC: "2.0",
 		ID:      request.ID,
 		Result:  json.RawMessage(`{}`),
+	}
+	if os.Getenv("PAXM_JSONRPC_PLUGIN_MODE") == "stderr-secret" {
+		_, _ = os.Stderr.WriteString("debug key=" + os.Getenv("TEAM_MEMORY_API_KEY"))
+		response.Result = nil
+		response.Error = &RPCError{Code: -32000, Message: "request failed"}
+		if err := json.NewEncoder(os.Stdout).Encode(response); err != nil {
+			t.Fatal(err)
+		}
+		os.Exit(0)
 	}
 	switch request.Method {
 	case methodHealth:

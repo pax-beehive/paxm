@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	jsonrpcadapter "github.com/pax-beehive/paxm/internal/adapters/jsonrpc"
 	"github.com/pax-beehive/paxm/internal/config"
@@ -21,19 +22,21 @@ type Provisioner interface {
 }
 
 type Dependencies struct {
-	Provisioner   Provisioner
-	CredentialDir string
+	Provisioner      Provisioner
+	CredentialDir    string
+	ProvisionTimeout time.Duration
 }
 
 type Provider struct {
-	mu             sync.RWMutex
-	inner          *jsonrpcadapter.Provider
-	baseConfig     config.ProviderConfig
-	provisioner    Provisioner
-	credentialPath string
-	agentID        string
-	automatic      bool
-	generation     uint64
+	mu               sync.RWMutex
+	inner            *jsonrpcadapter.Provider
+	baseConfig       config.ProviderConfig
+	provisioner      Provisioner
+	credentialPath   string
+	agentID          string
+	automatic        bool
+	generation       uint64
+	provisionTimeout time.Duration
 }
 
 type cachedCredential struct {
@@ -43,6 +46,8 @@ type cachedCredential struct {
 	UserID       string `json:"user_id"`
 	CredentialID string `json:"credential_id,omitempty"`
 }
+
+const defaultProvisionTimeout = 10 * time.Second
 
 func New(name string, providerConfig config.ProviderConfig, dependencies Dependencies) (*Provider, error) {
 	if explicitTeamAPIKey(providerConfig.Env) != "" {
@@ -71,6 +76,10 @@ func New(name string, providerConfig config.ProviderConfig, dependencies Depende
 		client := paxlclient.New(nil)
 		provisioner = client
 	}
+	provisionTimeout := dependencies.ProvisionTimeout
+	if provisionTimeout <= 0 {
+		provisionTimeout = defaultProvisionTimeout
+	}
 	cacheID := config.SlugID(agentID)
 	if cacheID == "" {
 		return nil, errors.New("team provider PAXM_AGENT_ID must contain letters or numbers")
@@ -81,7 +90,9 @@ func New(name string, providerConfig config.ProviderConfig, dependencies Depende
 		return nil, err
 	}
 	if !credential.usable() {
-		provisioned, provisionErr := provisioner.ProvisionAgent(context.Background(), agentID)
+		ctx, cancel := context.WithTimeout(context.Background(), provisionTimeout)
+		provisioned, provisionErr := provisioner.ProvisionAgent(ctx, agentID)
+		cancel()
 		if provisionErr != nil {
 			return nil, fmt.Errorf(
 				"team provider credentials unavailable; run `paxl device connect onprem ...` first: %w",
@@ -105,6 +116,7 @@ func New(name string, providerConfig config.ProviderConfig, dependencies Depende
 	return &Provider{
 		inner: inner, baseConfig: baseConfig, provisioner: provisioner,
 		credentialPath: credentialPath, agentID: agentID, automatic: true,
+		provisionTimeout: provisionTimeout,
 	}, nil
 }
 
@@ -212,6 +224,8 @@ func (p *Provider) refresh(ctx context.Context, observedGeneration uint64) error
 	if p.generation != observedGeneration {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, p.provisionTimeout)
+	defer cancel()
 	provision, err := p.provisioner.ProvisionAgent(ctx, p.agentID)
 	if err != nil {
 		return fmt.Errorf(
@@ -243,6 +257,9 @@ func isUnauthorized(err error) bool {
 		return false
 	}
 	if rpcErr.Code == 401 || rpcErrorStatus(rpcErr.Data) == 401 {
+		return true
+	}
+	if jsonrpcadapter.StderrIndicatesUnauthorized(err) {
 		return true
 	}
 	message := strings.ToLower(err.Error())

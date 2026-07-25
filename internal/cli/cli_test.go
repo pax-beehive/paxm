@@ -470,7 +470,7 @@ func TestCLISetupTeamUsesPaxlIdentityWithoutAPIKey(t *testing.T) {
 		"--provider", "team", "--agent", "codex", "--integration", "codex-plugin",
 	}, nil, &stdout, &stderr, Dependencies{
 		PaxlOnPremUserID: func(context.Context) (string, error) {
-			return "usr-1", nil
+			return "usr_AbC-01_Z", nil
 		},
 	})
 	if code != 0 {
@@ -480,8 +480,8 @@ func TestCLISetupTeamUsesPaxlIdentityWithoutAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Identity.UserID != "usr-1" {
-		t.Fatalf("identity user ID = %q, want usr-1", cfg.Identity.UserID)
+	if cfg.Identity.UserID != "usr_AbC-01_Z" {
+		t.Fatalf("identity user ID = %q, want usr_AbC-01_Z", cfg.Identity.UserID)
 	}
 	team := cfg.Providers["team"]
 	if !team.Enabled || team.Type != "team-memory" {
@@ -490,8 +490,34 @@ func TestCLISetupTeamUsesPaxlIdentityWithoutAPIKey(t *testing.T) {
 	if team.Env["TEAM_MEMORY_API_KEY"] != "" {
 		t.Fatal("setup persisted a Team Memory API key")
 	}
-	if team.Env["PAXM_USER_ID"] != "" || team.Env["PAXM_AGENT_ID"] != "paxm-usr-1-codex" {
+	if team.Env["PAXM_USER_ID"] != "" || team.Env["PAXM_AGENT_ID"] != "paxm-usr-abc-01-z-codex" {
 		t.Fatalf("team identity env = %#v", team.Env)
+	}
+}
+
+func TestConfigureTeamProviderIdentityUsesPaxlCompatibleAgentType(t *testing.T) {
+	tests := []struct {
+		name          string
+		selectedHooks map[string]bool
+		wantAgentID   string
+	}{
+		{name: "supported", selectedHooks: map[string]bool{"claude": true}, wantAgentID: "paxm-usr-1-claude"},
+		{name: "unsupported", selectedHooks: map[string]bool{"cursor": true}, wantAgentID: "paxm-usr-1-codex"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+			cfg.Identity.UserID = "usr-1"
+			provider := cfg.Providers["team"]
+			provider.Enabled = true
+			cfg.Providers["team"] = provider
+
+			configureTeamProviderIdentity(&cfg, tt.selectedHooks)
+
+			if got := cfg.Providers["team"].Env["PAXM_AGENT_ID"]; got != tt.wantAgentID {
+				t.Fatalf("PAXM_AGENT_ID = %q, want %q", got, tt.wantAgentID)
+			}
+		})
 	}
 }
 

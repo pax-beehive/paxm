@@ -21,7 +21,7 @@ func Normalize(cfg Config) Config {
 }
 
 func normalizeIdentity(cfg *Config) {
-	cfg.Identity.UserID = slugID(cfg.Identity.UserID)
+	cfg.Identity.UserID = normalizeUserID(cfg.Identity.UserID)
 	for name, agent := range cfg.Agents {
 		agent.AgentID = slugID(agent.AgentID)
 		if agent.AgentID == "" && cfg.Identity.UserID != "" {
@@ -31,12 +31,39 @@ func normalizeIdentity(cfg *Config) {
 	}
 	for name, profile := range cfg.WriteProfiles {
 		profile.Scope.Type = strings.ToLower(strings.TrimSpace(profile.Scope.Type))
-		profile.Scope.ID = slugID(profile.Scope.ID)
+		if profile.Scope.Type == "personal" {
+			profile.Scope.ID = normalizeUserID(profile.Scope.ID)
+		} else {
+			profile.Scope.ID = slugID(profile.Scope.ID)
+		}
 		if profile.Scope.Type == "" && profile.Scope.ID == "" && cfg.Identity.UserID != "" {
 			profile.Scope = MemoryScopeConfig{Type: "personal", ID: cfg.Identity.UserID}
 		}
 		cfg.WriteProfiles[name] = profile
 	}
+}
+
+func normalizeUserID(value string) string {
+	value = strings.TrimSpace(value)
+	if isOpaqueTeamMemoryUserID(value) {
+		return value
+	}
+	return slugID(value)
+}
+
+func isOpaqueTeamMemoryUserID(value string) bool {
+	if !strings.HasPrefix(value, "usr_") || len(value) == len("usr_") {
+		return false
+	}
+	for _, char := range value[len("usr_"):] {
+		if (char < 'a' || char > 'z') &&
+			(char < 'A' || char > 'Z') &&
+			(char < '0' || char > '9') &&
+			char != '-' && char != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func SlugID(value string) string { return slugID(value) }

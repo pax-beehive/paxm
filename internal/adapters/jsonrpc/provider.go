@@ -62,6 +62,19 @@ type RPCError struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+type processRPCError struct {
+	rpc    *RPCError
+	stderr string
+}
+
+func (e *processRPCError) Error() string {
+	return e.rpc.Error() + stderrSuffix(e.stderr)
+}
+
+func (e *processRPCError) Unwrap() error {
+	return e.rpc
+}
+
 func (e *RPCError) Error() string {
 	if e == nil {
 		return ""
@@ -297,8 +310,8 @@ func (p *Provider) call(ctx context.Context, method string, params any, result a
 		return fmt.Errorf("jsonrpc response id mismatch for %s: got %q, want %q", method, response.ID, request.ID)
 	}
 	if response.Error != nil {
-		if suffix := stderrSuffix(stderr.String()); suffix != "" {
-			return fmt.Errorf("%w%s", response.Error, suffix)
+		if strings.TrimSpace(stderr.String()) != "" {
+			return &processRPCError{rpc: response.Error, stderr: stderr.String()}
 		}
 		return response.Error
 	}
@@ -378,7 +391,18 @@ func stderrSuffix(value string) string {
 	if value == "" {
 		return ""
 	}
-	return ": stderr: " + value
+	return ": provider diagnostic output omitted"
+}
+
+func StderrIndicatesUnauthorized(err error) bool {
+	var processErr *processRPCError
+	if !errors.As(err, &processErr) {
+		return false
+	}
+	message := strings.ToLower(processErr.stderr)
+	return strings.Contains(message, "unauthorized") ||
+		strings.Contains(message, "returned 401") ||
+		strings.Contains(message, "status 401")
 }
 
 type boundedBuffer struct {
