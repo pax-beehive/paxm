@@ -92,6 +92,8 @@ type setupSelection struct {
 	selectedHooks map[string]bool
 }
 
+const setupPaxlIdentityTimeout = 5 * time.Second
+
 func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration, userID, teamIDs string, providerFlags, agentFlags []string) (setupSelection, bool, error) {
 	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, force, yes)
 	if err != nil || !proceed {
@@ -105,13 +107,9 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
 	pluginTarget := setupPluginTarget(integration)
 	previousEnabled := enabledAgents(cfg)
-	if strings.TrimSpace(userID) != "" {
-		cfg.Identity.UserID = config.SlugID(userID)
-		if cfg.Identity.UserID == "" {
-			return setupSelection{}, false, errors.New("setup user ID must contain letters or numbers")
-		}
+	if err := applyExplicitSetupUserID(&cfg, userID); err != nil {
+		return setupSelection{}, false, err
 	}
-	ensureSetupIdentity(&cfg)
 	if strings.TrimSpace(teamIDs) != "" {
 		if err := configureTeamWriteProfiles(&cfg, teamIDs); err != nil {
 			return setupSelection{}, false, err
@@ -143,7 +141,9 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	if !anySelected(selectedProviders) {
 		return setupSelection{}, false, errors.New("setup requires at least one memory provider")
 	}
+	r.resolveSetupIdentity(&cfg, selectedTeamMemoryProvider(cfg, selectedProviders))
 	applySetupSelections(&cfg, selectedProviders, selectedHooks)
+	configureTeamProviderIdentity(&cfg, selectedHooks)
 	applySetupIntegration(&cfg, integration, pluginTarget, previousEnabled)
 	if !yes {
 		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
@@ -152,6 +152,80 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 		}
 	}
 	return setupSelection{cfg: cfg, selectedHooks: selectedHooks}, true, nil
+}
+
+func applyExplicitSetupUserID(cfg *config.Config, userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	cfg.Identity.UserID = config.NormalizeUserID(userID)
+	if cfg.Identity.UserID == "" {
+		return errors.New("setup user ID must contain letters or numbers")
+	}
+	return nil
+}
+
+func (r runner) resolveSetupIdentity(cfg *config.Config, teamSelected bool) {
+	if strings.TrimSpace(cfg.Identity.UserID) == "" &&
+		teamSelected && r.paxlOnPremUserID != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), setupPaxlIdentityTimeout)
+		discovered, err := r.paxlOnPremUserID(ctx)
+		cancel()
+		if err == nil {
+			cfg.Identity.UserID = strings.TrimSpace(discovered)
+		}
+	}
+	ensureSetupIdentity(cfg)
+}
+
+func configureTeamProviderIdentity(cfg *config.Config, selectedHooks map[string]bool) {
+	agentType := "codex"
+	for _, name := range sortedSelected(selectedHooks) {
+		if selectedHooks[name] && paxlProvisionAgentType(name) {
+			agentType = name
+			break
+		}
+	}
+	for name, provider := range cfg.Providers {
+		if !provider.Enabled || !isTeamMemoryProvider(provider) {
+			continue
+		}
+		if provider.Env == nil {
+			provider.Env = make(map[string]string)
+		}
+		if strings.TrimSpace(provider.Env["PAXM_AGENT_ID"]) != "" {
+			continue
+		}
+		provider.Env["PAXM_AGENT_ID"] = firstNonEmpty(
+			os.Getenv("PAXM_AGENT_ID"),
+			config.SlugID("paxm-"+cfg.Identity.UserID+"-"+agentType),
+		)
+		cfg.Providers[name] = provider
+	}
+}
+
+func selectedTeamMemoryProvider(cfg config.Config, selected map[string]bool) bool {
+	for name, isSelected := range selected {
+		if isSelected && isTeamMemoryProvider(cfg.Providers[name]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTeamMemoryProvider(provider config.ProviderConfig) bool {
+	return provider.Type == "team-memory" ||
+		(provider.Type == "jsonrpc" &&
+			filepath.Base(strings.TrimSpace(provider.Command)) == "paxm-team-memory-provider")
+}
+
+func paxlProvisionAgentType(name string) bool {
+	switch name {
+	case "codex", "claude", "pi", "kiro", "opencode", "kimi":
+		return true
+	default:
+		return false
+	}
 }
 
 // pinnedSelections converts --provider/--agent flag values into a selection

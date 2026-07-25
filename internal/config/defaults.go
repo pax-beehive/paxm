@@ -75,6 +75,13 @@ func DefaultConfig(configPath string) Config {
 				Transport: defaultJSONRPCTransport,
 				Timeout:   defaultJSONRPCTimeout,
 			},
+			"team": {
+				Type:      "team-memory",
+				Enabled:   false,
+				Transport: defaultJSONRPCTransport,
+				Command:   "paxm-team-memory-provider",
+				Timeout:   defaultJSONRPCTimeout,
+			},
 		},
 		RecallProfiles: map[string]RecallProfileConfig{
 			"default":         defaultRecallProfile,

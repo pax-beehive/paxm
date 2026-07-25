@@ -10,6 +10,7 @@ import (
 	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
 	"github.com/pax-beehive/paxm/internal/config"
 	paxeval "github.com/pax-beehive/paxm/internal/eval"
+	"github.com/pax-beehive/paxm/internal/paxlclient"
 	paxruntime "github.com/pax-beehive/paxm/internal/runtime"
 	"github.com/pax-beehive/paxm/internal/tools"
 )
@@ -21,12 +22,14 @@ const (
 
 type ensureZepUserFunc func(context.Context, config.ProviderConfig) (zepadapter.EnsureUserResult, error)
 type shutdownHookDaemonFunc func(string) error
+type paxlOnPremUserIDFunc func(context.Context) (string, error)
 
 type Dependencies struct {
 	Version            string
 	EnsureZepUser      ensureZepUserFunc
 	ShutdownHookDaemon shutdownHookDaemonFunc
 	AgentExecutor      paxeval.AgentExecutor
+	PaxlOnPremUserID   paxlOnPremUserIDFunc
 	Now                func() time.Time
 }
 
@@ -39,6 +42,7 @@ type runner struct {
 	ensureZepUser      ensureZepUserFunc
 	shutdownHookDaemon shutdownHookDaemonFunc
 	agentExecutor      paxeval.AgentExecutor
+	paxlOnPremUserID   paxlOnPremUserIDFunc
 	now                func() time.Time
 }
 
@@ -71,6 +75,7 @@ func MainWithDependencies(args []string, stdin io.Reader, stdout, stderr io.Writ
 		ensureZepUser:      deps.EnsureZepUser,
 		shutdownHookDaemon: deps.ShutdownHookDaemon,
 		agentExecutor:      deps.AgentExecutor,
+		paxlOnPremUserID:   deps.PaxlOnPremUserID,
 		now:                deps.Now,
 	}
 	if len(args) == 0 {
@@ -106,6 +111,10 @@ func (deps Dependencies) withDefaults() Dependencies {
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
+	}
+	if deps.PaxlOnPremUserID == nil {
+		client := paxlclient.New(nil)
+		deps.PaxlOnPremUserID = client.OnPremUserID
 	}
 	return deps
 }

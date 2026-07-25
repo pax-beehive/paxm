@@ -2,9 +2,9 @@
 
 paxm（PAX Memory）是一个本地优先的 memory adaptor。它把 Codex、Claude
 Code、OpenCode、Pi、Cursor、TRAE、TRAE CN、Kimi Code、ZCode、Kiro、Cline
-和 MCP 客户端的记忆请求统一路由到 SQLite、Zep、Mem0、MemOS、OpenViking
-或自定义 provider。默认使用本地 SQLite，不要求先申请账号、API key 或额外的
-embedding/LLM 服务。
+和 MCP 客户端的记忆请求统一路由到 SQLite、Zep、Mem0、MemOS、OpenViking、
+Team Memory 或自定义 provider。默认使用本地 SQLite，不要求先申请账号、API
+key 或额外的 embedding/LLM 服务。
 
 本页是中文入口；完整的字段说明仍以英文的
 [配置参考](config.md)、[架构说明](architecture.md) 和
@@ -186,6 +186,36 @@ write_profiles:
 provider 可执行文件里。
 
 更完整的 YAML 示例见[配置参考](config.md)。
+
+### 通过 paxl Device 接入 Team Memory
+
+一台机器只需要连接一次 Device：
+
+```bash
+paxl device connect onprem \
+  --url https://memory.company.internal \
+  --device-name todd-macbook-air \
+  --enrollment-token tm_enroll_xxx
+paxm setup
+```
+
+setup 选择 Team Memory 后，会优先从 paxl Device status 读取默认
+`user_id`，旧版接入则回退到 on-prem Channel status，并配置稳定的
+`PAXM_AGENT_ID`。如果配置或进程环境里已有
+`TEAM_MEMORY_API_KEY`，现有显式凭证行为保持不变，不会调用 paxl。
+
+没有显式 key 时，provider 会执行：
+
+```text
+paxl device provision --agent <PAXM_AGENT_ID> --json
+```
+
+返回的 agent key、URL 和 user ID 只注入
+`paxm-team-memory-provider` 进程；key 不会写进 `config.yaml`，而是保存在
+`~/.config/paxm/credentials/team-<slugged-agent-id>.json`，其中名称部分是
+`PAXM_AGENT_ID` 规范化后的 slug，文件权限为 `0600`。
+provider 遇到 401 时只重新 provision 并重试一次；第二次仍失败会明确报错。找不到
+paxl 或 Device 凭证时，错误会提示先运行 `paxl device connect onprem`。
 
 ### Mem0 分数方向
 

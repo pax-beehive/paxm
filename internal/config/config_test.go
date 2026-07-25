@@ -41,16 +41,33 @@ func TestNormalizeDerivesAgentIdentityAndPersonalScopes(t *testing.T) {
 	}
 }
 
+func TestNormalizePreservesOpaqueTeamMemoryIdentity(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig("config.yaml")
+	cfg.Identity.UserID = "usr_AbC-01_Z"
+
+	normalized := Normalize(Normalize(cfg))
+
+	if normalized.Identity.UserID != "usr_AbC-01_Z" {
+		t.Fatalf("user_id = %q", normalized.Identity.UserID)
+	}
+	for name, profile := range normalized.WriteProfiles {
+		if profile.Scope != (MemoryScopeConfig{Type: "personal", ID: "usr_AbC-01_Z"}) {
+			t.Fatalf("write profile %q scope = %#v", name, profile.Scope)
+		}
+	}
+}
+
 func TestNormalizePreservesExplicitTeamScope(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultConfig("config.yaml")
 	cfg.Identity.UserID = "todd"
 	profile := cfg.WriteProfiles["ltm"]
-	profile.Scope = MemoryScopeConfig{Type: "TEAM", ID: "PAX Core"}
+	profile.Scope = MemoryScopeConfig{Type: "TEAM", ID: "usr_Project_X"}
 	cfg.WriteProfiles["ltm"] = profile
 
 	normalized := Normalize(cfg)
-	if got := normalized.WriteProfiles["ltm"].Scope; got != (MemoryScopeConfig{Type: "team", ID: "pax-core"}) {
+	if got := normalized.WriteProfiles["ltm"].Scope; got != (MemoryScopeConfig{Type: "team", ID: "usr-project-x"}) {
 		t.Fatalf("team scope = %#v", got)
 	}
 }
@@ -115,6 +132,11 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	}
 	if provider := cfg.Providers["jsonrpc"]; provider.Type != "jsonrpc" || provider.Enabled || provider.Transport != "stdio" || provider.Timeout != "30s" {
 		t.Fatalf("default jsonrpc provider is invalid: %#v", provider)
+	}
+	if provider := cfg.Providers["team"]; provider.Type != "team-memory" || provider.Enabled ||
+		provider.Command != "paxm-team-memory-provider" || provider.Transport != "stdio" ||
+		provider.Timeout != "30s" {
+		t.Fatalf("default team provider is invalid: %#v", provider)
 	}
 	active := cfg.RecallProfiles["default"]
 	if active.MaxResults != 3 {

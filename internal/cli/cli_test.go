@@ -459,6 +459,130 @@ func TestCLISetupCodexPluginOwnsHooks(t *testing.T) {
 	}
 }
 
+func TestCLISetupTeamUsesPaxlIdentityWithoutAPIKey(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := MainWithDependencies([]string{
+		"--config", configPath, "setup", "--yes",
+		"--provider", "team", "--agent", "codex", "--integration", "codex-plugin",
+	}, nil, &stdout, &stderr, Dependencies{
+		PaxlOnPremUserID: func(context.Context) (string, error) {
+			return "usr_AbC-01_Z", nil
+		},
+	})
+	if code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Identity.UserID != "usr_AbC-01_Z" {
+		t.Fatalf("identity user ID = %q, want usr_AbC-01_Z", cfg.Identity.UserID)
+	}
+	team := cfg.Providers["team"]
+	if !team.Enabled || team.Type != "team-memory" {
+		t.Fatalf("team provider = %#v", team)
+	}
+	if team.Env["TEAM_MEMORY_API_KEY"] != "" {
+		t.Fatal("setup persisted a Team Memory API key")
+	}
+	if team.Env["PAXM_USER_ID"] != "" || team.Env["PAXM_AGENT_ID"] != "paxm-usr-abc-01-z-codex" {
+		t.Fatalf("team identity env = %#v", team.Env)
+	}
+}
+
+func TestConfigureTeamProviderIdentityUsesPaxlCompatibleAgentType(t *testing.T) {
+	tests := []struct {
+		name          string
+		selectedHooks map[string]bool
+		wantAgentID   string
+	}{
+		{name: "supported", selectedHooks: map[string]bool{"claude": true}, wantAgentID: "paxm-usr-1-claude"},
+		{name: "unsupported", selectedHooks: map[string]bool{"cursor": true}, wantAgentID: "paxm-usr-1-codex"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+			cfg.Identity.UserID = "usr-1"
+			provider := cfg.Providers["team"]
+			provider.Enabled = true
+			cfg.Providers["team"] = provider
+
+			configureTeamProviderIdentity(&cfg, tt.selectedHooks)
+
+			if got := cfg.Providers["team"].Env["PAXM_AGENT_ID"]; got != tt.wantAgentID {
+				t.Fatalf("PAXM_AGENT_ID = %q, want %q", got, tt.wantAgentID)
+			}
+		})
+	}
+}
+
+func TestTeamMemorySetupDetectionUsesProviderContract(t *testing.T) {
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	cfg.Providers["team"] = config.ProviderConfig{Type: "sqlite"}
+	cfg.Providers["workstation"] = config.ProviderConfig{
+		Type: "jsonrpc", Command: "/opt/paxm-team-memory-provider",
+	}
+	selected := map[string]bool{"team": true, "workstation": false}
+	if selectedTeamMemoryProvider(cfg, selected) {
+		t.Fatal("unrelated provider named team triggered Team Memory discovery")
+	}
+	selected["team"] = false
+	selected["workstation"] = true
+	if !selectedTeamMemoryProvider(cfg, selected) {
+		t.Fatal("custom-named Team Memory provider was not detected")
+	}
+}
+
+func TestResolveSetupIdentityBoundsPaxlStatus(t *testing.T) {
+	t.Setenv("USER", "fallback-user")
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	r := runner{
+		paxlOnPremUserID: func(ctx context.Context) (string, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("paxl status context has no deadline")
+			}
+			return "", context.DeadlineExceeded
+		},
+	}
+
+	r.resolveSetupIdentity(&cfg, true)
+
+	if cfg.Identity.UserID != "fallback-user" {
+		t.Fatalf("identity user ID = %q, want fallback-user", cfg.Identity.UserID)
+	}
+}
+
+func TestApplyExplicitSetupUserIDPreservesOpaqueTeamMemoryID(t *testing.T) {
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+
+	if err := applyExplicitSetupUserID(&cfg, "usr_AbC-01_Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Identity.UserID != "usr_AbC-01_Z" {
+		t.Fatalf("identity user ID = %q, want usr_AbC-01_Z", cfg.Identity.UserID)
+	}
+}
+
+func TestConfigureCustomTeamProviderIdentity(t *testing.T) {
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	cfg.Identity.UserID = "usr_AbC"
+	cfg.Providers["workstation"] = config.ProviderConfig{
+		Type: "jsonrpc", Command: "/opt/paxm-team-memory-provider", Enabled: true,
+	}
+
+	configureTeamProviderIdentity(&cfg, map[string]bool{"claude": true})
+
+	if got := cfg.Providers["workstation"].Env["PAXM_AGENT_ID"]; got != "paxm-usr-abc-claude" {
+		t.Fatalf("PAXM_AGENT_ID = %q, want paxm-usr-abc-claude", got)
+	}
+}
+
 func TestCLIHookSourceMatchesConfiguredCodexOwner(t *testing.T) {
 	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
 	event := capture.Event{Target: "codex", Event: "user_input"}
