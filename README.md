@@ -314,6 +314,16 @@ retry; a second failure is returned to the caller. If paxl or its device
 credential is unavailable, the error directs the operator to run
 `paxl device connect onprem`.
 
+Passive capture uses the trusted hook origin to route each Team Memory batch
+through that agent's credential. On a shared workstation, Codex and Claude
+captures therefore use separate `team-<agent-id>.json` caches and are
+attributed to their own Team Memory principals. A rejected credential is
+re-provisioned only for the affected agent. Paxm passes the trusted hook target
+as paxl's explicit agent type, so legacy IDs such as `claude-<user>` do not
+depend on suffix inference. Captures without a resolved origin fall back to
+the configured `PAXM_AGENT_ID`; an explicit
+`TEAM_MEMORY_API_KEY` keeps the legacy single-credential behavior.
+
 Mem0 score direction is deployment-specific. `score_semantics` defaults to
 `similarity` for backward compatibility; set it to `distance` when the Mem0
 endpoint returns pgvector cosine distance. Paxm cannot infer this from a field

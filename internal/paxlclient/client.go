@@ -34,11 +34,36 @@ func New(run RunFunc) Client {
 }
 
 func (c Client) ProvisionAgent(ctx context.Context, agentID string) (AgentProvision, error) {
+	return c.provisionAgent(ctx, agentID, "")
+}
+
+func (c Client) ProvisionAgentWithType(
+	ctx context.Context,
+	agentID string,
+	agentType string,
+) (AgentProvision, error) {
+	agentType = strings.TrimSpace(agentType)
+	if agentType == "" {
+		return AgentProvision{}, errors.New("paxl device provision requires an agent type")
+	}
+	return c.provisionAgent(ctx, agentID, agentType)
+}
+
+func (c Client) provisionAgent(
+	ctx context.Context,
+	agentID string,
+	agentType string,
+) (AgentProvision, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return AgentProvision{}, errors.New("paxl device provision requires an agent ID")
 	}
-	output, err := c.run(ctx, "device", "provision", "--agent", agentID, "--json")
+	args := []string{"device", "provision", "--agent", agentID}
+	if agentType != "" {
+		args = append(args, "--agent-type", agentType)
+	}
+	args = append(args, "--json")
+	output, err := c.run(ctx, args...)
 	if err != nil {
 		return AgentProvision{}, fmt.Errorf("run paxl device provision: %w", err)
 	}

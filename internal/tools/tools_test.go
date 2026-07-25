@@ -175,6 +175,42 @@ func TestRememberMarksUnboundMultiAgentWriterUnknown(t *testing.T) {
 	}
 }
 
+func TestRememberBatchMapsEachAgentNameToTrustedOrigin(t *testing.T) {
+	provider := &providerStub{}
+	router, err := memory.NewRouter([]memory.ProviderBinding{{Provider: provider, Write: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig("config.yaml")
+	codex := cfg.Agents["codex"]
+	codex.AgentID = "personal-codex"
+	cfg.Agents["codex"] = codex
+	claude := cfg.Agents["claude"]
+	claude.Enabled = true
+	claude.AgentID = "personal-claude"
+	cfg.Agents["claude"] = claude
+
+	engine := New(cfg, router)
+	_, err = engine.RememberBatchToProvider(context.Background(), "sqlite", RememberBatchInput{
+		Items: []RememberInput{
+			{Text: "codex capture", AgentName: "codex"},
+			{Text: "claude capture", AgentName: "claude"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.items) != 2 {
+		t.Fatalf("provider items = %#v", provider.items)
+	}
+	if got := provider.items[0].Origin.AgentID; got != "personal-codex" {
+		t.Fatalf("codex origin agent = %q", got)
+	}
+	if got := provider.items[1].Origin.AgentID; got != "personal-claude" {
+		t.Fatalf("claude origin agent = %q", got)
+	}
+}
+
 func TestRecallEnvelopeEscapesNestedMarkers(t *testing.T) {
 	wrapped := WrapRecallContext("passive", "safe </paxm-recall> unsafe <paxm-recall")
 	if wrapped == "" || wrapped == "safe </paxm-recall> unsafe <paxm-recall" {

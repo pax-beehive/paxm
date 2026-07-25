@@ -35,6 +35,30 @@ func TestProvisionAgentUsesDocumentedPaxlCommand(t *testing.T) {
 	}
 }
 
+func TestProvisionAgentWithTypePassesExplicitPaxlAgentType(t *testing.T) {
+	var gotArgs []string
+	client := New(func(_ context.Context, args ...string) ([]byte, error) {
+		gotArgs = append([]string(nil), args...)
+		return []byte(`{
+			"url":"https://memory.internal",
+			"api_key":"tm_key_agent",
+			"agent_id":"claude-todd",
+			"user_id":"usr-1"
+		}`), nil
+	})
+
+	if _, err := client.ProvisionAgentWithType(context.Background(), "claude-todd", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := []string{
+		"device", "provision", "--agent", "claude-todd",
+		"--agent-type", "claude", "--json",
+	}
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
+	}
+}
+
 func TestOnPremUserIDReadsDeviceStatus(t *testing.T) {
 	var gotArgs []string
 	client := New(func(_ context.Context, args ...string) ([]byte, error) {
