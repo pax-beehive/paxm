@@ -212,7 +212,8 @@ paxl device provision --agent <PAXM_AGENT_ID> --json
 
 返回的 agent key、URL 和 user ID 只注入
 `paxm-team-memory-provider` 进程；key 不会写进 `config.yaml`，而是保存在
-`~/.config/paxm/credentials/team-<agent-id>.json`，文件权限为 `0600`。
+`~/.config/paxm/credentials/team-<slugged-agent-id>.json`，其中名称部分是
+`PAXM_AGENT_ID` 规范化后的 slug，文件权限为 `0600`。
 provider 遇到 401 时只重新 provision 并重试一次；第二次仍失败会明确报错。找不到
 paxl 或 Device 凭证时，错误会提示先运行 `paxl device connect onprem`。
 

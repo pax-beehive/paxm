@@ -12,11 +12,11 @@ func TestProvisionAgentUsesDocumentedPaxlCommand(t *testing.T) {
 	client := New(func(_ context.Context, args ...string) ([]byte, error) {
 		gotArgs = append([]string(nil), args...)
 		return []byte(`{
-			"url":"https://memory.internal",
-			"api_key":"tm_key_agent",
-			"agent_id":"paxm-todd",
-			"user_id":"usr-1",
-			"credential_id":"cred-agent"
+			"url":" https://memory.internal ",
+			"api_key":" tm_key_agent ",
+			"agent_id":" paxm-todd ",
+			"user_id":" usr-1 ",
+			"credential_id":" cred-agent "
 		}`), nil
 	})
 
@@ -29,7 +29,8 @@ func TestProvisionAgentUsesDocumentedPaxlCommand(t *testing.T) {
 		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
 	}
 	if got.APIKey != "tm_key_agent" || got.URL != "https://memory.internal" ||
-		got.UserID != "usr-1" || got.AgentID != "paxm-todd" {
+		got.UserID != "usr-1" || got.AgentID != "paxm-todd" ||
+		got.CredentialID != "cred-agent" {
 		t.Fatalf("provision = %#v", got)
 	}
 }

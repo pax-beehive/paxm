@@ -448,7 +448,8 @@ paxl device provision --agent <PAXM_AGENT_ID> --json
 
 The response supplies `TEAM_MEMORY_BASE_URL`, `TEAM_MEMORY_API_KEY`,
 `PAXM_USER_ID`, and `PAXM_AGENT_ID` to the provider process. The secret is
-cached at `~/.config/paxm/credentials/team-<agent-id>.json`; the directory is
+cached at `~/.config/paxm/credentials/team-<slugged-agent-id>.json`; the
+filename component is the normalized slug of `PAXM_AGENT_ID`, the directory is
 mode `0700` and the file is mode `0600`. It is never copied into this YAML.
 Setup derives an agent ID whose final segment is a paxl-supported selected
 integration type (for example, `paxm-todd-codex`) so paxl can infer the

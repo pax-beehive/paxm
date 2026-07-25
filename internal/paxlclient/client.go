@@ -46,12 +46,15 @@ func (c Client) ProvisionAgent(ctx context.Context, agentID string) (AgentProvis
 	if err := json.Unmarshal(output, &provision); err != nil {
 		return AgentProvision{}, fmt.Errorf("decode paxl device provision output: %w", err)
 	}
-	if strings.TrimSpace(provision.APIKey) == "" ||
-		strings.TrimSpace(provision.URL) == "" ||
-		strings.TrimSpace(provision.UserID) == "" {
+	provision.URL = strings.TrimSpace(provision.URL)
+	provision.APIKey = strings.TrimSpace(provision.APIKey)
+	provision.AgentID = strings.TrimSpace(provision.AgentID)
+	provision.UserID = strings.TrimSpace(provision.UserID)
+	provision.CredentialID = strings.TrimSpace(provision.CredentialID)
+	if provision.APIKey == "" || provision.URL == "" || provision.UserID == "" {
 		return AgentProvision{}, errors.New("paxl device provision returned incomplete credentials")
 	}
-	if strings.TrimSpace(provision.AgentID) == "" {
+	if provision.AgentID == "" {
 		provision.AgentID = agentID
 	}
 	return provision, nil
