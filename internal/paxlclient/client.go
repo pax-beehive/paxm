@@ -72,7 +72,7 @@ func (c Client) OnPremUserID(ctx context.Context) (string, error) {
 		if deviceErr != nil {
 			return "", fmt.Errorf("read paxl on-prem identity: device status: %v; channel status: %w", deviceErr, err)
 		}
-		return "", fmt.Errorf("read paxl on-prem identity: device status has no user ID; channel status: %w", err)
+		return "", fmt.Errorf("read paxl on-prem identity: device status returned no usable user ID; channel status: %w", err)
 	}
 	userID, err := channelStatusUserID(output)
 	if err != nil {

@@ -339,9 +339,9 @@ func teamEnvironment(existing map[string]string, credential cachedCredential) ma
 		env[key] = value
 	}
 	env["TEAM_MEMORY_API_KEY"] = credential.APIKey
-	env["TEAM_MEMORY_BASE_URL"] = firstNonEmpty(env["TEAM_MEMORY_BASE_URL"], credential.URL)
-	env["PAXM_USER_ID"] = firstNonEmpty(env["PAXM_USER_ID"], credential.UserID)
-	env["PAXM_AGENT_ID"] = firstNonEmpty(env["PAXM_AGENT_ID"], credential.AgentID)
+	env["TEAM_MEMORY_BASE_URL"] = credential.URL
+	env["PAXM_USER_ID"] = credential.UserID
+	env["PAXM_AGENT_ID"] = credential.AgentID
 	return env
 }
 

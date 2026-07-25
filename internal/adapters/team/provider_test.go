@@ -74,6 +74,8 @@ func TestProviderDiscoversAndCachesPaxlDeviceCredential(t *testing.T) {
 		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
 		Env: map[string]string{
 			"PAXM_AGENT_ID":             "paxm-todd",
+			"PAXM_USER_ID":              "stale-user",
+			"TEAM_MEMORY_BASE_URL":      "https://stale.invalid",
 			"PAXM_TEAM_PROVIDER_HELPER": "1",
 			"PAXM_TEAM_EXPECTED_KEY":    "tm_key_discovered",
 		},
