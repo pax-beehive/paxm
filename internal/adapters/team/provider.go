@@ -342,15 +342,51 @@ func saveCredential(path string, credential cachedCredential) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tempPath, path); err != nil {
-		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return err
-		}
-		if renameErr := os.Rename(tempPath, path); renameErr != nil {
-			return renameErr
-		}
+	if err := replaceCredentialFile(tempPath, path, os.Rename); err != nil {
+		return err
 	}
 	return os.Chmod(path, 0o600)
+}
+
+func replaceCredentialFile(tempPath, path string, rename func(string, string) error) error {
+	if err := rename(tempPath, path); err == nil {
+		return nil
+	}
+	backup, err := os.CreateTemp(filepath.Dir(path), ".team-credential-backup-*.tmp")
+	if err != nil {
+		return err
+	}
+	backupPath := backup.Name()
+	removeBackup := true
+	defer func() {
+		if removeBackup {
+			_ = os.Remove(backupPath)
+		}
+	}()
+	if err := backup.Close(); err != nil {
+		return err
+	}
+	if err := os.Remove(backupPath); err != nil {
+		return err
+	}
+	if err := rename(path, backupPath); err != nil {
+		return fmt.Errorf("preserve existing team credential: %w", err)
+	}
+	if err := rename(tempPath, path); err != nil {
+		if restoreErr := rename(backupPath, path); restoreErr != nil {
+			removeBackup = false
+			return errors.Join(
+				fmt.Errorf("install replacement team credential: %w", err),
+				fmt.Errorf("restore existing team credential from %s: %w", backupPath, restoreErr),
+			)
+		}
+		return fmt.Errorf("install replacement team credential: %w", err)
+	}
+	if err := os.Remove(backupPath); err != nil {
+		return fmt.Errorf("remove replaced team credential backup: %w", err)
+	}
+	removeBackup = false
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {

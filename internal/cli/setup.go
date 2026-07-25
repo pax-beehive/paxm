@@ -92,6 +92,8 @@ type setupSelection struct {
 	selectedHooks map[string]bool
 }
 
+const setupPaxlIdentityTimeout = 5 * time.Second
+
 func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bool, integration, userID, teamIDs string, providerFlags, agentFlags []string) (setupSelection, bool, error) {
 	configExists, proceed, err := r.confirmSetupOverwrite(path, prompter, force, yes)
 	if err != nil || !proceed {
@@ -139,7 +141,7 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	if !anySelected(selectedProviders) {
 		return setupSelection{}, false, errors.New("setup requires at least one memory provider")
 	}
-	r.resolveSetupIdentity(&cfg, selectedProviders["team"])
+	r.resolveSetupIdentity(&cfg, selectedTeamMemoryProvider(cfg, selectedProviders))
 	applySetupSelections(&cfg, selectedProviders, selectedHooks)
 	configureTeamProviderIdentity(&cfg, selectedHooks)
 	applySetupIntegration(&cfg, integration, pluginTarget, previousEnabled)
@@ -166,7 +168,10 @@ func applyExplicitSetupUserID(cfg *config.Config, userID string) error {
 func (r runner) resolveSetupIdentity(cfg *config.Config, teamSelected bool) {
 	if strings.TrimSpace(cfg.Identity.UserID) == "" &&
 		teamSelected && r.paxlOnPremUserID != nil {
-		if discovered, err := r.paxlOnPremUserID(context.Background()); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), setupPaxlIdentityTimeout)
+		discovered, err := r.paxlOnPremUserID(ctx)
+		cancel()
+		if err == nil {
 			cfg.Identity.UserID = strings.TrimSpace(discovered)
 		}
 	}
@@ -174,28 +179,44 @@ func (r runner) resolveSetupIdentity(cfg *config.Config, teamSelected bool) {
 }
 
 func configureTeamProviderIdentity(cfg *config.Config, selectedHooks map[string]bool) {
-	provider, ok := cfg.Providers["team"]
-	if !ok || !provider.Enabled ||
-		(provider.Type != "team-memory" && provider.Type != "jsonrpc") {
-		return
+	agentType := "codex"
+	for _, name := range sortedSelected(selectedHooks) {
+		if selectedHooks[name] && paxlProvisionAgentType(name) {
+			agentType = name
+			break
+		}
 	}
-	if provider.Env == nil {
-		provider.Env = make(map[string]string)
-	}
-	if strings.TrimSpace(provider.Env["PAXM_AGENT_ID"]) == "" {
-		agentType := "codex"
-		for _, name := range sortedSelected(selectedHooks) {
-			if selectedHooks[name] && paxlProvisionAgentType(name) {
-				agentType = name
-				break
-			}
+	for name, provider := range cfg.Providers {
+		if !provider.Enabled || !isTeamMemoryProvider(provider) {
+			continue
+		}
+		if provider.Env == nil {
+			provider.Env = make(map[string]string)
+		}
+		if strings.TrimSpace(provider.Env["PAXM_AGENT_ID"]) != "" {
+			continue
 		}
 		provider.Env["PAXM_AGENT_ID"] = firstNonEmpty(
 			os.Getenv("PAXM_AGENT_ID"),
 			config.SlugID("paxm-"+cfg.Identity.UserID+"-"+agentType),
 		)
+		cfg.Providers[name] = provider
 	}
-	cfg.Providers["team"] = provider
+}
+
+func selectedTeamMemoryProvider(cfg config.Config, selected map[string]bool) bool {
+	for name, isSelected := range selected {
+		if isSelected && isTeamMemoryProvider(cfg.Providers[name]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTeamMemoryProvider(provider config.ProviderConfig) bool {
+	return provider.Type == "team-memory" ||
+		(provider.Type == "jsonrpc" &&
+			filepath.Base(strings.TrimSpace(provider.Command)) == "paxm-team-memory-provider")
 }
 
 func paxlProvisionAgentType(name string) bool {

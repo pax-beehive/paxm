@@ -198,6 +198,42 @@ func TestProviderReusesCachedCredential(t *testing.T) {
 	}
 }
 
+func TestReplaceCredentialFileRestoresExistingCacheAfterInstallFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "team-paxm-todd.json")
+	tempPath := filepath.Join(dir, "new.tmp")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tempPath, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	rename := func(oldPath, newPath string) error {
+		calls++
+		switch calls {
+		case 1:
+			return errors.New("destination exists")
+		case 3:
+			return errors.New("install failed")
+		default:
+			return os.Rename(oldPath, newPath)
+		}
+	}
+
+	err := replaceCredentialFile(tempPath, path, rename)
+	if err == nil || !strings.Contains(err.Error(), "install replacement") {
+		t.Fatalf("error = %v, want replacement failure", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != "old" {
+		t.Fatalf("credential cache = %q, want old value restored", got)
+	}
+}
+
 func TestProviderGuidesDeviceConnectWhenProvisioningUnavailable(t *testing.T) {
 	_, err := New("team", config.ProviderConfig{
 		Type: "team-memory", Transport: "stdio", Command: "paxm-team-memory-provider",

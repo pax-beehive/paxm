@@ -521,6 +521,56 @@ func TestConfigureTeamProviderIdentityUsesPaxlCompatibleAgentType(t *testing.T) 
 	}
 }
 
+func TestTeamMemorySetupDetectionUsesProviderContract(t *testing.T) {
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	cfg.Providers["team"] = config.ProviderConfig{Type: "sqlite"}
+	cfg.Providers["workstation"] = config.ProviderConfig{
+		Type: "jsonrpc", Command: "/opt/paxm-team-memory-provider",
+	}
+	selected := map[string]bool{"team": true, "workstation": false}
+	if selectedTeamMemoryProvider(cfg, selected) {
+		t.Fatal("unrelated provider named team triggered Team Memory discovery")
+	}
+	selected["team"] = false
+	selected["workstation"] = true
+	if !selectedTeamMemoryProvider(cfg, selected) {
+		t.Fatal("custom-named Team Memory provider was not detected")
+	}
+}
+
+func TestResolveSetupIdentityBoundsPaxlStatus(t *testing.T) {
+	t.Setenv("USER", "fallback-user")
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	r := runner{
+		paxlOnPremUserID: func(ctx context.Context) (string, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("paxl status context has no deadline")
+			}
+			return "", context.DeadlineExceeded
+		},
+	}
+
+	r.resolveSetupIdentity(&cfg, true)
+
+	if cfg.Identity.UserID != "fallback-user" {
+		t.Fatalf("identity user ID = %q, want fallback-user", cfg.Identity.UserID)
+	}
+}
+
+func TestConfigureCustomTeamProviderIdentity(t *testing.T) {
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+	cfg.Identity.UserID = "usr_AbC"
+	cfg.Providers["workstation"] = config.ProviderConfig{
+		Type: "jsonrpc", Command: "/opt/paxm-team-memory-provider", Enabled: true,
+	}
+
+	configureTeamProviderIdentity(&cfg, map[string]bool{"claude": true})
+
+	if got := cfg.Providers["workstation"].Env["PAXM_AGENT_ID"]; got != "paxm-usr-abc-claude" {
+		t.Fatalf("PAXM_AGENT_ID = %q, want paxm-usr-abc-claude", got)
+	}
+}
+
 func TestCLIHookSourceMatchesConfiguredCodexOwner(t *testing.T) {
 	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
 	event := capture.Event{Target: "codex", Event: "user_input"}
