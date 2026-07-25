@@ -84,8 +84,9 @@ Current provider adapters:
   `X-API-Key` authentication, and memory-only `/search/find` mapping.
 - `team-memory`: on-prem Team Memory storage through the JSON-RPC stdio
   provider. The adapter owns explicit-key precedence, paxl device credential
-  discovery, a `0600` local agent-credential cache, and one unauthorized
-  re-provision/retry. The generic JSON-RPC transport remains unaware of paxl.
+  discovery, `0600` per-agent credential caches, origin-agent batch routing,
+  and isolated unauthorized re-provision/retry. The generic JSON-RPC transport
+  remains unaware of paxl.
 - `jsonrpc`: custom stdio plugin storage. The plugin implements the provider
   contract with JSON-RPC 2.0 methods while paxm keeps routing, thresholds, and
   ranking in core.

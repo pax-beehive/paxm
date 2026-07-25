@@ -21,10 +21,15 @@ type Provisioner interface {
 	ProvisionAgent(context.Context, string) (paxlclient.AgentProvision, error)
 }
 
+type typedProvisioner interface {
+	ProvisionAgentWithType(context.Context, string, string) (paxlclient.AgentProvision, error)
+}
+
 type Dependencies struct {
 	Provisioner      Provisioner
 	CredentialDir    string
 	ProvisionTimeout time.Duration
+	AgentType        string
 }
 
 type Provider struct {
@@ -32,20 +37,30 @@ type Provider struct {
 	inner            *jsonrpcadapter.Provider
 	baseConfig       config.ProviderConfig
 	provisioner      Provisioner
+	credentialDir    string
 	credentialPath   string
 	agentID          string
+	agentType        string
 	automatic        bool
 	generation       uint64
 	provisionTimeout time.Duration
 	refreshing       *refreshAttempt
 	lastRefreshGen   uint64
 	lastRefreshErr   error
+	agentsMu         sync.Mutex
+	agents           map[string]*providerEntry
 }
 
 type refreshAttempt struct {
 	generation uint64
 	done       chan struct{}
 	err        error
+}
+
+type providerEntry struct {
+	ready    chan struct{}
+	provider *Provider
+	err      error
 }
 
 type cachedCredential struct {
@@ -98,9 +113,11 @@ func New(name string, providerConfig config.ProviderConfig, dependencies Depende
 	if err != nil {
 		return nil, err
 	}
-	if !credential.usable() {
+	if !credential.usableFor(agentID) {
 		ctx, cancel := context.WithTimeout(context.Background(), provisionTimeout)
-		provisioned, provisionErr := provisioner.ProvisionAgent(ctx, agentID)
+		provisioned, provisionErr := provisionAgent(
+			ctx, provisioner, agentID, dependencies.AgentType,
+		)
 		cancel()
 		if provisionErr != nil {
 			return nil, fmt.Errorf(
@@ -111,6 +128,12 @@ func New(name string, providerConfig config.ProviderConfig, dependencies Depende
 		credential = cachedCredential{
 			URL: provisioned.URL, APIKey: provisioned.APIKey, AgentID: provisioned.AgentID,
 			UserID: provisioned.UserID, CredentialID: provisioned.CredentialID,
+		}
+		if !credential.usableFor(agentID) {
+			return nil, fmt.Errorf(
+				"team provider provisioned credential for agent %q, want %q",
+				strings.TrimSpace(credential.AgentID), agentID,
+			)
 		}
 		if err := saveCredential(credentialPath, credential); err != nil {
 			return nil, fmt.Errorf("cache team provider credential: %w", err)
@@ -124,7 +147,9 @@ func New(name string, providerConfig config.ProviderConfig, dependencies Depende
 	}
 	return &Provider{
 		inner: inner, baseConfig: baseConfig, provisioner: provisioner,
-		credentialPath: credentialPath, agentID: agentID, automatic: true,
+		credentialDir: credentialDir, credentialPath: credentialPath,
+		agentID: agentID, agentType: strings.TrimSpace(dependencies.AgentType),
+		automatic:        true,
 		provisionTimeout: provisionTimeout,
 	}, nil
 }
@@ -134,6 +159,10 @@ func (c cachedCredential) usable() bool {
 		strings.TrimSpace(c.APIKey) != "" &&
 		strings.TrimSpace(c.AgentID) != "" &&
 		strings.TrimSpace(c.UserID) != ""
+}
+
+func (c cachedCredential) usableFor(agentID string) bool {
+	return c.usable() && strings.TrimSpace(c.AgentID) == strings.TrimSpace(agentID)
 }
 
 func Matches(providerConfig config.ProviderConfig) bool {
@@ -149,7 +178,8 @@ func explicitTeamAPIKey(env map[string]string) string {
 }
 
 func (p *Provider) Name() string {
-	return p.inner.Name()
+	inner, _ := p.snapshot()
+	return inner.Name()
 }
 
 func (p *Provider) Search(ctx context.Context, query memory.SearchQuery) ([]memory.MemoryHit, error) {
@@ -192,6 +222,37 @@ func (p *Provider) Health(ctx context.Context) error {
 }
 
 func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]memory.MemoryRef, error) {
+	if !p.automatic {
+		return p.putBatch(ctx, items)
+	}
+	groups := groupByAgent(items, p.agentID)
+	if len(groups) == 1 && groups[0].agentID == p.agentID {
+		return p.putBatch(ctx, items)
+	}
+	refs := make([]memory.MemoryRef, len(items))
+	for _, group := range groups {
+		provider, err := p.providerForAgent(ctx, group.agentID, group.agentType)
+		if err != nil {
+			return nil, err
+		}
+		groupRefs, err := provider.putBatch(ctx, group.items)
+		if err != nil {
+			return nil, err
+		}
+		if len(groupRefs) != len(group.indexes) {
+			return nil, fmt.Errorf(
+				"team provider %s returned %d refs for %d items",
+				group.agentID, len(groupRefs), len(group.indexes),
+			)
+		}
+		for i, index := range group.indexes {
+			refs[index] = groupRefs[i]
+		}
+	}
+	return refs, nil
+}
+
+func (p *Provider) putBatch(ctx context.Context, items []memory.MemoryItem) ([]memory.MemoryRef, error) {
 	inner, generation := p.snapshot()
 	refs, err := inner.PutBatch(ctx, items)
 	if !p.shouldRefresh(err) {
@@ -202,6 +263,89 @@ func (p *Provider) PutBatch(ctx context.Context, items []memory.MemoryItem) ([]m
 	}
 	inner, _ = p.snapshot()
 	return inner.PutBatch(ctx, items)
+}
+
+type agentBatch struct {
+	agentID   string
+	agentType string
+	items     []memory.MemoryItem
+	indexes   []int
+}
+
+func groupByAgent(items []memory.MemoryItem, fallbackAgentID string) []agentBatch {
+	groups := make([]agentBatch, 0, 1)
+	indexByAgent := make(map[string]int)
+	for index, item := range items {
+		agentID := fallbackAgentID
+		if item.Source == "hook:episode" {
+			agentID = strings.TrimSpace(item.Origin.AgentID)
+		}
+		if agentID == "" || agentID == "unknown" {
+			agentID = fallbackAgentID
+		}
+		agentType := ""
+		if agentID != fallbackAgentID && item.Source == "hook:episode" {
+			agentType = strings.TrimSpace(item.Metadata["hook_target"])
+		}
+		groupIndex, ok := indexByAgent[agentID]
+		if !ok {
+			groupIndex = len(groups)
+			indexByAgent[agentID] = groupIndex
+			groups = append(groups, agentBatch{agentID: agentID, agentType: agentType})
+		} else if groups[groupIndex].agentType == "" {
+			groups[groupIndex].agentType = agentType
+		}
+		groups[groupIndex].items = append(groups[groupIndex].items, item)
+		groups[groupIndex].indexes = append(groups[groupIndex].indexes, index)
+	}
+	return groups
+}
+
+func (p *Provider) providerForAgent(
+	ctx context.Context,
+	agentID string,
+	agentType string,
+) (*Provider, error) {
+	if agentID == p.agentID || strings.TrimSpace(agentID) == "" {
+		return p, nil
+	}
+	p.agentsMu.Lock()
+	if entry := p.agents[agentID]; entry != nil {
+		p.agentsMu.Unlock()
+		select {
+		case <-entry.ready:
+			return entry.provider, entry.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if p.agents == nil {
+		p.agents = make(map[string]*providerEntry)
+	}
+	entry := &providerEntry{ready: make(chan struct{})}
+	p.agents[agentID] = entry
+	p.agentsMu.Unlock()
+
+	providerConfig := p.baseConfig
+	providerConfig.Env = cloneEnvironment(providerConfig.Env)
+	providerConfig.Env["PAXM_AGENT_ID"] = agentID
+	provider, err := New(p.Name(), providerConfig, Dependencies{
+		Provisioner: p.provisioner, CredentialDir: p.credentialDir,
+		ProvisionTimeout: p.provisionTimeout, AgentType: agentType,
+	})
+
+	p.agentsMu.Lock()
+	entry.provider = provider
+	entry.err = err
+	if err != nil {
+		delete(p.agents, agentID)
+	}
+	close(entry.ready)
+	p.agentsMu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("resolve team provider credential for agent %s: %w", agentID, err)
+	}
+	return provider, nil
 }
 
 func (p *Provider) Delete(ctx context.Context, ref memory.MemoryRef) error {
@@ -274,7 +418,7 @@ func (p *Provider) refresh(ctx context.Context, observedGeneration uint64) error
 func (p *Provider) reprovision(ctx context.Context, providerName string) (*jsonrpcadapter.Provider, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.provisionTimeout)
 	defer cancel()
-	provision, err := p.provisioner.ProvisionAgent(ctx, p.agentID)
+	provision, err := provisionAgent(ctx, p.provisioner, p.agentID, p.agentType)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"team provider credential rejected and re-provision failed; run `paxl device connect onprem ...` first: %w",
@@ -284,6 +428,12 @@ func (p *Provider) reprovision(ctx context.Context, providerName string) (*jsonr
 	credential := cachedCredential{
 		URL: provision.URL, APIKey: provision.APIKey, AgentID: provision.AgentID,
 		UserID: provision.UserID, CredentialID: provision.CredentialID,
+	}
+	if !credential.usableFor(p.agentID) {
+		return nil, fmt.Errorf(
+			"team provider re-provisioned credential for agent %q, want %q",
+			strings.TrimSpace(credential.AgentID), p.agentID,
+		)
 	}
 	if err := saveCredential(p.credentialPath, credential); err != nil {
 		return nil, fmt.Errorf("cache re-provisioned team credential: %w", err)
@@ -295,6 +445,20 @@ func (p *Provider) reprovision(ctx context.Context, providerName string) (*jsonr
 		return nil, fmt.Errorf("reload team provider credential: %w", err)
 	}
 	return inner, nil
+}
+
+func provisionAgent(
+	ctx context.Context,
+	provisioner Provisioner,
+	agentID string,
+	agentType string,
+) (paxlclient.AgentProvision, error) {
+	if agentType = strings.TrimSpace(agentType); agentType != "" {
+		if typed, ok := provisioner.(typedProvisioner); ok {
+			return typed.ProvisionAgentWithType(ctx, agentID, agentType)
+		}
+	}
+	return provisioner.ProvisionAgent(ctx, agentID)
 }
 
 func isUnauthorized(err error) bool {
@@ -342,6 +506,14 @@ func teamEnvironment(existing map[string]string, credential cachedCredential) ma
 	env["TEAM_MEMORY_BASE_URL"] = credential.URL
 	env["PAXM_USER_ID"] = credential.UserID
 	env["PAXM_AGENT_ID"] = credential.AgentID
+	return env
+}
+
+func cloneEnvironment(existing map[string]string) map[string]string {
+	env := make(map[string]string, len(existing)+1)
+	for key, value := range existing {
+		env[key] = value
+	}
 	return env
 }
 

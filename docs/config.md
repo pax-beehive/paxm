@@ -460,6 +460,15 @@ re-provisions once, and retries the operation once. Existing JSON-RPC configs
 whose command basename is `paxm-team-memory-provider` receive the same
 credential handling without changing their `type`.
 
+For passive capture, the adapter groups batch items by their trusted origin
+agent ID and lazily loads or provisions one credential per agent. Credential
+cache rotation is isolated: a 401 for one origin does not replace another
+agent's cache. The trusted hook target is passed as paxl's explicit agent type,
+which also supports legacy IDs whose final segment is not an agent type. Items
+without a resolved origin use the configured
+`PAXM_AGENT_ID`. Explicit `TEAM_MEMORY_API_KEY` configurations do not enable
+per-origin provisioning and retain the legacy single-provider batch behavior.
+
 Mem0 is intended for the self-hosted OSS REST server. Configure `base_url`
 without a `/v1` prefix, for example `http://localhost:8888`, and set at least
 one scope for paxm to use with `user_id`, `agent_id`, or `run_id`. Programmatic

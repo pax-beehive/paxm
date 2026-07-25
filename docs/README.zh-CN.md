@@ -217,6 +217,14 @@ paxl device provision --agent <PAXM_AGENT_ID> --json
 provider 遇到 401 时只重新 provision 并重试一次；第二次仍失败会明确报错。找不到
 paxl 或 Device 凭证时，错误会提示先运行 `paxl device connect onprem`。
 
+被动 capture 会根据可信 hook 来源 agent 对 Team Memory 批次分组，并分别使用
+`team-<agent-id>.json` 中的凭证。因此同机的 Codex、Claude、Pi 和 Kimi 会以各自
+Team Memory principal 写入；某个 agent 的 key 被拒绝时，也只重新 provision 该
+agent。paxm 会把可信 hook target 作为显式 agent type 传给 paxl，因此
+`claude-<user>` 这类旧 ID 不依赖末段类型推断。无法解析来源的旧事件回退到配置的
+`PAXM_AGENT_ID`。显式配置
+`TEAM_MEMORY_API_KEY` 时继续使用原来的单凭证行为。
+
 ### Mem0 分数方向
 
 不同 Mem0 部署或 vector store 对返回字段的语义可能不同，不能看到字段名是

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,41 @@ type provisionerFunc func(context.Context, string) (paxlclient.AgentProvision, e
 
 func (f provisionerFunc) ProvisionAgent(ctx context.Context, agentID string) (paxlclient.AgentProvision, error) {
 	return f(ctx, agentID)
+}
+
+type typedProvisionCall struct {
+	agentID   string
+	agentType string
+}
+
+type typedProvisionerStub struct {
+	calls []typedProvisionCall
+}
+
+func (p *typedProvisionerStub) ProvisionAgent(
+	_ context.Context,
+	agentID string,
+) (paxlclient.AgentProvision, error) {
+	return p.provision(agentID, "")
+}
+
+func (p *typedProvisionerStub) ProvisionAgentWithType(
+	_ context.Context,
+	agentID string,
+	agentType string,
+) (paxlclient.AgentProvision, error) {
+	return p.provision(agentID, agentType)
+}
+
+func (p *typedProvisionerStub) provision(
+	agentID string,
+	agentType string,
+) (paxlclient.AgentProvision, error) {
+	p.calls = append(p.calls, typedProvisionCall{agentID: agentID, agentType: agentType})
+	return paxlclient.AgentProvision{
+		URL: "https://memory.internal", APIKey: "tm_key_" + agentID,
+		AgentID: agentID, UserID: "usr-1", CredentialID: agentID + "-fresh",
+	}, nil
 }
 
 type blockingProvisioner struct {
@@ -137,6 +173,228 @@ func TestProviderPreservesExplicitAPIKeyWithoutProvisioning(t *testing.T) {
 	}
 }
 
+func TestProviderExplicitAPIKeyKeepsSingleBatchForMixedOrigins(t *testing.T) {
+	cacheDir := t.TempDir()
+	provisioner := &provisionerStub{err: errors.New("must not provision")}
+	provider, err := New("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: os.Args[0],
+		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
+		Env: map[string]string{
+			"TEAM_MEMORY_API_KEY":       "tm_key_explicit",
+			"TEAM_MEMORY_BASE_URL":      "https://memory.internal",
+			"PAXM_USER_ID":              "usr-1",
+			"PAXM_AGENT_ID":             "personal-codex",
+			"PAXM_TEAM_PROVIDER_HELPER": "1",
+			"PAXM_TEAM_HELPER_MODE":     "explicit-route",
+		},
+		Timeout: "5s",
+	}, Dependencies{Provisioner: provisioner, CredentialDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := provider.PutBatch(context.Background(), []memory.MemoryItem{
+		{ID: "codex-1", Text: "codex", Origin: memory.MemoryOrigin{AgentID: "personal-codex"}},
+		{ID: "claude-1", Text: "claude", Origin: memory.MemoryOrigin{AgentID: "personal-claude"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("refs = %#v, want both items in explicit-key batch", refs)
+	}
+	if provisioner.calls != 0 {
+		t.Fatalf("provision calls = %d, want 0", provisioner.calls)
+	}
+	cacheFiles, err := filepath.Glob(filepath.Join(cacheDir, "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cacheFiles) != 0 {
+		t.Fatalf("explicit key wrote credential caches: %#v", cacheFiles)
+	}
+}
+
+func TestProviderRoutesPutBatchByOriginAgentCredential(t *testing.T) {
+	cacheDir := t.TempDir()
+	var provisionedAgents []string
+	provisioner := provisionerFunc(func(_ context.Context, agentID string) (paxlclient.AgentProvision, error) {
+		provisionedAgents = append(provisionedAgents, agentID)
+		return paxlclient.AgentProvision{
+			URL: "https://memory.internal", APIKey: "tm_key_" + agentID,
+			AgentID: agentID, UserID: "usr-1",
+		}, nil
+	})
+	provider, err := New("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: os.Args[0],
+		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_AGENT_ID":             "personal-codex",
+			"PAXM_TEAM_PROVIDER_HELPER": "1",
+			"PAXM_TEAM_HELPER_MODE":     "route",
+		},
+		Timeout: "5s",
+	}, Dependencies{Provisioner: provisioner, CredentialDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refs, err := provider.PutBatch(context.Background(), []memory.MemoryItem{
+		{
+			ID: "codex-1", Text: "codex first", Source: "hook:episode",
+			Metadata: map[string]string{"hook_target": "codex"},
+			Origin:   memory.MemoryOrigin{AgentID: "personal-codex"},
+		},
+		{
+			ID: "claude-1", Text: "claude", Source: "hook:episode",
+			Metadata: map[string]string{"hook_target": "claude"},
+			Origin:   memory.MemoryOrigin{AgentID: "personal-claude"},
+		},
+		{
+			ID: "codex-2", Text: "codex second", Source: "hook:episode",
+			Metadata: map[string]string{"hook_target": "codex"},
+			Origin:   memory.MemoryOrigin{AgentID: "personal-codex"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 3 {
+		t.Fatalf("refs = %#v, want one per item", refs)
+	}
+	if refs[0].ID != "codex-1" || refs[1].ID != "claude-1" || refs[2].ID != "codex-2" {
+		t.Fatalf("refs lost input order: %#v", refs)
+	}
+	if got := strings.Join(provisionedAgents, ","); got != "personal-codex,personal-claude" {
+		t.Fatalf("provisioned agents = %q, want independent credentials", got)
+	}
+	for _, agentID := range []string{"personal-codex", "personal-claude"} {
+		if _, err := os.Stat(filepath.Join(cacheDir, "team-"+agentID+".json")); err != nil {
+			t.Fatalf("credential cache for %s: %v", agentID, err)
+		}
+	}
+}
+
+func TestProviderPassesCaptureAgentTypeForDefaultAgentID(t *testing.T) {
+	cacheDir := t.TempDir()
+	writeCachedCredential(t, cacheDir, cachedCredential{
+		URL: "https://memory.internal", APIKey: "tm_key_paxm-todd-codex",
+		AgentID: "paxm-todd-codex", UserID: "usr-1",
+	})
+	provisioner := &typedProvisionerStub{}
+	provider, err := New("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: os.Args[0],
+		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_AGENT_ID":             "paxm-todd-codex",
+			"PAXM_TEAM_PROVIDER_HELPER": "1",
+			"PAXM_TEAM_HELPER_MODE":     "route",
+		},
+		Timeout: "5s",
+	}, Dependencies{Provisioner: provisioner, CredentialDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.PutBatch(context.Background(), []memory.MemoryItem{{
+		ID: "claude-1", Text: "claude capture", Source: "hook:episode",
+		Metadata: map[string]string{"hook_target": "claude"},
+		Origin:   memory.MemoryOrigin{AgentID: "claude-todd"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	want := []typedProvisionCall{{agentID: "claude-todd", agentType: "claude"}}
+	if !reflect.DeepEqual(provisioner.calls, want) {
+		t.Fatalf("provision calls = %#v, want %#v", provisioner.calls, want)
+	}
+}
+
+func TestProviderMissingOriginFallsBackToDefaultCredential(t *testing.T) {
+	cacheDir := t.TempDir()
+	provisioner := &provisionerStub{provisions: []paxlclient.AgentProvision{{
+		URL: "https://memory.internal", APIKey: "tm_key_personal-codex",
+		AgentID: "personal-codex", UserID: "usr-1",
+	}}}
+	provider, err := New("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: os.Args[0],
+		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_AGENT_ID":             "personal-codex",
+			"PAXM_TEAM_PROVIDER_HELPER": "1",
+			"PAXM_TEAM_HELPER_MODE":     "route-fallback",
+		},
+		Timeout: "5s",
+	}, Dependencies{Provisioner: provisioner, CredentialDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.PutBatch(context.Background(), []memory.MemoryItem{{
+		ID: "legacy-1", Text: "legacy item without origin",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if provisioner.calls != 1 {
+		t.Fatalf("provision calls = %d, want only default credential", provisioner.calls)
+	}
+}
+
+func TestProviderReprovisionsOnlyRejectedOriginAgentCredential(t *testing.T) {
+	cacheDir := t.TempDir()
+	writeCachedCredential(t, cacheDir, cachedCredential{
+		URL: "https://memory.internal", APIKey: "tm_key_paxm-todd-codex",
+		AgentID: "paxm-todd-codex", UserID: "usr-1", CredentialID: "recall-stable",
+	})
+	writeCachedCredential(t, cacheDir, cachedCredential{
+		URL: "https://memory.internal", APIKey: "tm_key_codex-todd",
+		AgentID: "codex-todd", UserID: "usr-1", CredentialID: "codex-stable",
+	})
+	writeCachedCredential(t, cacheDir, cachedCredential{
+		URL: "https://memory.internal", APIKey: "tm_key_stale",
+		AgentID: "claude-todd", UserID: "usr-1", CredentialID: "claude-stale",
+	})
+	provisioner := &typedProvisionerStub{}
+	provider, err := New("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: os.Args[0],
+		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_AGENT_ID":             "paxm-todd-codex",
+			"PAXM_TEAM_PROVIDER_HELPER": "1",
+			"PAXM_TEAM_HELPER_MODE":     "route-rotate",
+		},
+		Timeout: "5s",
+	}, Dependencies{Provisioner: provisioner, CredentialDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = provider.PutBatch(context.Background(), []memory.MemoryItem{
+		{
+			ID: "codex-1", Text: "codex", Source: "hook:episode",
+			Metadata: map[string]string{"hook_target": "codex"},
+			Origin:   memory.MemoryOrigin{AgentID: "codex-todd"},
+		},
+		{
+			ID: "claude-1", Text: "claude", Source: "hook:episode",
+			Metadata: map[string]string{"hook_target": "claude"},
+			Origin:   memory.MemoryOrigin{AgentID: "claude-todd"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCalls := []typedProvisionCall{{agentID: "claude-todd", agentType: "claude"}}
+	if !reflect.DeepEqual(provisioner.calls, wantCalls) {
+		t.Fatalf("provision calls = %#v, want only rejected claude agent", provisioner.calls)
+	}
+	codex := readCachedCredential(t, filepath.Join(cacheDir, "team-codex-todd.json"))
+	if codex.CredentialID != "codex-stable" {
+		t.Fatalf("codex credential changed to %#v", codex)
+	}
+	claude := readCachedCredential(t, filepath.Join(cacheDir, "team-claude-todd.json"))
+	if claude.CredentialID != "claude-todd-fresh" {
+		t.Fatalf("claude credential = %#v, want refreshed", claude)
+	}
+}
+
 func TestProviderPreservesProcessAPIKeyWithoutProvisioning(t *testing.T) {
 	t.Setenv("TEAM_MEMORY_API_KEY", "tm_key_process")
 	provisioner := &provisionerStub{err: context.Canceled}
@@ -198,6 +456,79 @@ func TestProviderReusesCachedCredential(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("cache mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestProviderReplacesCredentialCachedForDifferentAgent(t *testing.T) {
+	cacheDir := t.TempDir()
+	cachePath := filepath.Join(cacheDir, "team-personal-claude.json")
+	if err := os.WriteFile(
+		cachePath,
+		[]byte(`{
+			"url":"https://memory.internal",
+			"api_key":"tm_key_personal-codex",
+			"agent_id":"personal-codex",
+			"user_id":"usr-1"
+		}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	provisioner := &provisionerStub{provisions: []paxlclient.AgentProvision{{
+		URL: "https://memory.internal", APIKey: "tm_key_personal-claude",
+		AgentID: "personal-claude", UserID: "usr-1",
+	}}}
+	provider, err := New("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: os.Args[0],
+		Args: []string{"-test.run=TestTeamProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_AGENT_ID":             "personal-claude",
+			"PAXM_TEAM_PROVIDER_HELPER": "1",
+			"PAXM_TEAM_HELPER_MODE":     "route",
+		},
+		Timeout: "5s",
+	}, Dependencies{Provisioner: provisioner, CredentialDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.PutBatch(context.Background(), []memory.MemoryItem{{
+		ID: "claude-1", Text: "claude",
+		Origin: memory.MemoryOrigin{AgentID: "personal-claude"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if provisioner.calls != 1 {
+		t.Fatalf("provision calls = %d, want mismatched cache replaced", provisioner.calls)
+	}
+	credential := readCachedCredential(t, cachePath)
+	if credential.AgentID != "personal-claude" {
+		t.Fatalf("cached credential agent = %q, want personal-claude", credential.AgentID)
+	}
+}
+
+func TestProviderRejectsProvisionedCredentialForDifferentAgent(t *testing.T) {
+	cacheDir := t.TempDir()
+	_, err := New("team", config.ProviderConfig{
+		Type:      "team-memory",
+		Transport: "stdio",
+		Command:   "paxm-team-memory-provider",
+		Env:       map[string]string{"PAXM_AGENT_ID": "personal-claude"},
+	}, Dependencies{
+		CredentialDir: cacheDir,
+		Provisioner: &provisionerStub{provisions: []paxlclient.AgentProvision{{
+			URL: "https://memory.internal", APIKey: "tm_key_personal-codex",
+			AgentID: "personal-codex", UserID: "usr-1",
+		}}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `want "personal-claude"`) {
+		t.Fatalf("error = %v, want credential principal mismatch", err)
+	}
+	cacheFiles, globErr := filepath.Glob(filepath.Join(cacheDir, "*.json"))
+	if globErr != nil {
+		t.Fatal(globErr)
+	}
+	if len(cacheFiles) != 0 {
+		t.Fatalf("mismatched credential was cached: %#v", cacheFiles)
 	}
 }
 
@@ -528,7 +859,8 @@ func TestTeamProviderHelper(t *testing.T) {
 	}
 	mode := os.Getenv("PAXM_TEAM_HELPER_MODE")
 	if mode == "always-unauthorized" ||
-		(mode == "rotate" && os.Getenv("TEAM_MEMORY_API_KEY") == "tm_key_stale") {
+		((mode == "rotate" || mode == "route-rotate") &&
+			os.Getenv("TEAM_MEMORY_API_KEY") == "tm_key_stale") {
 		if signalPath := os.Getenv("PAXM_TEAM_UNAUTHORIZED_SIGNAL_FILE"); signalPath != "" {
 			file, err := os.OpenFile(signalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 			if err != nil {
@@ -558,6 +890,56 @@ func TestTeamProviderHelper(t *testing.T) {
 		}
 		return
 	}
+	if mode == "explicit-route" {
+		if os.Getenv("TEAM_MEMORY_API_KEY") != "tm_key_explicit" ||
+			os.Getenv("PAXM_AGENT_ID") != "personal-codex" {
+			t.Fatalf("explicit team provider environment changed")
+		}
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Items []memory.MemoryItem `json:"items"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Method != "paxm.putBatch" || len(request.Params.Items) != 2 {
+			t.Fatalf("explicit batch request = %#v", request)
+		}
+		writeHelperRefs(t, request.ID, request.Params.Items)
+		return
+	}
+	if mode == "route" || mode == "route-rotate" || mode == "route-fallback" {
+		agentID := os.Getenv("PAXM_AGENT_ID")
+		if os.Getenv("TEAM_MEMORY_API_KEY") != "tm_key_"+agentID ||
+			os.Getenv("TEAM_MEMORY_BASE_URL") != "https://memory.internal" ||
+			os.Getenv("PAXM_USER_ID") != "usr-1" {
+			t.Fatalf("unexpected routed team provider environment")
+		}
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Items []memory.MemoryItem `json:"items"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Method != "paxm.putBatch" {
+			t.Fatalf("method = %q, want paxm.putBatch", request.Method)
+		}
+		for _, item := range request.Params.Items {
+			if item.Origin.AgentID != agentID &&
+				!(mode == "route-fallback" && item.Origin.AgentID == "") {
+				t.Fatalf("item agent = %q, credential agent = %q", item.Origin.AgentID, agentID)
+			}
+		}
+		writeHelperRefs(t, request.ID, request.Params.Items)
+		return
+	}
 	if os.Getenv("TEAM_MEMORY_API_KEY") != os.Getenv("PAXM_TEAM_EXPECTED_KEY") ||
 		os.Getenv("TEAM_MEMORY_BASE_URL") != "https://memory.internal" ||
 		os.Getenv("PAXM_USER_ID") != "usr-1" ||
@@ -580,6 +962,46 @@ func TestTeamProviderHelper(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeHelperRefs(t *testing.T, requestID json.RawMessage, items []memory.MemoryItem) {
+	t.Helper()
+	refs := make([]memory.MemoryRef, 0, len(items))
+	for _, item := range items {
+		refs = append(refs, memory.MemoryRef{ID: item.ID})
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      requestID,
+		"result":  map[string]any{"refs": refs},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeCachedCredential(t *testing.T, dir string, credential cachedCredential) {
+	t.Helper()
+	data, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "team-"+config.SlugID(credential.AgentID)+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readCachedCredential(t *testing.T, path string) cachedCredential {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var credential cachedCredential
+	if err := json.Unmarshal(data, &credential); err != nil {
+		t.Fatal(err)
+	}
+	return credential
 }
 
 func waitForSignalLines(t *testing.T, path string, count int) {
