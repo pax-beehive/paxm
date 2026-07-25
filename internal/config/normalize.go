@@ -68,6 +68,8 @@ func isOpaqueTeamMemoryUserID(value string) bool {
 
 func SlugID(value string) string { return slugID(value) }
 
+func NormalizeUserID(value string) string { return normalizeUserID(value) }
+
 func DefaultAgentID(agentName, userID string) string {
 	if slugID(userID) == "" {
 		return ""

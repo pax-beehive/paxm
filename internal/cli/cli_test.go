@@ -557,6 +557,18 @@ func TestResolveSetupIdentityBoundsPaxlStatus(t *testing.T) {
 	}
 }
 
+func TestApplyExplicitSetupUserIDPreservesOpaqueTeamMemoryID(t *testing.T) {
+	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
+
+	if err := applyExplicitSetupUserID(&cfg, "usr_AbC-01_Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Identity.UserID != "usr_AbC-01_Z" {
+		t.Fatalf("identity user ID = %q, want usr_AbC-01_Z", cfg.Identity.UserID)
+	}
+}
+
 func TestConfigureCustomTeamProviderIdentity(t *testing.T) {
 	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
 	cfg.Identity.UserID = "usr_AbC"

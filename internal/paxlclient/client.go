@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 )
@@ -59,13 +60,8 @@ func (c Client) ProvisionAgent(ctx context.Context, agentID string) (AgentProvis
 func (c Client) OnPremUserID(ctx context.Context) (string, error) {
 	deviceOutput, deviceErr := c.run(ctx, "device", "status", "--format", "jsonl")
 	if deviceErr == nil {
-		var status struct {
-			UserID string `json:"user_id"`
-		}
-		if err := json.Unmarshal(deviceOutput, &status); err == nil {
-			if userID := strings.TrimSpace(status.UserID); userID != "" {
-				return userID, nil
-			}
+		if userID := deviceStatusUserID(deviceOutput); userID != "" {
+			return userID, nil
 		}
 	}
 	output, err := c.run(ctx, "channel", "status", "onprem", "--format", "jsonl")
@@ -75,19 +71,49 @@ func (c Client) OnPremUserID(ctx context.Context) (string, error) {
 		}
 		return "", fmt.Errorf("read paxl on-prem identity: device status has no user ID; channel status: %w", err)
 	}
-	var status struct {
-		Profile struct {
-			UserID string `json:"user_id"`
-		} `json:"profile"`
-	}
-	if err := json.Unmarshal(output, &status); err != nil {
+	userID, err := channelStatusUserID(output)
+	if err != nil {
 		return "", fmt.Errorf("decode paxl on-prem channel status: %w", err)
 	}
-	userID := strings.TrimSpace(status.Profile.UserID)
 	if userID == "" {
 		return "", errors.New("paxl on-prem channel status has no user ID")
 	}
 	return userID, nil
+}
+
+func deviceStatusUserID(output []byte) string {
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for {
+		var status struct {
+			UserID string `json:"user_id"`
+		}
+		if err := decoder.Decode(&status); err != nil {
+			return ""
+		}
+		if userID := strings.TrimSpace(status.UserID); userID != "" {
+			return userID
+		}
+	}
+}
+
+func channelStatusUserID(output []byte) (string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for {
+		var status struct {
+			Profile struct {
+				UserID string `json:"user_id"`
+			} `json:"profile"`
+		}
+		if err := decoder.Decode(&status); err != nil {
+			if errors.Is(err, io.EOF) {
+				return "", nil
+			}
+			return "", err
+		}
+		if userID := strings.TrimSpace(status.Profile.UserID); userID != "" {
+			return userID, nil
+		}
+	}
 }
 
 func runPaxl(ctx context.Context, args ...string) ([]byte, error) {

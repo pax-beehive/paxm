@@ -158,7 +158,7 @@ func applyExplicitSetupUserID(cfg *config.Config, userID string) error {
 	if strings.TrimSpace(userID) == "" {
 		return nil
 	}
-	cfg.Identity.UserID = config.SlugID(userID)
+	cfg.Identity.UserID = config.NormalizeUserID(userID)
 	if cfg.Identity.UserID == "" {
 		return errors.New("setup user ID must contain letters or numbers")
 	}

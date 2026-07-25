@@ -85,3 +85,37 @@ func TestOnPremUserIDFallsBackToChannelStatus(t *testing.T) {
 		t.Fatalf("user ID = %q, want usr-1", got)
 	}
 }
+
+func TestOnPremUserIDReadsMultipleDeviceStatusJSONLines(t *testing.T) {
+	client := New(func(_ context.Context, args ...string) ([]byte, error) {
+		if args[0] != "device" {
+			t.Fatalf("unexpected channel fallback: %#v", args)
+		}
+		return []byte("{\"status\":\"connecting\"}\n{\"status\":\"connected\",\"user_id\":\"usr_AbC\"}\n"), nil
+	})
+
+	got, err := client.OnPremUserID(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "usr_AbC" {
+		t.Fatalf("user ID = %q, want usr_AbC", got)
+	}
+}
+
+func TestOnPremUserIDReadsMultipleChannelStatusJSONLines(t *testing.T) {
+	client := New(func(_ context.Context, args ...string) ([]byte, error) {
+		if args[0] == "device" {
+			return nil, errors.New("device status unsupported")
+		}
+		return []byte("{\"status\":\"connecting\"}\n{\"status\":\"connected\",\"profile\":{\"user_id\":\"usr_AbC\"}}\n"), nil
+	})
+
+	got, err := client.OnPremUserID(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "usr_AbC" {
+		t.Fatalf("user ID = %q, want usr_AbC", got)
+	}
+}
