@@ -116,6 +116,11 @@ func TestDefaultConfigUsesConservativePassiveRecall(t *testing.T) {
 	if provider := cfg.Providers["jsonrpc"]; provider.Type != "jsonrpc" || provider.Enabled || provider.Transport != "stdio" || provider.Timeout != "30s" {
 		t.Fatalf("default jsonrpc provider is invalid: %#v", provider)
 	}
+	if provider := cfg.Providers["team"]; provider.Type != "team-memory" || provider.Enabled ||
+		provider.Command != "paxm-team-memory-provider" || provider.Transport != "stdio" ||
+		provider.Timeout != "30s" {
+		t.Fatalf("default team provider is invalid: %#v", provider)
+	}
 	active := cfg.RecallProfiles["default"]
 	if active.MaxResults != 3 {
 		t.Fatalf("default active recall should return 3 results: %#v", active)

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	teamadapter "github.com/pax-beehive/paxm/internal/adapters/team"
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
 )
@@ -221,6 +222,40 @@ func TestDefaultRegistryBuildsOpenVikingProvider(t *testing.T) {
 	}
 	if provider.Name() != "private" {
 		t.Fatalf("name = %q, want private", provider.Name())
+	}
+}
+
+func TestDefaultRegistryBuildsTeamMemoryProviderWithExplicitCredentials(t *testing.T) {
+	t.Parallel()
+
+	provider, err := DefaultRegistry().BuildProvider("team", config.ProviderConfig{
+		Type: "team-memory", Transport: "stdio", Command: "paxm-team-memory-provider",
+		Env: map[string]string{"TEAM_MEMORY_API_KEY": "explicit-key"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Name() != "team" {
+		t.Fatalf("name = %q, want team", provider.Name())
+	}
+}
+
+func TestDefaultRegistryRecognizesExistingTeamMemoryJSONRPCConfig(t *testing.T) {
+	t.Parallel()
+
+	provider, err := DefaultRegistry().BuildProvider("workstation", config.ProviderConfig{
+		Type: "jsonrpc", Transport: "stdio",
+		Command: "/usr/local/bin/paxm-team-memory-provider",
+		Env:     map[string]string{"TEAM_MEMORY_API_KEY": "explicit-key"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Name() != "workstation" {
+		t.Fatalf("name = %q, want workstation", provider.Name())
+	}
+	if _, ok := provider.(*teamadapter.Provider); !ok {
+		t.Fatalf("provider type = %T, want Team Memory adapter", provider)
 	}
 }
 

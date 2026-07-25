@@ -385,11 +385,20 @@ providers:
     enabled: true
     transport: stdio
     command: /opt/paxm/plugins/corp-memory
+
+  team:
+    type: team-memory
+    enabled: true
+    transport: stdio
+    command: paxm-team-memory-provider
+    env:
+      PAXM_AGENT_ID: paxm-todd-codex
 ```
 
 Fields:
 
-- `type`: adapter type, such as `sqlite`, `zep`, `mem0`, `mem0-cloud`, `memos`, `memos-cloud`, `openviking`, or `jsonrpc`.
+- `type`: adapter type, such as `sqlite`, `zep`, `mem0`, `mem0-cloud`,
+  `memos`, `memos-cloud`, `openviking`, `team-memory`, or `jsonrpc`.
 - `enabled`: whether this provider can be used by profiles.
 - `path`: local SQLite provider database path.
 - `api_key`: optional plain-text API key for remote providers.
@@ -419,10 +428,31 @@ Fields:
 - `infer`: optional Mem0 write flag. Omit it to use the server default.
 
 V1 ships with `sqlite`, `zep`, `mem0`, `mem0-cloud`, `memos`, `memos-cloud`,
-`openviking`, and `jsonrpc` provider adapters. Zep
+`openviking`, `team-memory`, and `jsonrpc` provider adapters. Zep
 requires `api_key` and exactly one of `user_id` or `graph_id`. If setup is
 configured for a Zep user graph, it idempotently creates the configured
 `user_id` when the user does not already exist.
+
+The `team-memory` adapter runs the Team Memory JSON-RPC provider over stdio.
+An explicit `TEAM_MEMORY_API_KEY` in `env` (or the process environment when the
+key is not present in `env`) always wins and preserves the legacy behavior.
+Without one, paxm asks the locally connected paxl device to mint an agent
+credential:
+
+```text
+paxl device provision --agent <PAXM_AGENT_ID> --json
+```
+
+The response supplies `TEAM_MEMORY_BASE_URL`, `TEAM_MEMORY_API_KEY`,
+`PAXM_USER_ID`, and `PAXM_AGENT_ID` to the provider process. The secret is
+cached at `~/.config/paxm/credentials/team-<agent-id>.json`; the directory is
+mode `0700` and the file is mode `0600`. It is never copied into this YAML.
+Setup derives an agent ID whose final segment is the selected integration type
+(for example, `paxm-todd-codex`) so paxl can infer the provisioning agent type.
+One unauthorized provider response invalidates the cached credential,
+re-provisions once, and retries the operation once. Existing JSON-RPC configs
+whose command basename is `paxm-team-memory-provider` receive the same
+credential handling without changing their `type`.
 
 Mem0 is intended for the self-hosted OSS REST server. Configure `base_url`
 without a `/v1` prefix, for example `http://localhost:8888`, and set at least

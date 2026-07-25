@@ -105,13 +105,9 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	selectedHooks := defaultSelections(hookOptions(cfg), cfgHookEnabled(cfg))
 	pluginTarget := setupPluginTarget(integration)
 	previousEnabled := enabledAgents(cfg)
-	if strings.TrimSpace(userID) != "" {
-		cfg.Identity.UserID = config.SlugID(userID)
-		if cfg.Identity.UserID == "" {
-			return setupSelection{}, false, errors.New("setup user ID must contain letters or numbers")
-		}
+	if err := applyExplicitSetupUserID(&cfg, userID); err != nil {
+		return setupSelection{}, false, err
 	}
-	ensureSetupIdentity(&cfg)
 	if strings.TrimSpace(teamIDs) != "" {
 		if err := configureTeamWriteProfiles(&cfg, teamIDs); err != nil {
 			return setupSelection{}, false, err
@@ -143,7 +139,9 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 	if !anySelected(selectedProviders) {
 		return setupSelection{}, false, errors.New("setup requires at least one memory provider")
 	}
+	r.resolveSetupIdentity(&cfg, selectedProviders["team"])
 	applySetupSelections(&cfg, selectedProviders, selectedHooks)
+	configureTeamProviderIdentity(&cfg, selectedHooks)
 	applySetupIntegration(&cfg, integration, pluginTarget, previousEnabled)
 	if !yes {
 		proceed, err = r.confirmSetupSummary(prompter, cfg, selectedProviders, selectedHooks)
@@ -152,6 +150,52 @@ func (r runner) prepareSetup(path string, prompter *setupPrompter, force, yes bo
 		}
 	}
 	return setupSelection{cfg: cfg, selectedHooks: selectedHooks}, true, nil
+}
+
+func applyExplicitSetupUserID(cfg *config.Config, userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	cfg.Identity.UserID = config.SlugID(userID)
+	if cfg.Identity.UserID == "" {
+		return errors.New("setup user ID must contain letters or numbers")
+	}
+	return nil
+}
+
+func (r runner) resolveSetupIdentity(cfg *config.Config, teamSelected bool) {
+	if strings.TrimSpace(cfg.Identity.UserID) == "" &&
+		teamSelected && r.paxlOnPremUserID != nil {
+		if discovered, err := r.paxlOnPremUserID(context.Background()); err == nil {
+			cfg.Identity.UserID = config.SlugID(discovered)
+		}
+	}
+	ensureSetupIdentity(cfg)
+}
+
+func configureTeamProviderIdentity(cfg *config.Config, selectedHooks map[string]bool) {
+	provider, ok := cfg.Providers["team"]
+	if !ok || !provider.Enabled ||
+		(provider.Type != "team-memory" && provider.Type != "jsonrpc") {
+		return
+	}
+	if provider.Env == nil {
+		provider.Env = make(map[string]string)
+	}
+	if strings.TrimSpace(provider.Env["PAXM_AGENT_ID"]) == "" {
+		agentType := "codex"
+		for _, name := range sortedSelected(selectedHooks) {
+			if selectedHooks[name] && isRequestedAgent(name) {
+				agentType = name
+				break
+			}
+		}
+		provider.Env["PAXM_AGENT_ID"] = firstNonEmpty(
+			os.Getenv("PAXM_AGENT_ID"),
+			config.SlugID("paxm-"+cfg.Identity.UserID+"-"+agentType),
+		)
+	}
+	cfg.Providers["team"] = provider
 }
 
 // pinnedSelections converts --provider/--agent flag values into a selection

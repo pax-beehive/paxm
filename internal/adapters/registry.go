@@ -10,6 +10,7 @@ import (
 	memosadapter "github.com/pax-beehive/paxm/internal/adapters/memos"
 	openvikingadapter "github.com/pax-beehive/paxm/internal/adapters/openviking"
 	sqliteadapter "github.com/pax-beehive/paxm/internal/adapters/sqlite"
+	teamadapter "github.com/pax-beehive/paxm/internal/adapters/team"
 	zepadapter "github.com/pax-beehive/paxm/internal/adapters/zep"
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/memory"
@@ -45,7 +46,13 @@ func DefaultRegistry() Registry {
 		return openvikingadapter.New(name, cfg)
 	})
 	registry.Register("jsonrpc", func(name string, cfg config.ProviderConfig) (memory.Provider, error) {
+		if teamadapter.Matches(cfg) {
+			return teamadapter.New(name, cfg, teamadapter.Dependencies{})
+		}
 		return jsonrpcadapter.New(name, cfg)
+	})
+	registry.Register("team-memory", func(name string, cfg config.ProviderConfig) (memory.Provider, error) {
+		return teamadapter.New(name, cfg, teamadapter.Dependencies{})
 	})
 	return registry
 }

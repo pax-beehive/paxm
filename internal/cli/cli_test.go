@@ -459,6 +459,42 @@ func TestCLISetupCodexPluginOwnsHooks(t *testing.T) {
 	}
 }
 
+func TestCLISetupTeamUsesPaxlIdentityWithoutAPIKey(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("PAXM_CODEX_CONFIG", filepath.Join(t.TempDir(), "codex.toml"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := MainWithDependencies([]string{
+		"--config", configPath, "setup", "--yes",
+		"--provider", "team", "--agent", "codex", "--integration", "codex-plugin",
+	}, nil, &stdout, &stderr, Dependencies{
+		PaxlOnPremUserID: func(context.Context) (string, error) {
+			return "usr-1", nil
+		},
+	})
+	if code != 0 {
+		t.Fatalf("setup failed with code %d: %s", code, stderr.String())
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Identity.UserID != "usr-1" {
+		t.Fatalf("identity user ID = %q, want usr-1", cfg.Identity.UserID)
+	}
+	team := cfg.Providers["team"]
+	if !team.Enabled || team.Type != "team-memory" {
+		t.Fatalf("team provider = %#v", team)
+	}
+	if team.Env["TEAM_MEMORY_API_KEY"] != "" {
+		t.Fatal("setup persisted a Team Memory API key")
+	}
+	if team.Env["PAXM_USER_ID"] != "" || team.Env["PAXM_AGENT_ID"] != "paxm-usr-1-codex" {
+		t.Fatalf("team identity env = %#v", team.Env)
+	}
+}
+
 func TestCLIHookSourceMatchesConfiguredCodexOwner(t *testing.T) {
 	cfg := config.DefaultConfig(filepath.Join(t.TempDir(), "config.yaml"))
 	event := capture.Event{Target: "codex", Event: "user_input"}

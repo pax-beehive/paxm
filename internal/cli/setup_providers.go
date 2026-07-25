@@ -61,6 +61,8 @@ func providerOptionPriority(providerType string) int {
 		return 6
 	case "openviking":
 		return 7
+	case "team-memory":
+		return 8
 	default:
 		return 100
 	}
@@ -83,6 +85,8 @@ func promptProviderInstance(prompter *setupPrompter, cfg *config.Config, provide
 		return promptOpenVikingProvider(prompter, cfg, providerName)
 	case "jsonrpc":
 		return promptJSONRPCProvider(prompter, cfg, providerName)
+	case "team-memory":
+		return nil
 	default:
 		return nil
 	}
@@ -319,6 +323,8 @@ func providerPromptLabel(providerName string, provider config.ProviderConfig) st
 			return "JSON-RPC"
 		}
 		return providerName + " (JSON-RPC)"
+	case "team-memory":
+		return "Team Memory"
 	default:
 		return providerName
 	}

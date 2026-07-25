@@ -80,7 +80,9 @@ paxm history --days 1
 ```
 
 Set `PAXM_VERSION` before installation for a reproducible version or rollback.
-Provider credentials remain user-managed.
+Provider credentials remain user-managed. Team Memory can derive a scoped
+agent credential from a paxl device connection; paxm never writes that secret
+to `config.yaml`.
 
 ### Claude Code plugin
 
@@ -119,11 +121,13 @@ paxm config doctor
 `paxm setup` asks only two questions: which providers to enable and which
 agents get passive memory. Agents found on the machine are pre-selected and
 marked `(detected)`, and cloud provider API keys are masked as they are typed.
-Everything else uses the tuned defaults — the user
-ID comes from `$USER`, agents get IDs such as `codex-todd`, and selected
-providers route read/write as required. Use up/down to move, space to toggle,
-and enter to confirm. Fine-tuning (paths, profiles, routing policy, per-hook
-behavior) lives in the config file; see `docs/config.md`.
+Everything else uses the tuned defaults. When Team Memory is selected, setup
+first reads the on-prem user ID from paxl device status, with channel status as
+a compatibility fallback; otherwise the user ID comes from `$USER`. Agents get
+IDs such as `codex-todd`, and selected providers route
+read/write as required. Use up/down to move, space to toggle, and enter to
+confirm. Fine-tuning (paths, profiles, routing policy, per-hook behavior) lives
+in the config file; see `docs/config.md`.
 
 Optional team IDs create explicit durable write profiles such as
 `team-pax-core`; non-interactive setup can pass `--user-id todd --team-id
@@ -281,11 +285,34 @@ must round-trip both values; see the
 | MemOS | Built in | Self-hosted product API, scoped by memory cube |
 | MemOS Cloud | Built in | Managed OpenMem API with Token authentication |
 | OpenViking | Built in | Self-hosted session extraction and semantic memory search |
+| Team Memory | Built in | On-prem JSON-RPC provider with paxl device credential discovery |
 | Custom JSON-RPC | Adapter | Bring an existing or private memory system |
 
 Enable multiple provider instances at once. Recall and write profiles control
 routes, required or best-effort behavior, ranking weights, thresholds, memory
 tiers, and timeouts.
+
+### Team Memory through a paxl device
+
+Connect the workstation once, then select Team Memory during setup:
+
+```bash
+paxl device connect onprem \
+  --url https://memory.company.internal \
+  --device-name todd-macbook-air \
+  --enrollment-token tm_enroll_xxx
+paxm setup
+```
+
+If `TEAM_MEMORY_API_KEY` is explicitly configured, paxm preserves the existing
+behavior and does not call paxl. Otherwise the Team Memory adapter runs
+`paxl device provision --agent <PAXM_AGENT_ID> --json`, caches the returned
+agent credential under `~/.config/paxm/credentials/` with mode `0600`, and
+passes the URL, user ID, agent ID, and key only to
+`paxm-team-memory-provider`. A provider 401 triggers one re-provision and one
+retry; a second failure is returned to the caller. If paxl or its device
+credential is unavailable, the error directs the operator to run
+`paxl device connect onprem`.
 
 Mem0 score direction is deployment-specific. `score_semantics` defaults to
 `similarity` for backward compatibility; set it to `distance` when the Mem0

@@ -297,6 +297,9 @@ func (p *Provider) call(ctx context.Context, method string, params any, result a
 		return fmt.Errorf("jsonrpc response id mismatch for %s: got %q, want %q", method, response.ID, request.ID)
 	}
 	if response.Error != nil {
+		if suffix := stderrSuffix(stderr.String()); suffix != "" {
+			return fmt.Errorf("%w%s", response.Error, suffix)
+		}
 		return response.Error
 	}
 	if result != nil {
