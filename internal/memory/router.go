@@ -165,11 +165,94 @@ func (r *Router) SearchWithPolicy(ctx context.Context, query SearchQuery, policy
 	if len(requiredErrs) > 0 {
 		return result, errors.Join(requiredErrs...)
 	}
+	if policy.ProviderAllocation > 0 {
+		result.Hits = allocateHitsPerProvider(result, policy.ProviderAllocation)
+	}
 	sortSearchHits(result.Hits)
 	if resultLimit > 0 && len(result.Hits) > resultLimit {
 		result.Hits = result.Hits[:resultLimit]
 	}
 	return result, nil
+}
+
+// allocateHitsPerProvider caps how many hits each provider may contribute to
+// the final result, so that one provider holding a large volume of hits
+// cannot crowd every other provider out of a single global top-N. Within
+// each provider the top `allocation` hits (by the same score ordering used
+// for the final result) are kept. A provider offering fewer hits than its
+// allocation - including a provider contributing zero hits - does not shrink
+// the total: the unused share is handed, one unit at a time in provider-name
+// order, to providers that still have more hits than their current cap,
+// until the shortfall is exhausted or no provider has anything left to give.
+// The caller still applies the overall limit and global sort afterwards, so
+// this only decides which hits are eligible to compete for the final slots,
+// never the final order or count.
+//
+// Provider names are taken from result.ProviderRecalls rather than solely
+// from the hits, because a provider that returned zero hits is invisible in
+// the hit list yet must still be counted for redistribution - otherwise its
+// unused allocation would silently vanish instead of going to a provider
+// that has more to give.
+func allocateHitsPerProvider(result SearchResult, allocation int) []MemoryHit {
+	hits := result.Hits
+	if allocation <= 0 || len(hits) == 0 {
+		return hits
+	}
+
+	byProvider := make(map[string][]MemoryHit)
+	for _, hit := range hits {
+		byProvider[hit.Provider] = append(byProvider[hit.Provider], hit)
+	}
+
+	nameSet := make(map[string]struct{}, len(result.ProviderRecalls)+len(byProvider))
+	for _, recall := range result.ProviderRecalls {
+		nameSet[recall.Provider] = struct{}{}
+	}
+	for name := range byProvider {
+		nameSet[name] = struct{}{}
+	}
+	names := make([]string, 0, len(nameSet))
+	for name := range nameSet {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		sortSearchHits(byProvider[name])
+	}
+
+	caps := make(map[string]int, len(names))
+	unused := 0
+	for _, name := range names {
+		count := len(byProvider[name])
+		if count < allocation {
+			caps[name] = count
+			unused += allocation - count
+		} else {
+			caps[name] = allocation
+		}
+	}
+	for unused > 0 {
+		progressed := false
+		for _, name := range names {
+			if unused <= 0 {
+				break
+			}
+			if caps[name] < len(byProvider[name]) {
+				caps[name]++
+				unused--
+				progressed = true
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+
+	selected := make([]MemoryHit, 0, len(hits))
+	for _, name := range names {
+		selected = append(selected, byProvider[name][:caps[name]]...)
+	}
+	return selected
 }
 
 func providerCandidateLimit(resultLimit int) int {

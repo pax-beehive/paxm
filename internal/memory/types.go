@@ -178,6 +178,14 @@ type SearchPolicy struct {
 	MinScore     float64
 	RecencyBoost float64
 	Tiers        []MemoryTier
+	// ProviderAllocation caps how many hits each provider may contribute to
+	// the final result before the global sort and Limit are applied. Zero
+	// (the default) leaves every hit from every provider in one pool that is
+	// sorted globally and truncated, which is the original behaviour and
+	// what every existing caller depends on. When set, a provider that
+	// returns fewer hits than the allocation does not shrink the result: its
+	// unused share is redistributed to providers with more hits to give.
+	ProviderAllocation int
 }
 
 type PutPolicy struct {
