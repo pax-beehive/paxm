@@ -563,6 +563,284 @@ func TestRouterSearchOversamplesProviderCandidatesBeforeFinalLimit(t *testing.T)
 	}
 }
 
+func hitIDs(hits []MemoryHit) []string {
+	ids := make([]string, len(hits))
+	for i, hit := range hits {
+		ids[i] = hit.ID
+	}
+	return ids
+}
+
+// TestRouterSearchWithoutAllocationKeepsGlobalTopN is the regression guard for
+// every existing caller: with no ProviderAllocation configured, SearchWithPolicy
+// must keep behaving exactly as it does today - one pool of hits from every
+// provider, sorted globally, then truncated to the overall limit. This is a
+// hand-computed expectation so a future change to the allocation code path
+// cannot silently alter the zero-value path.
+func TestRouterSearchWithoutAllocationKeepsGlobalTopN(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "verbose", hits: []MemoryHit{
+			{ID: "verbose-1", Relevance: 0.99},
+			{ID: "verbose-2", Relevance: 0.9},
+			{ID: "verbose-3", Relevance: 0.8},
+			{ID: "verbose-4", Relevance: 0.7},
+			{ID: "verbose-5", Relevance: 0.6},
+		}}, Read: true},
+		{Provider: fakeProvider{name: "quiet", hits: []MemoryHit{
+			{ID: "quiet-1", Relevance: 0.95},
+		}}, Read: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"verbose-1", "quiet-1", "verbose-2"}
+	if got := hitIDs(result.Hits); !equalStrings(got, want) {
+		t.Fatalf("hits = %v, want %v", got, want)
+	}
+}
+
+// TestRouterSearchAllocationCapsEachProviderInScoreOrder covers requirements 2
+// and 4 from the task brief: with an allocation configured and two providers
+// each returning more than the allocation, exactly N hits survive from each
+// provider (in that provider's own score order), and the combined result is
+// still ordered by score.
+func TestRouterSearchAllocationCapsEachProviderInScoreOrder(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "a", hits: []MemoryHit{
+			{ID: "a1", Relevance: 1.0},
+			{ID: "a2", Relevance: 0.9},
+			{ID: "a3", Relevance: 0.2},
+		}}, Read: true},
+		{Provider: fakeProvider{name: "b", hits: []MemoryHit{
+			{ID: "b1", Relevance: 0.95},
+			{ID: "b2", Relevance: 0.85},
+			{ID: "b3", Relevance: 0.15},
+		}}, Read: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{ProviderAllocation: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a1", "b1", "a2", "b2"}
+	if got := hitIDs(result.Hits); !equalStrings(got, want) {
+		t.Fatalf("hits = %v, want %v (each provider capped at its allocation, ranked globally)", got, want)
+	}
+	for _, hit := range result.Hits {
+		if hit.ID == "a1" || hit.ID == "a2" {
+			if hit.Provider != "a" {
+				t.Fatalf("hit %s has provider %q, want %q", hit.ID, hit.Provider, "a")
+			}
+		}
+		if hit.ID == "b1" || hit.ID == "b2" {
+			if hit.Provider != "b" {
+				t.Fatalf("hit %s has provider %q, want %q", hit.ID, hit.Provider, "b")
+			}
+		}
+	}
+}
+
+// TestRouterSearchAllocationRedistributesShortfall covers requirement 3: a
+// provider with fewer hits than its allocation must not shrink the overall
+// result. Its unused share goes to the provider that has more to give.
+func TestRouterSearchAllocationRedistributesShortfall(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "a", hits: []MemoryHit{
+			{ID: "a1", Relevance: 1.0},
+		}}, Read: true},
+		{Provider: fakeProvider{name: "b", hits: []MemoryHit{
+			{ID: "b1", Relevance: 0.99},
+			{ID: "b2", Relevance: 0.9},
+			{ID: "b3", Relevance: 0.8},
+			{ID: "b4", Relevance: 0.7},
+			{ID: "b5", Relevance: 0.6},
+		}}, Read: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{ProviderAllocation: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a1", "b1", "b2", "b3"}
+	if got := hitIDs(result.Hits); !equalStrings(got, want) {
+		t.Fatalf("hits = %v, want %v ('a' quiet-provider hit kept, its unused share of 1 redistributed to 'b')", got, want)
+	}
+}
+
+// makeHits builds n hits named prefix1..prefixN with strictly decreasing
+// relevance starting at start and stepping down by step, for tests that need
+// a provider with many candidates without spelling each one out.
+func makeHits(prefix string, n int, start, step float64) []MemoryHit {
+	hits := make([]MemoryHit, n)
+	for i := 0; i < n; i++ {
+		hits[i] = MemoryHit{ID: fmt.Sprintf("%s%d", prefix, i+1), Relevance: start - float64(i)*step}
+	}
+	return hits
+}
+
+// TestRouterSearchAllocationRedistributesAcrossSeveralShortAndSurplusProviders
+// covers the shape the decomposed eval arms actually exercise: several
+// providers short of their allocation at the same time as several providers
+// with surplus to give. The round-robin redistribution loop must spread the
+// combined shortfall across the surplus providers (rather than, say, only
+// ever crediting the first surplus provider it finds), while never handing a
+// short provider fewer hits than it actually returned.
+func TestRouterSearchAllocationRedistributesAcrossSeveralShortAndSurplusProviders(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "a", hits: []MemoryHit{
+			{ID: "a1", Relevance: 1.0},
+		}}, Read: true}, // short by 2
+		{Provider: fakeProvider{name: "b", hits: []MemoryHit{
+			{ID: "b1", Relevance: 0.99},
+			{ID: "b2", Relevance: 0.98},
+		}}, Read: true}, // short by 1
+		{Provider: fakeProvider{name: "c", hits: makeHits("c", 10, 0.9, 0.05)}, Read: true},  // surplus
+		{Provider: fakeProvider{name: "d", hits: makeHits("d", 10, 0.89, 0.05)}, Read: true}, // surplus
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{ProviderAllocation: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	counts := map[string]int{}
+	for _, hit := range result.Hits {
+		counts[hit.Provider]++
+	}
+
+	// The two short providers must keep every hit they actually returned -
+	// their shortfall must not cost them hits they had.
+	if counts["a"] != 1 {
+		t.Fatalf("provider a contributed %d hits, want 1 (all it returned)", counts["a"])
+	}
+	if counts["b"] != 2 {
+		t.Fatalf("provider b contributed %d hits, want 2 (all it returned)", counts["b"])
+	}
+	// No provider may exceed what it actually returned.
+	if counts["c"] > 10 {
+		t.Fatalf("provider c contributed %d hits, more than the 10 it returned", counts["c"])
+	}
+	if counts["d"] > 10 {
+		t.Fatalf("provider d contributed %d hits, more than the 10 it returned", counts["d"])
+	}
+	// The combined shortfall of 3 (2 from a, 1 from b) must be fully
+	// redistributed across the surplus providers, not wasted: total hits
+	// must equal numProviders * allocation = 4 * 3 = 12.
+	total := counts["a"] + counts["b"] + counts["c"] + counts["d"]
+	if total != 12 {
+		t.Fatalf("total redistributed hits = %d, want 12 (4 providers * allocation 3, shortfall of 3 fully redistributed)", total)
+	}
+	// The redistribution must spread across both surplus providers rather
+	// than dumping the whole shortfall on just one of them.
+	if counts["c"] <= 3 {
+		t.Fatalf("provider c contributed %d hits, want more than its base allocation of 3 (should have received some of the redistributed shortfall)", counts["c"])
+	}
+	if counts["d"] <= 3 {
+		t.Fatalf("provider d contributed %d hits, want more than its base allocation of 3 (should have received some of the redistributed shortfall)", counts["d"])
+	}
+}
+
+// TestRouterSearchAllocationToleratesZeroHitProvider covers requirement 5: a
+// provider contributing zero hits must not fail the search, and its entire
+// allocation is redistributed to providers with hits to give.
+func TestRouterSearchAllocationToleratesZeroHitProvider(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "a", hits: []MemoryHit{
+			{ID: "a1", Relevance: 1.0},
+			{ID: "a2", Relevance: 0.9},
+			{ID: "a3", Relevance: 0.8},
+		}}, Read: true},
+		{Provider: fakeProvider{name: "empty", hits: nil}, Read: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{ProviderAllocation: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a1", "a2", "a3"}
+	if got := hitIDs(result.Hits); !equalStrings(got, want) {
+		t.Fatalf("hits = %v, want %v (empty provider's allocation redistributed to 'a')", got, want)
+	}
+}
+
+// TestRouterSearchAllocationNeverExceedsOverallLimit covers requirement 6: even
+// when the sum of per-provider allocations exceeds the caller's overall limit,
+// the final result is truncated to that limit.
+func TestRouterSearchAllocationNeverExceedsOverallLimit(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "a", hits: []MemoryHit{
+			{ID: "a1", Relevance: 1.0},
+			{ID: "a2", Relevance: 0.9},
+			{ID: "a3", Relevance: 0.8},
+			{ID: "a4", Relevance: 0.7},
+			{ID: "a5", Relevance: 0.6},
+		}}, Read: true},
+		{Provider: fakeProvider{name: "b", hits: []MemoryHit{
+			{ID: "b1", Relevance: 0.95},
+			{ID: "b2", Relevance: 0.85},
+			{ID: "b3", Relevance: 0.75},
+			{ID: "b4", Relevance: 0.65},
+			{ID: "b5", Relevance: 0.55},
+		}}, Read: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{ProviderAllocation: 3, Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) > 4 {
+		t.Fatalf("hits = %d, want at most 4", len(result.Hits))
+	}
+	want := []string{"a1", "b1", "a2", "b2"}
+	if got := hitIDs(result.Hits); !equalStrings(got, want) {
+		t.Fatalf("hits = %v, want %v (allocation total of 6 truncated to overall limit of 4)", got, want)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestRouterSearchAppliesProviderRouteThresholdOverrides(t *testing.T) {
 	t.Parallel()
 

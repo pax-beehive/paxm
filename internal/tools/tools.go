@@ -242,7 +242,21 @@ func (s *Engine) searchPolicy(name string, limit int) (memory.SearchPolicy, erro
 	if limit <= 0 {
 		limit = profile.MaxResults
 	}
-	return memory.SearchPolicy{Providers: routes(profile.Providers), Limit: limit, MinRelevance: profile.Thresholds.MinRelevance, MinScore: profile.Thresholds.MinScore, RecencyBoost: profile.Ranking.RecencyBoost, Tiers: tiers(profile.Tiers)}, nil
+	// PAXM_PASSIVE_PROVIDER_ALLOCATION is read unconditionally (so a
+	// malformed value fails loudly regardless of which profile happens to be
+	// queried first) but only applied to the passive recall profiles it is
+	// named for - the same scoping PAXM_PASSIVE_MIN_RELEVANCE and
+	// PAXM_PASSIVE_MIN_SCORE already have, since those are only ever baked
+	// into the "passive" and "passive_initial" profiles, never "default".
+	allocation, err := config.ProviderAllocationFromEnv()
+	if err != nil {
+		return memory.SearchPolicy{}, err
+	}
+	policy := memory.SearchPolicy{Providers: routes(profile.Providers), Limit: limit, MinRelevance: profile.Thresholds.MinRelevance, MinScore: profile.Thresholds.MinScore, RecencyBoost: profile.Ranking.RecencyBoost, Tiers: tiers(profile.Tiers)}
+	if name == "passive" || name == "passive_initial" {
+		policy.ProviderAllocation = allocation
+	}
+	return policy, nil
 }
 func (s *Engine) putPolicy(name string) (memory.PutPolicy, error) {
 	if strings.TrimSpace(name) == "" {
