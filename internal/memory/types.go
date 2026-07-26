@@ -185,6 +185,24 @@ type SearchPolicy struct {
 	// what every existing caller depends on. When set, a provider that
 	// returns fewer hits than the allocation does not shrink the result: its
 	// unused share is redistributed to providers with more hits to give.
+	//
+	// Precondition: ProviderAllocation is only meaningful when it is at or
+	// below the per-provider over-fetch cap (providerCandidateLimit applied
+	// to the overall Limit). A provider whose true corpus is larger than
+	// what over-fetch retrieved is clipped before allocation ever sees it,
+	// so it looks "short" and donates shortfall it does not actually have,
+	// over-crediting the other providers. Callers must size
+	// ProviderAllocation no larger than that over-fetch cap.
+	//
+	// Sizing note: even a correctly sized allocation does not guarantee a
+	// provider's share survives to the caller. The final global truncation
+	// to Limit still applies after allocation, and when
+	// numProviders * ProviderAllocation exceeds Limit, that truncation can
+	// still drop a lower-scoring provider's hits (e.g. allocation 3, limit
+	// 5, two providers: one of the three hits reserved for the
+	// lower-scoring provider is still cut). Callers who want a provider's
+	// allocation guaranteed to reach the caller must also keep
+	// numProviders * ProviderAllocation <= Limit.
 	ProviderAllocation int
 }
 

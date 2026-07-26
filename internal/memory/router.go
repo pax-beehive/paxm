@@ -193,6 +193,20 @@ func (r *Router) SearchWithPolicy(ctx context.Context, query SearchQuery, policy
 // the hit list yet must still be counted for redistribution - otherwise its
 // unused allocation would silently vanish instead of going to a provider
 // that has more to give.
+//
+// Precondition: shortfall is computed purely from len(byProvider[name]) -
+// how many hits a provider has in this result - compared against
+// allocation. That slice was already capped upstream by
+// providerCandidateLimit(resultLimit) in SearchWithPolicy, a cap that knows
+// nothing about allocation. If allocation is set higher than that
+// over-fetch cap, a provider with a genuinely large corpus gets clipped
+// before it ever reaches this function, looks short here even though it is
+// not, and donates a "shortfall" it does not actually have - which
+// over-credits the other providers at its expense. This function cannot
+// detect that case (it has no way to know a provider's true corpus size
+// beyond what it was handed), so callers must keep ProviderAllocation at or
+// below the over-fetch cap for shortfall accounting to be meaningful. See
+// the precondition and sizing notes on SearchPolicy.ProviderAllocation.
 func allocateHitsPerProvider(result SearchResult, allocation int) []MemoryHit {
 	hits := result.Hits
 	if allocation <= 0 || len(hits) == 0 {

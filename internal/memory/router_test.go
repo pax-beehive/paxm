@@ -684,6 +684,84 @@ func TestRouterSearchAllocationRedistributesShortfall(t *testing.T) {
 	}
 }
 
+// makeHits builds n hits named prefix1..prefixN with strictly decreasing
+// relevance starting at start and stepping down by step, for tests that need
+// a provider with many candidates without spelling each one out.
+func makeHits(prefix string, n int, start, step float64) []MemoryHit {
+	hits := make([]MemoryHit, n)
+	for i := 0; i < n; i++ {
+		hits[i] = MemoryHit{ID: fmt.Sprintf("%s%d", prefix, i+1), Relevance: start - float64(i)*step}
+	}
+	return hits
+}
+
+// TestRouterSearchAllocationRedistributesAcrossSeveralShortAndSurplusProviders
+// covers the shape the decomposed eval arms actually exercise: several
+// providers short of their allocation at the same time as several providers
+// with surplus to give. The round-robin redistribution loop must spread the
+// combined shortfall across the surplus providers (rather than, say, only
+// ever crediting the first surplus provider it finds), while never handing a
+// short provider fewer hits than it actually returned.
+func TestRouterSearchAllocationRedistributesAcrossSeveralShortAndSurplusProviders(t *testing.T) {
+	t.Parallel()
+
+	router, err := NewRouter([]ProviderBinding{
+		{Provider: fakeProvider{name: "a", hits: []MemoryHit{
+			{ID: "a1", Relevance: 1.0},
+		}}, Read: true}, // short by 2
+		{Provider: fakeProvider{name: "b", hits: []MemoryHit{
+			{ID: "b1", Relevance: 0.99},
+			{ID: "b2", Relevance: 0.98},
+		}}, Read: true}, // short by 1
+		{Provider: fakeProvider{name: "c", hits: makeHits("c", 10, 0.9, 0.05)}, Read: true},  // surplus
+		{Provider: fakeProvider{name: "d", hits: makeHits("d", 10, 0.89, 0.05)}, Read: true}, // surplus
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := router.SearchWithPolicy(context.Background(), SearchQuery{Text: "memory"}, SearchPolicy{ProviderAllocation: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	counts := map[string]int{}
+	for _, hit := range result.Hits {
+		counts[hit.Provider]++
+	}
+
+	// The two short providers must keep every hit they actually returned -
+	// their shortfall must not cost them hits they had.
+	if counts["a"] != 1 {
+		t.Fatalf("provider a contributed %d hits, want 1 (all it returned)", counts["a"])
+	}
+	if counts["b"] != 2 {
+		t.Fatalf("provider b contributed %d hits, want 2 (all it returned)", counts["b"])
+	}
+	// No provider may exceed what it actually returned.
+	if counts["c"] > 10 {
+		t.Fatalf("provider c contributed %d hits, more than the 10 it returned", counts["c"])
+	}
+	if counts["d"] > 10 {
+		t.Fatalf("provider d contributed %d hits, more than the 10 it returned", counts["d"])
+	}
+	// The combined shortfall of 3 (2 from a, 1 from b) must be fully
+	// redistributed across the surplus providers, not wasted: total hits
+	// must equal numProviders * allocation = 4 * 3 = 12.
+	total := counts["a"] + counts["b"] + counts["c"] + counts["d"]
+	if total != 12 {
+		t.Fatalf("total redistributed hits = %d, want 12 (4 providers * allocation 3, shortfall of 3 fully redistributed)", total)
+	}
+	// The redistribution must spread across both surplus providers rather
+	// than dumping the whole shortfall on just one of them.
+	if counts["c"] <= 3 {
+		t.Fatalf("provider c contributed %d hits, want more than its base allocation of 3 (should have received some of the redistributed shortfall)", counts["c"])
+	}
+	if counts["d"] <= 3 {
+		t.Fatalf("provider d contributed %d hits, want more than its base allocation of 3 (should have received some of the redistributed shortfall)", counts["d"])
+	}
+}
+
 // TestRouterSearchAllocationToleratesZeroHitProvider covers requirement 5: a
 // provider contributing zero hits must not fail the search, and its entire
 // allocation is redistributed to providers with hits to give.
