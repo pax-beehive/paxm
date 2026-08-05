@@ -8,8 +8,8 @@
 [![Release](https://img.shields.io/github/v/release/pax-beehive/paxm)](https://github.com/pax-beehive/paxm/releases/latest)
 [![Go](https://img.shields.io/github/go-mod/go-version/pax-beehive/paxm)](go.mod)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-6f42c1)](https://github.com/pax-beehive/paxm/releases/latest)
-<a href="https://trendshift.io/repositories/88474?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-88474" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/88474/daily?language=Go" alt="pax-beehive%2Fpaxm | Trendshift" width="250" height="55"/></a>
-<a href="https://trendshift.io/repositories/88474?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-88474" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/88474/weekly?language=Go" alt="pax-beehive%2Fpaxm | Trendshift" width="250" height="55"/></a>
+[![pax-beehive/paxm | Trendshift Daily](https://trendshift.io/api/badge/trendshift/repositories/88474/daily?language=Go)](https://trendshift.io/repositories/88474)
+[![pax-beehive/paxm | Trendshift Weekly](https://trendshift.io/api/badge/trendshift/repositories/88474/weekly?language=Go)](https://trendshift.io/repositories/88474)
 
 PAXM carries decisions, conventions, and working context into later Codex,
 Claude Code, OpenCode, Pi, Cursor, TRAE, Kimi Code, ZCode, Kiro, Cline, and MCP
