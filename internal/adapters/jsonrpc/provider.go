@@ -279,27 +279,25 @@ func (p *Provider) call(ctx context.Context, method string, params any, result a
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	wait := make(chan error, 1)
-	go func() {
-		wait <- cmd.Wait()
-	}()
 
 	if _, err := stdin.Write(append(payload, '\n')); err != nil {
 		_ = stdin.Close()
 		p.kill(cmd)
-		<-wait
+		_ = cmd.Wait()
 		return err
 	}
 	if err := stdin.Close(); err != nil {
 		p.kill(cmd)
-		<-wait
+		_ = cmd.Wait()
 		return err
 	}
 
 	var response rpcResponse
+	// Wait closes StdoutPipe, so decode the complete response first. Fast
+	// providers can otherwise race with Wait and fail with "file already closed".
 	decodeErr := json.NewDecoder(stdout).Decode(&response)
 	p.kill(cmd)
-	<-wait
+	_ = cmd.Wait()
 	if ctx.Err() != nil {
 		return fmt.Errorf("jsonrpc provider %q %s timed out after %s: %w", p.name, method, timeout, ctx.Err())
 	}
