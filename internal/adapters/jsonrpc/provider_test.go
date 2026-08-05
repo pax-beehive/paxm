@@ -85,6 +85,19 @@ func TestProviderSearchPutBatchAndHealth(t *testing.T) {
 	}
 }
 
+func TestProviderReadsResponseBeforeWaitingForFastProcess(t *testing.T) {
+	t.Parallel()
+
+	provider := newHelperProvider(t, "large-fast-response")
+	hits, err := provider.Search(context.Background(), memory.SearchQuery{Text: "large response"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || len(hits[0].Text) != 4<<20 {
+		t.Fatalf("unexpected large response: hits=%d text_bytes=%d", len(hits), len(hits[0].Text))
+	}
+}
+
 func TestProviderMapsStructuredAttribution(t *testing.T) {
 	provider := newHelperProvider(t, "put-attribution")
 	item := memory.MemoryItem{
@@ -231,6 +244,10 @@ func TestJSONRPCPluginHelper(t *testing.T) {
 		var query memory.SearchQuery
 		if err := remarshal(request.Params, &query); err != nil {
 			t.Fatal(err)
+		}
+		if os.Getenv("PAXM_JSONRPC_PLUGIN_MODE") == "large-fast-response" {
+			response.Result = mustRawJSON(searchResult{Hits: []memory.MemoryHit{{ID: "large-1", Text: strings.Repeat("x", 4<<20), Relevance: 1, Score: 1}}})
+			break
 		}
 		createdAt := time.Date(2026, 7, 9, 1, 2, 3, 0, time.UTC).Format(time.RFC3339Nano)
 		response.Result = mustRawJSON(searchResult{Hits: []memory.MemoryHit{{
