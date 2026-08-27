@@ -98,9 +98,10 @@ must be evaluated separately by the configured paxm/provider policy; this
 protocol does not turn attribution into an ACL. Values copied from model output
 or caller-controlled search metadata are not trusted identity.
 
-For Codex and Claude Code passive hooks, paxm constructs `runtime_context`
+For Codex and OpenCode passive hooks, paxm constructs `runtime_context`
 before decoding the host stdin payload. The command flags own `target` and
-`event`; the hook process working directory owns `workspace`. A payload may
+`event`; the hook process working directory owns `workspace`. OpenCode sets
+that cwd from host `worktree || directory`. A payload may
 contain fields with the same names, including a nested `runtime_context`, but
 those values remain non-authoritative evidence and cannot override the object
 sent to the provider. `metadata.workspace` mirrors the same trusted workspace

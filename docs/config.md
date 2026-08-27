@@ -804,9 +804,10 @@ write providers without storing the rest of the raw runtime event. Claude Code
 receives admitted recall hits as Markdown context from the synchronous
 `UserPromptSubmit` hook.
 
-For Codex and Claude Code plugin hooks, `.target`, `.event`, and `.workspace`
+For Codex hooks and the OpenCode plugin, `.target`, `.event`, and `.workspace`
 come from paxm's trusted runtime context: installed command flags plus the hook
-process working directory. Same-named stdin fields, including `cwd` and a
+process working directory. OpenCode sets that cwd from host
+`worktree || directory`. Same-named stdin fields, including `cwd` and a
 nested `runtime_context`, remain available only through explicit raw evidence
 paths and cannot override these template values or `metadata.workspace` sent
 to recall providers.

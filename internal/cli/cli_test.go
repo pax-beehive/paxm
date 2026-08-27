@@ -30,11 +30,11 @@ import (
 )
 
 func TestInternalCodexHookSuppliesTrustedRuntimeContext(t *testing.T) {
-	assertTrustedRuntimeContextHook(t, "codex", config.IntegrationOwnerCodexPlugin, "claude", true)
+	assertTrustedRuntimeContextHook(t, "codex", config.IntegrationOwnerCodexPlugin, "cline")
 }
 
-func TestInternalClaudeHookSuppliesTrustedRuntimeContext(t *testing.T) {
-	assertTrustedRuntimeContextHook(t, "claude", config.IntegrationOwnerClaudePlugin, "codex", false)
+func TestInternalOpenCodeHookSuppliesTrustedRuntimeContext(t *testing.T) {
+	assertTrustedRuntimeContextHook(t, "opencode", "", "cline")
 }
 
 func TestInternalClineHookDoesNotForwardPayloadRuntimeContext(t *testing.T) {
@@ -148,7 +148,7 @@ func TestUntrustedRuntimeContextProviderHelper(t *testing.T) {
 	}
 }
 
-func assertTrustedRuntimeContextHook(t *testing.T, target, owner, forgedTarget string, jsonOut bool) {
+func assertTrustedRuntimeContextHook(t *testing.T, target, owner, forgedTarget string) {
 	t.Helper()
 	workspace := t.TempDir()
 	t.Chdir(workspace)
@@ -198,10 +198,7 @@ func assertTrustedRuntimeContextHook(t *testing.T, target, owner, forgedTarget s
 		"runtime_context":{"target":"` + forgedTarget + `","event":"turn_end","workspace":"/forged/runtime"},
 		"prompt":"verify trusted runtime context"
 	}`
-	args := []string{"--config", configPath, "__hook", "--target", target, "--event", "user_input"}
-	if jsonOut {
-		args = append(args, "--json")
-	}
+	args := []string{"--config", configPath, "__hook", "--target", target, "--event", "user_input", "--json"}
 	var stdout, stderr bytes.Buffer
 	code := Main(args, strings.NewReader(forged), &stdout, &stderr)
 	if code != 0 {
@@ -209,9 +206,6 @@ func assertTrustedRuntimeContextHook(t *testing.T, target, owner, forgedTarget s
 	}
 	if !strings.Contains(stdout.String(), "runtime-context-ok") {
 		t.Fatalf("%s hook did not receive trusted runtime context: stdout=%s stderr=%s", target, stdout.String(), stderr.String())
-	}
-	if !jsonOut && json.Valid(stdout.Bytes()) {
-		t.Fatalf("Claude hook unexpectedly emitted Codex JSON: %s", stdout.String())
 	}
 }
 
@@ -259,8 +253,8 @@ func TestHookBinaryCarriesTrustedRuntimeContextAcrossDaemonWorkspaces(t *testing
 	write.Providers = []config.ProviderRouteConfig{{Name: "runtime-context", Required: true}}
 	cfg.WriteProfiles["default"] = write
 	for name, owner := range map[string]string{
-		"codex":  config.IntegrationOwnerCodexPlugin,
-		"claude": config.IntegrationOwnerClaudePlugin,
+		"codex":    config.IntegrationOwnerCodexPlugin,
+		"opencode": "",
 	} {
 		agent := cfg.Agents[name]
 		agent.Enabled = true
@@ -281,7 +275,7 @@ func TestHookBinaryCarriesTrustedRuntimeContextAcrossDaemonWorkspaces(t *testing
 		_, _ = shutdown.CombinedOutput()
 	}()
 
-	runHook := func(target, owner, workspace string, jsonOut bool) {
+	runHook := func(target, owner, workspace string) {
 		t.Helper()
 		payload := `{
 			"target":"forged-target",
@@ -292,11 +286,13 @@ func TestHookBinaryCarriesTrustedRuntimeContextAcrossDaemonWorkspaces(t *testing
 			"session_id":"session-` + target + `",
 			"last_assistant_message":"completed ` + target + ` turn"
 		}`
-		wrapper := filepath.Join(repoRoot, "plugins", "paxm-claude", "hooks", "paxm-hook.sh")
-		if jsonOut {
-			wrapper = filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh")
+		var command *exec.Cmd
+		if target == "codex" {
+			wrapper := filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh")
+			command = exec.Command("sh", wrapper, "turn_end")
+		} else {
+			command = exec.Command(binary, "--config", configPath, "__hook", "--target", target, "--event", "turn_end", "--json")
 		}
-		command := exec.Command("sh", wrapper, "turn_end")
 		command.Dir = workspace
 		command.Env = append(os.Environ(), "PAXM_BINARY="+binary, "PAXM_CONFIG="+configPath, "PAXM_INTEGRATION_OWNER="+owner)
 		command.Stdin = strings.NewReader(payload)
@@ -309,9 +305,9 @@ func TestHookBinaryCarriesTrustedRuntimeContextAcrossDaemonWorkspaces(t *testing
 		}
 	}
 
-	runHook("codex", config.IntegrationOwnerCodexPlugin, workspaceA, true)
+	runHook("codex", config.IntegrationOwnerCodexPlugin, workspaceA)
 	waitForRuntimeContextReceipts(t, receiptPath, 1)
-	runHook("claude", config.IntegrationOwnerClaudePlugin, workspaceB, false)
+	runHook("opencode", "", workspaceB)
 	contexts := waitForRuntimeContextReceipts(t, receiptPath, 2)
 	want := []struct {
 		Target    string
@@ -319,7 +315,7 @@ func TestHookBinaryCarriesTrustedRuntimeContextAcrossDaemonWorkspaces(t *testing
 		Workspace string
 	}{
 		{Target: "codex", Event: "turn_end", Workspace: trustedWorkspaceA},
-		{Target: "claude", Event: "turn_end", Workspace: trustedWorkspaceB},
+		{Target: "opencode", Event: "turn_end", Workspace: trustedWorkspaceB},
 	}
 	for index := range want {
 		if contexts[index].Target != want[index].Target || contexts[index].Event != want[index].Event || contexts[index].Workspace != want[index].Workspace {
@@ -342,25 +338,32 @@ func TestAgentHookWrappersFailOpenWhenRuntimeIsUnavailable(t *testing.T) {
 	if err := os.Mkdir(workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	openCodeShim := filepath.Join(dir, "opencode-user_input")
+	_, shim := hookShimScript(runtime.GOOS, failingRuntime, filepath.Join(dir, "missing-config.yaml"), "opencode", "user_input", " --json")
+	if err := os.WriteFile(openCodeShim, []byte(shim), 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, test := range []struct {
 		name    string
 		wrapper string
 	}{
 		{name: "codex", wrapper: filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh")},
-		{name: "claude", wrapper: filepath.Join(repoRoot, "plugins", "paxm-claude", "hooks", "paxm-hook.sh")},
+		{name: "opencode", wrapper: openCodeShim},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			command := exec.Command("sh", test.wrapper, "user_input")
 			command.Dir = workspace
 			command.Env = append(os.Environ(), "PAXM_BINARY="+failingRuntime, "HOME="+dir)
 			command.Stdin = strings.NewReader(`{"prompt":"continue native Agent work"}`)
-			output, err := command.CombinedOutput()
-			if err != nil {
-				t.Fatalf("wrapper blocked Agent work: %v: %s", err, output)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			if err := command.Run(); err != nil {
+				t.Fatalf("wrapper blocked Agent work: %v: %s", err, stderr.String())
 			}
-			if len(output) != 0 {
-				t.Fatalf("fail-open wrapper output = %q, want empty", output)
+			if stdout.Len() != 0 {
+				t.Fatalf("fail-open wrapper stdout = %q, want empty; stderr=%s", stdout.String(), stderr.String())
 			}
 		})
 	}
@@ -391,7 +394,7 @@ func TestAgentHookWrappersFailOpenWhenProviderIsUnavailable(t *testing.T) {
 	recall.Providers = []config.ProviderRouteConfig{{Name: "ctx", Required: true}}
 	cfg.RecallProfiles["default"] = recall
 	for name, owner := range map[string]string{
-		"codex": config.IntegrationOwnerCodexPlugin, "claude": config.IntegrationOwnerClaudePlugin,
+		"codex": config.IntegrationOwnerCodexPlugin, "opencode": "",
 	} {
 		agent := cfg.Agents[name]
 		agent.Enabled = true
@@ -411,32 +414,47 @@ func TestAgentHookWrappersFailOpenWhenProviderIsUnavailable(t *testing.T) {
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
+	openCodeShims := make(map[string]string, 2)
+	for _, event := range []string{"session_start", "user_input"} {
+		path := filepath.Join(dir, "opencode-"+event)
+		_, shim := hookShimScript(runtime.GOOS, binary, configPath, "opencode", event, " --json")
+		if err := os.WriteFile(path, []byte(shim), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		openCodeShims[event] = path
+	}
 
 	for _, test := range []struct {
-		name, owner, wrapper string
+		name, owner, sessionStart, userInput string
 	}{
-		{name: "codex", owner: config.IntegrationOwnerCodexPlugin, wrapper: filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh")},
-		{name: "claude", owner: config.IntegrationOwnerClaudePlugin, wrapper: filepath.Join(repoRoot, "plugins", "paxm-claude", "hooks", "paxm-hook.sh")},
+		{
+			name: "codex", owner: config.IntegrationOwnerCodexPlugin,
+			sessionStart: filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh"),
+			userInput:    filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh"),
+		},
+		{name: "opencode", sessionStart: openCodeShims["session_start"], userInput: openCodeShims["user_input"]},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			sessionID := "provider-unavailable-" + test.name
-			start := exec.Command("sh", test.wrapper, "session_start")
+			start := exec.Command("sh", test.sessionStart, "session_start")
 			start.Dir = workspace
 			start.Env = append(os.Environ(), "PAXM_BINARY="+binary, "PAXM_CONFIG="+configPath, "PAXM_INTEGRATION_OWNER="+test.owner)
 			start.Stdin = strings.NewReader(`{"session_id":"` + sessionID + `"}`)
 			if output, err := start.CombinedOutput(); err != nil {
 				t.Fatalf("session start failed: %v: %s", err, output)
 			}
-			command := exec.Command("sh", test.wrapper, "user_input")
+			command := exec.Command("sh", test.userInput, "user_input")
 			command.Dir = workspace
 			command.Env = append(os.Environ(), "PAXM_BINARY="+binary, "PAXM_CONFIG="+configPath, "PAXM_INTEGRATION_OWNER="+test.owner)
 			command.Stdin = strings.NewReader(`{"session_id":"` + sessionID + `","prompt":"continue native Agent work"}`)
-			output, err := command.CombinedOutput()
-			if err != nil {
-				t.Fatalf("provider failure blocked Agent work: %v: %s", err, output)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			if err := command.Run(); err != nil {
+				t.Fatalf("provider failure blocked Agent work: %v: %s", err, stderr.String())
 			}
-			if len(output) != 0 {
-				t.Fatalf("provider failure output = %q, want empty", output)
+			if stdout.Len() != 0 {
+				t.Fatalf("provider failure stdout = %q, want empty; stderr=%s", stdout.String(), stderr.String())
 			}
 		})
 	}

@@ -56,6 +56,11 @@ func TestInstallOpenCodeGlobalHook(t *testing.T) {
 		`additional_context`,
 		`paxm.opencode.turn_end.v1`,
 		`target: "opencode"`,
+		`function runHook(command: string, payload: unknown, workspace: string)`,
+		`cwd: workspace`,
+		`if (result.error)`,
+		`if (result.status !== 0)`,
+		`return { ok: false, stdout`,
 		userInput,
 		sessionStart,
 		turnEnd,
@@ -66,6 +71,24 @@ func TestInstallOpenCodeGlobalHook(t *testing.T) {
 	}
 	if strings.Contains(source, `type === "reasoning"`) {
 		t.Fatalf("OpenCode plugin should select text parts instead of forwarding reasoning")
+	}
+	for _, command := range []string{
+		"paxmSessionStartHookCommand",
+		"paxmUserInputHookCommand",
+		"paxmTurnEndHookCommand",
+	} {
+		start := strings.Index(source, "runHook("+command)
+		if start < 0 {
+			t.Fatalf("OpenCode plugin has no %s invocation", command)
+		}
+		end := strings.Index(source[start:], ");")
+		if end < 0 {
+			t.Fatalf("OpenCode plugin has incomplete %s invocation", command)
+		}
+		call := source[start : start+end+2]
+		if !strings.HasSuffix(call, ", workspace);") {
+			t.Fatalf("OpenCode %s invocation does not pass host workspace: %s", command, call)
+		}
 	}
 	info, err := os.Stat(path)
 	if err != nil {

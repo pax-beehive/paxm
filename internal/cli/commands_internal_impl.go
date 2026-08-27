@@ -649,7 +649,7 @@ func pathDoesNotExist(path string) bool {
 }
 
 func decodeHookEvent(raw []byte, target, eventName string) (capture.Event, error) {
-	if target != "codex" && target != "claude" {
+	if target != "codex" && target != "opencode" {
 		return decodeHookPayload(raw, target, eventName)
 	}
 	runtimeContext, err := hookRuntimeContext(target, eventName)

@@ -113,12 +113,13 @@ Then verify in the real client:
 Native hook failures are fail-open at the client boundary: a missing provider,
 timeout, or paxm hook error must not block the coding session.
 
-### Trusted runtime context for Codex and Claude Code
+### Trusted runtime context for Codex and OpenCode
 
-The Codex and Claude Code plugin commands build `runtime_context` inside paxm,
+The Codex hook and OpenCode plugin commands build `runtime_context` inside paxm,
 not from an undocumented stdin field. `target` and `event` come from the
 installed command flags, while `workspace` comes from the hook process working
-directory. Payload fields named `target`, `event`, `workspace`, `cwd`, or
+directory. OpenCode sets every hook subprocess cwd from host
+`worktree || directory`. Payload fields named `target`, `event`, `workspace`, `cwd`, or
 `runtime_context` remain non-authoritative hook evidence and cannot replace the
 trusted values. The same context crosses the local hook daemon socket, so a
 daemon started in one workspace cannot relabel a later hook from another.

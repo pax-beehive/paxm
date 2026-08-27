@@ -386,13 +386,14 @@ as provider search filters.
 
 ## Agent integrations
 
-Codex and Claude Code plugin hooks create a trusted `runtime_context` inside
+Codex hooks and the OpenCode plugin create a trusted `runtime_context` inside
 paxm. Its `target` and `event` come from the installed hook command, and its
-`workspace` comes from that command's process working directory. Stdin JSON is
+`workspace` comes from that command's process working directory. The OpenCode
+plugin sets that directory from host `worktree || directory`. Stdin JSON is
 retained as hook evidence but cannot override those values. JSON-RPC providers
-receive the context on passive searches and capture writes. The plugin wrappers remain
-fail-open: if paxm or a provider is unavailable, they emit nothing and let the
-host agent continue.
+receive the context on passive searches and capture writes. Both integrations
+remain fail-open: if paxm or a provider is unavailable, they emit no Context
+and let the host agent continue.
 
 ### Codex plugin
 
