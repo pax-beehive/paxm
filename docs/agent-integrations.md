@@ -128,7 +128,8 @@ Passive JSON-RPC searches and capture writes carry the trusted object as
 `workspace`. A buffered episode uses the last contributing hook's trusted
 event while target and workspace stay fixed by the episode's session key.
 Other agent integrations retain their documented payload-derived workspace
-contracts.
+contracts, but a payload field named `runtime_context` is ignored and never
+forwarded as typed trusted context.
 
 Disable and remove one integration without deleting memory or provider config:
 

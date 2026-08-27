@@ -692,6 +692,9 @@ func decodeHookPayload(raw []byte, target, eventName string) (capture.Event, err
 	if err := json.Unmarshal(typedRaw, &event); err != nil {
 		return capture.Event{}, fmt.Errorf("decode hook event JSON: %w", err)
 	}
+	// RuntimeContext is created only by trusted host adapters. Keep the raw
+	// payload as evidence, but never deserialize its runtime_context as trust.
+	event.RuntimeContext = memory.RuntimeContext{}
 	if event.Target == "" {
 		event.Target = target
 	}

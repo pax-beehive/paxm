@@ -23,7 +23,7 @@ type Event struct {
 	Workspace      string                `json:"workspace,omitempty"`
 	Limit          int                   `json:"limit,omitempty"`
 	Metadata       map[string]string     `json:"metadata,omitempty"`
-	RuntimeContext memory.RuntimeContext `json:"runtime_context,omitempty"`
+	RuntimeContext memory.RuntimeContext `json:"-"`
 	Raw            json.RawMessage       `json:"-"`
 }
 type Message struct {

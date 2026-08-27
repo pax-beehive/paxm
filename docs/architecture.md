@@ -59,6 +59,9 @@ Codex and Claude Code passive searches additionally carry a typed
 `SearchQuery.RuntimeContext` constructed at the hidden hook CLI seam. Its
 target/event come from command flags and its workspace from the hook process
 working directory; stdin remains evidence and cannot override the typed value.
+The capture payload type does not deserialize `runtime_context`; integrations
+without a trusted constructor therefore omit the typed value while preserving
+their existing payload-derived workspace behavior.
 The same value reaches passive `MemoryItem` writes, with buffered episodes
 retaining the last contributing hook event inside their trusted session scope.
 

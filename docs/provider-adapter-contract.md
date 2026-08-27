@@ -100,7 +100,9 @@ For Codex and Claude Code it is created from installed command flags plus the
 hook process working directory before stdin is decoded. Adapters may use its
 workspace for explicit local scope policy, but must not replace it with values
 from `Metadata`, query text, or model output. Active and non-hook searches omit
-the field.
+the field. Hook payload decoding cannot populate the typed field; integrations
+without a trusted host constructor omit it even when their raw payload contains
+a same-named object.
 
 Passive `MemoryItem.RuntimeContext` uses the same trusted structure. When the
 capture queue combines several lifecycle events into one episode item, it keeps
