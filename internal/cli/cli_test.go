@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,472 @@ import (
 	"github.com/pax-beehive/paxm/internal/telemetry"
 	"github.com/pax-beehive/paxm/internal/tools"
 )
+
+func TestInternalCodexHookSuppliesTrustedRuntimeContext(t *testing.T) {
+	assertTrustedRuntimeContextHook(t, "codex", config.IntegrationOwnerCodexPlugin, "claude", true)
+}
+
+func TestInternalClaudeHookSuppliesTrustedRuntimeContext(t *testing.T) {
+	assertTrustedRuntimeContextHook(t, "claude", config.IntegrationOwnerClaudePlugin, "codex", false)
+}
+
+func assertTrustedRuntimeContextHook(t *testing.T, target, owner, forgedTarget string, jsonOut bool) {
+	t.Helper()
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	cfg.Providers["sqlite"] = config.ProviderConfig{Type: "sqlite", Enabled: false}
+	cfg.Providers["runtime-context"] = config.ProviderConfig{
+		Type:      "jsonrpc",
+		Enabled:   true,
+		Transport: "stdio",
+		Command:   os.Args[0],
+		Args:      []string{"-test.run=TestRuntimeContextProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_RUNTIME_CONTEXT_HELPER":    "1",
+			"PAXM_RUNTIME_CONTEXT_TARGET":    target,
+			"PAXM_RUNTIME_CONTEXT_EVENT":     "user_input",
+			"PAXM_RUNTIME_CONTEXT_WORKSPACE": workspace,
+		},
+		Timeout: "5s",
+	}
+	recall := cfg.RecallProfiles["default"]
+	recall.Providers = []config.ProviderRouteConfig{{Name: "runtime-context", Required: true}}
+	cfg.RecallProfiles["default"] = recall
+	agent := cfg.Agents[target]
+	agent.Enabled = true
+	agent.Integration.Owner = owner
+	userInput := agent.Hooks["user_input"]
+	userInput.Recall.Enabled = true
+	userInput.Recall.Profile = "default"
+	userInput.Recall.QueryTemplate = "{{ .raw_json }}"
+	userInput.Recall.Initial = &config.HookInitialRecall{Enabled: false}
+	userInput.Write.Enabled = false
+	agent.Hooks["user_input"] = userInput
+	cfg.Agents[target] = agent
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PAXM_INTEGRATION_OWNER", owner)
+
+	forged := `{
+		"target":"` + forgedTarget + `",
+		"event":"turn_end",
+		"workspace":"/forged/workspace",
+		"cwd":"/forged/cwd",
+		"metadata":{"workspace":"/forged/metadata","hook_target":"forged","hook_event":"forged"},
+		"runtime_context":{"target":"` + forgedTarget + `","event":"turn_end","workspace":"/forged/runtime"},
+		"prompt":"verify trusted runtime context"
+	}`
+	args := []string{"--config", configPath, "__hook", "--target", target, "--event", "user_input"}
+	if jsonOut {
+		args = append(args, "--json")
+	}
+	var stdout, stderr bytes.Buffer
+	code := Main(args, strings.NewReader(forged), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("hook failed with code %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime-context-ok") {
+		t.Fatalf("%s hook did not receive trusted runtime context: stdout=%s stderr=%s", target, stdout.String(), stderr.String())
+	}
+	if !jsonOut && json.Valid(stdout.Bytes()) {
+		t.Fatalf("Claude hook unexpectedly emitted Codex JSON: %s", stdout.String())
+	}
+}
+
+func TestHookBinaryCarriesTrustedRuntimeContextAcrossDaemonWorkspaces(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "paxm-runtime-context-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	repoRoot := testPAXMRepoRoot(t)
+	binary := buildTestPAXMBinary(t, repoRoot, dir)
+
+	workspaceA := filepath.Join(dir, "workspace-a")
+	workspaceB := filepath.Join(dir, "workspace-b")
+	for _, workspace := range []string{workspaceA, workspaceB} {
+		if err := os.MkdirAll(workspace, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trustedWorkspaceA, err := filepath.EvalSymlinks(workspaceA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustedWorkspaceB, err := filepath.EvalSymlinks(workspaceB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := filepath.Join(dir, "runtime-contexts.jsonl")
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	cfg.Providers["sqlite"] = config.ProviderConfig{Type: "sqlite", Enabled: false}
+	cfg.Providers["runtime-context"] = config.ProviderConfig{
+		Type:      "jsonrpc",
+		Enabled:   true,
+		Transport: "stdio",
+		Command:   os.Args[0],
+		Args:      []string{"-test.run=TestRuntimeContextWriteProviderHelper", "--"},
+		Env: map[string]string{
+			"PAXM_RUNTIME_CONTEXT_WRITE_HELPER": "1",
+			"PAXM_RUNTIME_CONTEXT_RECEIPT_FILE": receiptPath,
+		},
+		Timeout: "5s",
+	}
+	write := cfg.WriteProfiles["default"]
+	write.Providers = []config.ProviderRouteConfig{{Name: "runtime-context", Required: true}}
+	cfg.WriteProfiles["default"] = write
+	for name, owner := range map[string]string{
+		"codex":  config.IntegrationOwnerCodexPlugin,
+		"claude": config.IntegrationOwnerClaudePlugin,
+	} {
+		agent := cfg.Agents[name]
+		agent.Enabled = true
+		agent.Integration.Owner = owner
+		turnEnd := agent.Hooks["turn_end"]
+		turnEnd.Recall.Enabled = false
+		turnEnd.Write.Enabled = true
+		turnEnd.Write.Profile = "default"
+		turnEnd.Write.Buffer = config.HookBufferConfig{Enabled: true, Flush: true}
+		agent.Hooks["turn_end"] = turnEnd
+		cfg.Agents[name] = agent
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		shutdown := exec.Command(binary, "--config", configPath, "__hook-control", "--shutdown")
+		_, _ = shutdown.CombinedOutput()
+	}()
+
+	runHook := func(target, owner, workspace string, jsonOut bool) {
+		t.Helper()
+		payload := `{
+			"target":"forged-target",
+			"event":"forged-event",
+			"workspace":"/forged/workspace",
+			"cwd":"/forged/cwd",
+			"runtime_context":{"target":"forged","event":"forged","workspace":"/forged/runtime"},
+			"session_id":"session-` + target + `",
+			"last_assistant_message":"completed ` + target + ` turn"
+		}`
+		wrapper := filepath.Join(repoRoot, "plugins", "paxm-claude", "hooks", "paxm-hook.sh")
+		if jsonOut {
+			wrapper = filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh")
+		}
+		command := exec.Command("sh", wrapper, "turn_end")
+		command.Dir = workspace
+		command.Env = append(os.Environ(), "PAXM_BINARY="+binary, "PAXM_CONFIG="+configPath, "PAXM_INTEGRATION_OWNER="+owner)
+		command.Stdin = strings.NewReader(payload)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s hook failed: %v: %s", target, err, output)
+		}
+		if len(output) != 0 {
+			t.Fatalf("%s turn-end hook output = %q, want empty", target, output)
+		}
+	}
+
+	runHook("codex", config.IntegrationOwnerCodexPlugin, workspaceA, true)
+	waitForRuntimeContextReceipts(t, receiptPath, 1)
+	runHook("claude", config.IntegrationOwnerClaudePlugin, workspaceB, false)
+	contexts := waitForRuntimeContextReceipts(t, receiptPath, 2)
+	want := []struct {
+		Target    string
+		Event     string
+		Workspace string
+	}{
+		{Target: "codex", Event: "turn_end", Workspace: trustedWorkspaceA},
+		{Target: "claude", Event: "turn_end", Workspace: trustedWorkspaceB},
+	}
+	for index := range want {
+		if contexts[index].Target != want[index].Target || contexts[index].Event != want[index].Event || contexts[index].Workspace != want[index].Workspace {
+			t.Fatalf("runtime context %d = %#v, want %#v", index, contexts[index], want[index])
+		}
+	}
+}
+
+func TestAgentHookWrappersFailOpenWhenRuntimeIsUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("plugin hook wrappers use POSIX shell")
+	}
+	repoRoot := testPAXMRepoRoot(t)
+	dir := t.TempDir()
+	failingRuntime := filepath.Join(dir, "paxm-unavailable")
+	if err := os.WriteFile(failingRuntime, []byte("#!/bin/sh\nexit 23\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name    string
+		wrapper string
+	}{
+		{name: "codex", wrapper: filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh")},
+		{name: "claude", wrapper: filepath.Join(repoRoot, "plugins", "paxm-claude", "hooks", "paxm-hook.sh")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := exec.Command("sh", test.wrapper, "user_input")
+			command.Dir = workspace
+			command.Env = append(os.Environ(), "PAXM_BINARY="+failingRuntime, "HOME="+dir)
+			command.Stdin = strings.NewReader(`{"prompt":"continue native Agent work"}`)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("wrapper blocked Agent work: %v: %s", err, output)
+			}
+			if len(output) != 0 {
+				t.Fatalf("fail-open wrapper output = %q, want empty", output)
+			}
+		})
+	}
+}
+
+func TestAgentHookWrappersFailOpenWhenProviderIsUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("plugin hook wrappers use POSIX shell")
+	}
+	dir := t.TempDir()
+	repoRoot := testPAXMRepoRoot(t)
+	binary := buildTestPAXMBinary(t, repoRoot, dir)
+	failingProvider := filepath.Join(dir, "ctx-unavailable")
+	if err := os.WriteFile(failingProvider, []byte("#!/bin/sh\nexit 23\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := config.DefaultConfig(configPath)
+	cfg.Providers["sqlite"] = config.ProviderConfig{Type: "sqlite", Enabled: false}
+	cfg.Providers["ctx"] = config.ProviderConfig{
+		Type: "jsonrpc", Enabled: true, Transport: "stdio", Command: failingProvider, Timeout: "1s",
+	}
+	recall := cfg.RecallProfiles["default"]
+	recall.Providers = []config.ProviderRouteConfig{{Name: "ctx", Required: true}}
+	cfg.RecallProfiles["default"] = recall
+	for name, owner := range map[string]string{
+		"codex": config.IntegrationOwnerCodexPlugin, "claude": config.IntegrationOwnerClaudePlugin,
+	} {
+		agent := cfg.Agents[name]
+		agent.Enabled = true
+		agent.Integration.Owner = owner
+		userInput := agent.Hooks["user_input"]
+		userInput.Recall.Enabled = true
+		userInput.Recall.Profile = "default"
+		userInput.Recall.Initial = &config.HookInitialRecall{Enabled: false}
+		userInput.Write.Enabled = false
+		agent.Hooks["user_input"] = userInput
+		sessionStart := agent.Hooks["session_start"]
+		sessionStart.Recall.Enabled = false
+		sessionStart.Write.Enabled = false
+		agent.Hooks["session_start"] = sessionStart
+		cfg.Agents[name] = agent
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name, owner, wrapper string
+	}{
+		{name: "codex", owner: config.IntegrationOwnerCodexPlugin, wrapper: filepath.Join(repoRoot, "plugins", "paxm-memory", "hooks", "paxm-hook.sh")},
+		{name: "claude", owner: config.IntegrationOwnerClaudePlugin, wrapper: filepath.Join(repoRoot, "plugins", "paxm-claude", "hooks", "paxm-hook.sh")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sessionID := "provider-unavailable-" + test.name
+			start := exec.Command("sh", test.wrapper, "session_start")
+			start.Dir = workspace
+			start.Env = append(os.Environ(), "PAXM_BINARY="+binary, "PAXM_CONFIG="+configPath, "PAXM_INTEGRATION_OWNER="+test.owner)
+			start.Stdin = strings.NewReader(`{"session_id":"` + sessionID + `"}`)
+			if output, err := start.CombinedOutput(); err != nil {
+				t.Fatalf("session start failed: %v: %s", err, output)
+			}
+			command := exec.Command("sh", test.wrapper, "user_input")
+			command.Dir = workspace
+			command.Env = append(os.Environ(), "PAXM_BINARY="+binary, "PAXM_CONFIG="+configPath, "PAXM_INTEGRATION_OWNER="+test.owner)
+			command.Stdin = strings.NewReader(`{"session_id":"` + sessionID + `","prompt":"continue native Agent work"}`)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("provider failure blocked Agent work: %v: %s", err, output)
+			}
+			if len(output) != 0 {
+				t.Fatalf("provider failure output = %q, want empty", output)
+			}
+		})
+	}
+}
+
+func testPAXMRepoRoot(t *testing.T) string {
+	t.Helper()
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repoRoot
+}
+
+func buildTestPAXMBinary(t *testing.T, repoRoot, dir string) string {
+	t.Helper()
+	binary := filepath.Join(dir, "paxm")
+	build := exec.Command("go", "build", "-o", binary, filepath.Join(repoRoot, "cmd/paxm"))
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build paxm: %v: %s", err, output)
+	}
+	return binary
+}
+
+type runtimeContextReceipt struct {
+	Target    string `json:"target"`
+	Event     string `json:"event"`
+	Workspace string `json:"workspace"`
+}
+
+func waitForRuntimeContextReceipts(t *testing.T, path string, count int) []runtimeContextReceipt {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var receipts []runtimeContextReceipt
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				var receipt runtimeContextReceipt
+				if decodeErr := json.Unmarshal([]byte(line), &receipt); decodeErr != nil {
+					t.Fatalf("decode runtime context receipt: %v: %s", decodeErr, line)
+				}
+				receipts = append(receipts, receipt)
+			}
+			if len(receipts) >= count {
+				return receipts
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d runtime context receipts", count)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestRuntimeContextWriteProviderHelper(t *testing.T) {
+	if os.Getenv("PAXM_RUNTIME_CONTEXT_WRITE_HELPER") != "1" {
+		return
+	}
+	var request struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}
+	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Method != "paxm.putBatch" {
+		t.Fatalf("unexpected method %q", request.Method)
+	}
+	var batch struct {
+		Items []struct {
+			Metadata       map[string]string     `json:"metadata"`
+			RuntimeContext runtimeContextReceipt `json:"runtime_context"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(request.Params, &batch); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := os.OpenFile(os.Getenv("PAXM_RUNTIME_CONTEXT_RECEIPT_FILE"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range batch.Items {
+		metadataContext := runtimeContextReceipt{
+			Target: item.Metadata["hook_target"], Event: item.Metadata["hook_event"], Workspace: item.Metadata["workspace"],
+		}
+		context := item.RuntimeContext
+		if context != metadataContext {
+			context = runtimeContextReceipt{}
+		}
+		if err := json.NewEncoder(receipt).Encode(context); err != nil {
+			_ = receipt.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := receipt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	refs := make([]map[string]string, len(batch.Items))
+	for index := range refs {
+		refs[index] = map[string]string{"id": fmt.Sprintf("runtime-context-%d", index)}
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      request.ID,
+		"result":  map[string]any{"refs": refs},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeContextProviderHelper(t *testing.T) {
+	if os.Getenv("PAXM_RUNTIME_CONTEXT_HELPER") != "1" {
+		return
+	}
+	var request struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}
+	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Method != "paxm.search" {
+		t.Fatalf("unexpected method %q", request.Method)
+	}
+	var params struct {
+		Text           string            `json:"text"`
+		Metadata       map[string]string `json:"metadata"`
+		RuntimeContext struct {
+			Target    string `json:"target"`
+			Event     string `json:"event"`
+			Workspace string `json:"workspace"`
+		} `json:"runtime_context"`
+	}
+	if err := json.Unmarshal(request.Params, &params); err != nil {
+		t.Fatal(err)
+	}
+	context := params.RuntimeContext
+	matched := context.Target == os.Getenv("PAXM_RUNTIME_CONTEXT_TARGET") &&
+		context.Event == os.Getenv("PAXM_RUNTIME_CONTEXT_EVENT") &&
+		context.Workspace == os.Getenv("PAXM_RUNTIME_CONTEXT_WORKSPACE") &&
+		params.Metadata["workspace"] == os.Getenv("PAXM_RUNTIME_CONTEXT_WORKSPACE") &&
+		params.Metadata["hook_target"] == os.Getenv("PAXM_RUNTIME_CONTEXT_TARGET") &&
+		params.Metadata["hook_event"] == os.Getenv("PAXM_RUNTIME_CONTEXT_EVENT") &&
+		strings.Contains(params.Text, `/forged/runtime`)
+	hits := []map[string]any{}
+	if matched {
+		hits = append(hits, map[string]any{
+			"id": "runtime-context", "text": "runtime-context-ok", "relevance": 1, "score": 1,
+		})
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      request.ID,
+		"result":  map[string]any{"hits": hits},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestEvalProviderJSONRPCPublicCommand(t *testing.T) {
 	dir := t.TempDir()

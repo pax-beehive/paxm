@@ -55,6 +55,12 @@ Provider-side search filters come only from `SearchQuery.Filters`, which
 callers set explicitly. `SearchQuery.Metadata` is runtime and diagnostic
 context (hook session ids, event sources, recall phases) and must never become
 store-native filter criteria — see `docs/provider-adapter-contract.md`.
+Codex and Claude Code passive searches additionally carry a typed
+`SearchQuery.RuntimeContext` constructed at the hidden hook CLI seam. Its
+target/event come from command flags and its workspace from the hook process
+working directory; stdin remains evidence and cannot override the typed value.
+The same value reaches passive `MemoryItem` writes, with buffered episodes
+retaining the last contributing hook event inside their trusted session scope.
 
 Provider relevance should be normalized to `[0, 1]` by the adapter. The router
 can then compare hits from different providers without knowing provider-specific

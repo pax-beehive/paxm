@@ -11,11 +11,12 @@ import (
 )
 
 type RecallInput struct {
-	Query     string            `json:"query"`
-	Profile   string            `json:"profile,omitempty"`
-	Limit     int               `json:"limit,omitempty"`
-	Meta      map[string]string `json:"meta,omitempty"`
-	SessionID string            `json:"-"`
+	Query          string                `json:"query"`
+	Profile        string                `json:"profile,omitempty"`
+	Limit          int                   `json:"limit,omitempty"`
+	Meta           map[string]string     `json:"meta,omitempty"`
+	SessionID      string                `json:"-"`
+	RuntimeContext memory.RuntimeContext `json:"runtime_context,omitempty"`
 	// Filters is the only field providers translate into store-native search
 	// filters. Meta stays runtime/diagnostic context and never filters.
 	Filters map[string]string `json:"filters,omitempty"`
@@ -28,18 +29,19 @@ type RecallResult struct {
 	TimedOut        bool                    `json:"timed_out,omitempty"`
 }
 type RememberInput struct {
-	ID            string              `json:"id,omitempty"`
-	Text          string              `json:"text"`
-	AdmissionText string              `json:"-"`
-	Profile       string              `json:"profile,omitempty"`
-	Source        string              `json:"source,omitempty"`
-	Metadata      map[string]string   `json:"metadata,omitempty"`
-	CreatedAt     time.Time           `json:"created_at,omitempty"`
-	Tier          memory.MemoryTier   `json:"tier,omitempty"`
-	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
-	Turn          *memory.TurnContext `json:"-"`
-	SessionID     string              `json:"-"`
-	AgentName     string              `json:"agent_name,omitempty"`
+	ID             string                `json:"id,omitempty"`
+	Text           string                `json:"text"`
+	AdmissionText  string                `json:"-"`
+	Profile        string                `json:"profile,omitempty"`
+	Source         string                `json:"source,omitempty"`
+	Metadata       map[string]string     `json:"metadata,omitempty"`
+	CreatedAt      time.Time             `json:"created_at,omitempty"`
+	Tier           memory.MemoryTier     `json:"tier,omitempty"`
+	ExpiresAt      *time.Time            `json:"expires_at,omitempty"`
+	Turn           *memory.TurnContext   `json:"-"`
+	RuntimeContext memory.RuntimeContext `json:"runtime_context,omitempty"`
+	SessionID      string                `json:"-"`
+	AgentName      string                `json:"agent_name,omitempty"`
 }
 type RememberResult struct {
 	Refs           []memory.MemoryRef     `json:"refs"`
@@ -92,12 +94,21 @@ func (s *Engine) Recall(ctx context.Context, input RecallInput) (RecallResult, e
 	if sessionID := strings.TrimSpace(input.SessionID); sessionID != "" {
 		metadata["session_id"] = sessionID
 	}
-	value, err := s.router.SearchWithPolicy(ctx, memory.SearchQuery{Text: query, Metadata: metadata, Filters: input.Filters}, policy)
+	value, err := s.router.SearchWithPolicy(ctx, memory.SearchQuery{
+		Text: query, Metadata: metadata, Filters: input.Filters, RuntimeContext: runtimeContextPointer(input.RuntimeContext),
+	}, policy)
 	result := RecallResult{Query: query, Hits: value.Hits, ProviderErrors: value.ProviderErrors, ProviderRecalls: value.ProviderRecalls}
 	if errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
 	}
 	return result, err
+}
+
+func runtimeContextPointer(value memory.RuntimeContext) *memory.RuntimeContext {
+	if value == (memory.RuntimeContext{}) {
+		return nil
+	}
+	return &value
 }
 func (s *Engine) Remember(ctx context.Context, input RememberInput) (RememberResult, error) {
 	item, profile, ok := s.itemFromInput(input)
@@ -228,7 +239,8 @@ func (s *Engine) itemFromInput(input RememberInput) (memory.MemoryItem, string, 
 	return memory.MemoryItem{
 		ID: input.ID, Text: text, AdmissionText: input.AdmissionText, Source: input.Source,
 		Metadata: metadata, CreatedAt: created, Tier: input.Tier, ExpiresAt: input.ExpiresAt,
-		Turn: input.Turn, Origin: memory.MemoryOrigin{SessionID: sessionID},
+		Turn: input.Turn, RuntimeContext: runtimeContextPointer(input.RuntimeContext),
+		Origin: memory.MemoryOrigin{SessionID: sessionID},
 	}, profile, true
 }
 func (s *Engine) searchPolicy(name string, limit int) (memory.SearchPolicy, error) {
