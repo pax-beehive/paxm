@@ -20,6 +20,8 @@ every agent.
 
 [Install for Codex](#codex-plugin) · [Install the CLI](#opencode-pi-cli-or-mcp) · [See the result](#what-changes-after-installation) · [Docs](#documentation) · [中文](docs/README.zh-CN.md)
 
+Also from us: [DSH Plugin Hub](https://dshpluginhub.ai) — exact versions and one-command installs for DeepSeek Harness plugins.
+
 </div>
 
 ## What changes after installation

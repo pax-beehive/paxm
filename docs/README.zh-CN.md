@@ -11,6 +11,8 @@ key 或额外的 embedding/LLM 服务。
 [provider contract](provider-adapter-contract.md) 为准。自定义 JSON-RPC
 provider 请直接看[中文接入指南](jsonrpc-provider-protocol.zh-CN.md)。
 
+同系列：[DSH Plugin Hub](https://dshpluginhub.ai) — DeepSeek Harness 插件注册表，精确版本与一键安装。
+
 ## 1. 安装与第一次运行
 
 安装最新发布版本：
