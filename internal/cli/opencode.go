@@ -77,13 +77,14 @@ function partText(parts: OpenCodePart[]): string {
     .trim();
 }
 
-function runHook(command: string, payload: unknown): { ok: boolean; stdout: string } {
+function runHook(command: string, payload: unknown, workspace: string): { ok: boolean; stdout: string } {
   if (command === "") return { ok: true, stdout: "" };
   try {
 	    const result = spawnSync(command, [], {
 	      input: JSON.stringify(payload) + "\n",
 	      encoding: "utf8",
 	      maxBuffer: 1024 * 1024,
+	      cwd: workspace,
       timeout: 2_000,
     });
 	    const stdout = result.stdout ?? "";
@@ -167,7 +168,7 @@ export const PaxmPlugin: Plugin = async ({ client, directory, worktree }) => ({
         cwd: directory,
         workspace,
         source: "opencode",
-      });
+      }, workspace);
       if (started.ok && started.stdout.trim() !== "") contexts.push(started.stdout.trim());
     }
     if (paxmUserInputHookCommand === "") {
@@ -185,7 +186,7 @@ export const PaxmPlugin: Plugin = async ({ client, directory, worktree }) => ({
       prompt,
       source: "opencode",
     };
-    const result = runHook(paxmUserInputHookCommand, payload);
+    const result = runHook(paxmUserInputHookCommand, payload, workspace);
     if (result.ok) {
       const recall = formatRecall(result.stdout);
       if (recall !== "") contexts.push(recall);
@@ -239,7 +240,7 @@ export const PaxmPlugin: Plugin = async ({ client, directory, worktree }) => ({
         trigger_event: "session.idle",
         messages,
         metadata: { message_count: String(messages.length) },
-      });
+      }, workspace);
       if (result.ok) lastFlushedMessage.set(sessionID, flushID);
     } catch (error) {
       console.warn("paxm OpenCode session flush failed:", error);

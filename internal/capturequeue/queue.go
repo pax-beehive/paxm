@@ -111,6 +111,7 @@ func (e Episode) ingestGroup(profile string, events []facade.IngestInput, multip
 	var texts []string
 	var admissionText string
 	var agentName string
+	var runtimeContext memory.RuntimeContext
 	metadata := map[string]string{
 		"paxm_episode_id":       e.ID,
 		"paxm_episode_complete": fmt.Sprintf("%t", e.Complete),
@@ -139,6 +140,9 @@ func (e Episode) ingestGroup(profile string, events []facade.IngestInput, multip
 		if agentName == "" && strings.TrimSpace(item.AgentName) != "" {
 			agentName = item.AgentName
 		}
+		if item.RuntimeContext != (memory.RuntimeContext{}) {
+			runtimeContext = item.RuntimeContext
+		}
 		if createdAt.IsZero() || (!item.CreatedAt.IsZero() && item.CreatedAt.Before(createdAt)) {
 			createdAt = item.CreatedAt
 		}
@@ -153,17 +157,18 @@ func (e Episode) ingestGroup(profile string, events []facade.IngestInput, multip
 		id += "_" + checksum([]byte(profile + "\x00" + string(events[0].Tier) + "\x00" + expiryString(events[0].ExpiresAt)))[:12]
 	}
 	return facade.IngestInput{
-		ID:            id,
-		Text:          strings.Join(texts, "\n\n"),
-		AdmissionText: admissionText,
-		Profile:       profile,
-		Source:        "hook:episode",
-		Metadata:      metadata,
-		CreatedAt:     createdAt,
-		Tier:          events[0].Tier,
-		ExpiresAt:     events[0].ExpiresAt,
-		Turn:          e.turnContext(),
-		AgentName:     agentName,
+		ID:             id,
+		Text:           strings.Join(texts, "\n\n"),
+		AdmissionText:  admissionText,
+		Profile:        profile,
+		Source:         "hook:episode",
+		Metadata:       metadata,
+		CreatedAt:      createdAt,
+		Tier:           events[0].Tier,
+		ExpiresAt:      events[0].ExpiresAt,
+		Turn:           e.turnContext(),
+		RuntimeContext: runtimeContext,
+		AgentName:      agentName,
 	}
 }
 

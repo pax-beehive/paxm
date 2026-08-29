@@ -55,6 +55,16 @@ Provider-side search filters come only from `SearchQuery.Filters`, which
 callers set explicitly. `SearchQuery.Metadata` is runtime and diagnostic
 context (hook session ids, event sources, recall phases) and must never become
 store-native filter criteria — see `docs/provider-adapter-contract.md`.
+Codex and OpenCode passive searches additionally carry a typed
+`SearchQuery.RuntimeContext` constructed at the hidden hook CLI seam. Its
+target/event come from command flags and its workspace from the hook process
+working directory; the OpenCode plugin sets that cwd from host
+`worktree || directory`. Stdin remains evidence and cannot override the typed value.
+The capture payload type does not deserialize `runtime_context`; integrations
+without a trusted constructor therefore omit the typed value while preserving
+their existing payload-derived workspace behavior.
+The same value reaches passive `MemoryItem` writes, with buffered episodes
+retaining the last contributing hook event inside their trusted session scope.
 
 Provider relevance should be normalized to `[0, 1]` by the adapter. The router
 can then compare hits from different providers without knowing provider-specific

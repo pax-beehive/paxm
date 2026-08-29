@@ -70,20 +70,30 @@ func EffectiveHitExpiresAt(hit MemoryHit) *time.Time {
 }
 
 type MemoryItem struct {
-	ID            string            `json:"id,omitempty"`
-	Text          string            `json:"text"`
-	AdmissionText string            `json:"-"`
-	Source        string            `json:"source,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
-	CreatedAt     time.Time         `json:"created_at,omitempty"`
-	Tier          MemoryTier        `json:"tier,omitempty"`
-	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
-	Turn          *TurnContext      `json:"-"`
-	Origin        MemoryOrigin      `json:"origin,omitempty"`
-	Scope         MemoryScope       `json:"scope,omitempty"`
+	ID             string            `json:"id,omitempty"`
+	Text           string            `json:"text"`
+	AdmissionText  string            `json:"-"`
+	Source         string            `json:"source,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	CreatedAt      time.Time         `json:"created_at,omitempty"`
+	Tier           MemoryTier        `json:"tier,omitempty"`
+	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
+	Turn           *TurnContext      `json:"-"`
+	RuntimeContext *RuntimeContext   `json:"runtime_context,omitempty"`
+	Origin         MemoryOrigin      `json:"origin,omitempty"`
+	Scope          MemoryScope       `json:"scope,omitempty"`
 	// Provenance is the v1 compatibility shape. New integrations should use
 	// Origin and Scope, which separate authorship from visibility boundaries.
 	Provenance Provenance `json:"provenance,omitempty"`
+}
+
+// RuntimeContext identifies the trusted host hook invocation. Hook adapters
+// construct it from their command arguments and process working directory;
+// hook payloads are evidence and must not supply or override these values.
+type RuntimeContext struct {
+	Target    string `json:"target"`
+	Event     string `json:"event"`
+	Workspace string `json:"workspace"`
 }
 
 // MemoryOrigin identifies where a memory was produced. These values are
@@ -133,9 +143,10 @@ type MemoryRef struct {
 }
 
 type SearchQuery struct {
-	Text     string            `json:"text"`
-	Limit    int               `json:"limit,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Text           string            `json:"text"`
+	Limit          int               `json:"limit,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	RuntimeContext *RuntimeContext   `json:"runtime_context,omitempty"`
 	// Filters carries caller-explicit provider-side filter criteria. Unlike
 	// Metadata (runtime/diagnostic context), Filters is opt-in: providers must
 	// only translate Filters into store-native filter syntax.

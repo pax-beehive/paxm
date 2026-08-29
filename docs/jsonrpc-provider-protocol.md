@@ -41,6 +41,7 @@ are `stm` or `ltm`.
 | | `created_at` | RFC 3339 string | optional |
 | | `tier` | `stm` or `ltm` | optional |
 | | `expires_at` | RFC 3339 string | optional |
+| | `runtime_context` | `RuntimeContext` object | optional trusted host hook invocation for passive capture |
 | | `origin` | `MemoryOrigin` object | optional trusted write attribution |
 | | `scope` | `MemoryScope` object | optional write visibility boundary |
 | | `provenance` | legacy `Provenance` object | optional compatibility input |
@@ -59,8 +60,12 @@ are `stm` or `ltm`.
 | `SearchQuery` | `text` | string | required |
 | | `limit` | positive integer | optional |
 | | `metadata` | object of string to string | optional runtime/diagnostic context; plugins must not treat it as filter criteria |
+| | `runtime_context` | `RuntimeContext` object | optional trusted host hook invocation; omitted for active/non-hook calls |
 | | `filters` | object of string to string | optional caller-explicit exact-match filters |
 | | `tiers` | array of `stm` or `ltm` | optional filters |
+| `RuntimeContext` | `target` | string | required agent target, from the installed hook command |
+| | `event` | string | required normalized event, from the installed hook command |
+| | `workspace` | string | required hook process working directory |
 | `MemoryHit` | `id` | string | required |
 | | `text` | string | required |
 | | `relevance` | number in `[0,1]` | required |
@@ -93,6 +98,17 @@ must be evaluated separately by the configured paxm/provider policy; this
 protocol does not turn attribution into an ACL. Values copied from model output
 or caller-controlled search metadata are not trusted identity.
 
+For Codex and OpenCode passive hooks, paxm constructs `runtime_context`
+before decoding the host stdin payload. The command flags own `target` and
+`event`; the hook process working directory owns `workspace`. OpenCode sets
+that cwd from host `worktree || directory`. A payload may
+contain fields with the same names, including a nested `runtime_context`, but
+those values remain non-authoritative evidence and cannot override the object
+sent to the provider. `metadata.workspace` mirrors the same trusted workspace
+for adapters that use the compatibility metadata path. Buffered capture items
+carry the last contributing hook's trusted event; their target and workspace
+remain fixed by the episode session key.
+
 ### `paxm.health`
 
 Params are `{}`. Any successful JSON-RPC result means the provider is healthy.
@@ -110,7 +126,8 @@ stable ref:
 
 ### `paxm.search`
 
-Params contain `text`, optional `limit`, `metadata`, and `tiers`. The result is:
+Params contain `text`, optional `limit`, `metadata`, `runtime_context`, and
+`tiers`. The result is:
 
 ```json
 {"hits":[{"id":"memory-123","text":"...","relevance":0.92,"score":0.92,"metadata":{}}]}
@@ -175,6 +192,8 @@ requirements.
 
 - Existing v1 plugins remain valid because every new field is optional and
   implementations must ignore unknown fields.
+- Active and non-hook searches omit `runtime_context`; plugins must not invent
+  it from query text or metadata.
 - Existing `provenance` is accepted as a fallback, but cannot carry session or
   turn identity.
 - New plugins should implement `origin` and `scope`, then advertise

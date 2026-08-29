@@ -34,16 +34,17 @@ type IngestResult = tools.RememberResult
 type IngestBatchInput = tools.RememberBatchInput
 
 type HookEvent struct {
-	Target    string            `json:"target,omitempty"`
-	Event     string            `json:"event,omitempty"`
-	Query     string            `json:"query,omitempty"`
-	Prompt    string            `json:"prompt,omitempty"`
-	Assistant string            `json:"assistant,omitempty"`
-	Messages  []HookMessage     `json:"messages,omitempty"`
-	Workspace string            `json:"workspace,omitempty"`
-	Limit     int               `json:"limit,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Raw       json.RawMessage   `json:"-"`
+	Target         string                `json:"target,omitempty"`
+	Event          string                `json:"event,omitempty"`
+	Query          string                `json:"query,omitempty"`
+	Prompt         string                `json:"prompt,omitempty"`
+	Assistant      string                `json:"assistant,omitempty"`
+	Messages       []HookMessage         `json:"messages,omitempty"`
+	Workspace      string                `json:"workspace,omitempty"`
+	Limit          int                   `json:"limit,omitempty"`
+	Metadata       map[string]string     `json:"metadata,omitempty"`
+	RuntimeContext memory.RuntimeContext `json:"runtime_context,omitempty"`
+	Raw            json.RawMessage       `json:"-"`
 }
 
 type HookMessage struct {
@@ -147,11 +148,22 @@ func (s *Service) RunHook(ctx context.Context, event HookEvent) (HookResult, err
 		recallCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
+	metadata := copyMetadata(event.Metadata)
+	workspace := strings.TrimSpace(event.RuntimeContext.Workspace)
+	if workspace == "" {
+		workspace = strings.TrimSpace(event.Workspace)
+	}
+	if workspace != "" {
+		metadata["workspace"] = workspace
+	}
+	metadata["hook_target"] = event.Target
+	metadata["hook_event"] = event.Event
 	recall, err := s.Recall(recallCtx, RecallInput{
-		Query:   query,
-		Profile: recallCfg.Profile,
-		Limit:   limit,
-		Meta:    event.Metadata,
+		Query:          query,
+		Profile:        recallCfg.Profile,
+		Limit:          limit,
+		Meta:           metadata,
+		RuntimeContext: event.RuntimeContext,
 	})
 	recall.Hits = filterHookInsertionHits(recall.Hits, query, recallCfg.Insertion)
 	result.Query = recall.Query
@@ -244,12 +256,13 @@ func (s *Service) HookWriteItem(event HookEvent) (IngestInput, bool, error) {
 		admissionText = event.Prompt
 	}
 	input := IngestInput{
-		Text:          text,
-		AdmissionText: admissionText,
-		Profile:       eventCfg.Write.Profile,
-		Source:        "hook:" + event.Target + ":" + event.Event,
-		Metadata:      metadata,
-		AgentName:     event.Target,
+		Text:           text,
+		AdmissionText:  admissionText,
+		Profile:        eventCfg.Write.Profile,
+		Source:         "hook:" + event.Target + ":" + event.Event,
+		Metadata:       metadata,
+		RuntimeContext: event.RuntimeContext,
+		AgentName:      event.Target,
 	}
 	policy, err := s.putPolicy(input.Profile)
 	if err != nil {

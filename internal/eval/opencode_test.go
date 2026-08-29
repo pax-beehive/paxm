@@ -48,6 +48,25 @@ func TestOpenCodeExecutorBuildsPassivePluginAndParsesJSONStream(t *testing.T) {
 	if !strings.Contains(string(plugin), "PAXM_BINARY") || !strings.Contains(string(plugin), "session.idle") || !strings.Contains(string(plugin), "__hook") {
 		t.Fatalf("plugin = %s", plugin)
 	}
+	pluginSource := string(plugin)
+	for _, expected := range []string{
+		"function runHook(event, payload, workspace)",
+		"cwd:workspace",
+	} {
+		if !strings.Contains(pluginSource, expected) {
+			t.Fatalf("OpenCode eval plugin missing %q", expected)
+		}
+	}
+	for _, event := range []string{"user_input", "turn_end"} {
+		start := strings.Index(pluginSource, `runHook("`+event+`"`)
+		if start < 0 {
+			t.Fatalf("OpenCode eval plugin has no %s hook", event)
+		}
+		end := strings.Index(pluginSource[start:], ");")
+		if end < 0 || !strings.HasSuffix(pluginSource[start:start+end+2], ", workspace);") {
+			t.Fatalf("OpenCode eval %s hook does not pass host workspace", event)
+		}
+	}
 	if envValue(capturedEnv, "PAXM_BINARY") != "/bin/paxm" || envValue(capturedEnv, "PAXM_OPENCODE_RECALL") != "1" {
 		t.Fatalf("plugin environment = %#v", capturedEnv)
 	}

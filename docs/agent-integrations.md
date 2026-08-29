@@ -113,6 +113,25 @@ Then verify in the real client:
 Native hook failures are fail-open at the client boundary: a missing provider,
 timeout, or paxm hook error must not block the coding session.
 
+### Trusted runtime context for Codex and OpenCode
+
+The Codex hook and OpenCode plugin commands build `runtime_context` inside paxm,
+not from an undocumented stdin field. `target` and `event` come from the
+installed command flags, while `workspace` comes from the hook process working
+directory. OpenCode sets every hook subprocess cwd from host
+`worktree || directory`. Payload fields named `target`, `event`, `workspace`, `cwd`, or
+`runtime_context` remain non-authoritative hook evidence and cannot replace the
+trusted values. The same context crosses the local hook daemon socket, so a
+daemon started in one workspace cannot relabel a later hook from another.
+
+Passive JSON-RPC searches and capture writes carry the trusted object as
+`runtime_context`; compatibility metadata also receives the same trusted
+`workspace`. A buffered episode uses the last contributing hook's trusted
+event while target and workspace stay fixed by the episode's session key.
+Other agent integrations retain their documented payload-derived workspace
+contracts, but a payload field named `runtime_context` is ignored and never
+forwarded as typed trusted context.
+
 Disable and remove one integration without deleting memory or provider config:
 
 ```bash

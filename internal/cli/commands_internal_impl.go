@@ -176,11 +176,12 @@ func localTimeContext(now time.Time) string {
 }
 
 type hookBufferRequest struct {
-	Action  string          `json:"action,omitempty"`
-	EventID string          `json:"event_id,omitempty"`
-	Target  string          `json:"target"`
-	Event   string          `json:"event"`
-	Raw     json.RawMessage `json:"raw"`
+	Action         string                `json:"action,omitempty"`
+	EventID        string                `json:"event_id,omitempty"`
+	Target         string                `json:"target"`
+	Event          string                `json:"event"`
+	RuntimeContext memory.RuntimeContext `json:"runtime_context,omitempty"`
+	Raw            json.RawMessage       `json:"raw"`
 }
 
 type hookBufferResponse struct {
@@ -479,7 +480,11 @@ func handleCaptureQueueConn(ctx context.Context, runtime *capture.Runtime, conn 
 	command := capture.Command{Action: request.Action, EventID: request.EventID}
 	var err error
 	if request.Action == "" {
-		command.Event, err = decodeHookEvent(request.Raw, request.Target, request.Event)
+		if request.RuntimeContext != (memory.RuntimeContext{}) {
+			command.Event, err = decodeHookEventWithRuntimeContext(request.Raw, request.RuntimeContext)
+		} else {
+			command.Event, err = decodeHookEvent(request.Raw, request.Target, request.Event)
+		}
 	}
 	if err != nil {
 		_ = writeJSON(conn, hookBufferResponse{OK: false, Error: err.Error()})
@@ -551,10 +556,11 @@ func sendHookBufferRequest(socket string, event capture.Event) (hookBufferRespon
 		raw = json.RawMessage(`{}`)
 	}
 	request := hookBufferRequest{
-		EventID: event.Metadata["event_id"],
-		Target:  event.Target,
-		Event:   event.Event,
-		Raw:     raw,
+		EventID:        event.Metadata["event_id"],
+		Target:         event.Target,
+		Event:          event.Event,
+		RuntimeContext: event.RuntimeContext,
+		Raw:            raw,
 	}
 	if err := json.NewEncoder(conn).Encode(request); err != nil {
 		return hookBufferResponse{}, err
@@ -643,6 +649,33 @@ func pathDoesNotExist(path string) bool {
 }
 
 func decodeHookEvent(raw []byte, target, eventName string) (capture.Event, error) {
+	if target != "codex" && target != "opencode" {
+		return decodeHookPayload(raw, target, eventName)
+	}
+	runtimeContext, err := hookRuntimeContext(target, eventName)
+	if err != nil {
+		return capture.Event{}, err
+	}
+	return decodeHookEventWithRuntimeContext(raw, runtimeContext)
+}
+
+func decodeHookEventWithRuntimeContext(raw []byte, runtimeContext memory.RuntimeContext) (capture.Event, error) {
+	runtimeContext, err := normalizeHookRuntimeContext(runtimeContext)
+	if err != nil {
+		return capture.Event{}, err
+	}
+	event, err := decodeHookPayload(raw, runtimeContext.Target, runtimeContext.Event)
+	if err != nil {
+		return capture.Event{}, err
+	}
+	event.Target = runtimeContext.Target
+	event.Event = runtimeContext.Event
+	event.Workspace = runtimeContext.Workspace
+	event.RuntimeContext = runtimeContext
+	return event, nil
+}
+
+func decodeHookPayload(raw []byte, target, eventName string) (capture.Event, error) {
 	raw = bytesTrimSpace(raw)
 	if len(raw) == 0 {
 		raw = []byte(`{}`)
@@ -659,6 +692,9 @@ func decodeHookEvent(raw []byte, target, eventName string) (capture.Event, error
 	if err := json.Unmarshal(typedRaw, &event); err != nil {
 		return capture.Event{}, fmt.Errorf("decode hook event JSON: %w", err)
 	}
+	// RuntimeContext is created only by trusted host adapters. Keep the raw
+	// payload as evidence, but never deserialize its runtime_context as trust.
+	event.RuntimeContext = memory.RuntimeContext{}
 	if event.Target == "" {
 		event.Target = target
 	}
@@ -677,6 +713,31 @@ func decodeHookEvent(raw []byte, target, eventName string) (capture.Event, error
 	enrichHookEventFromRaw(&event, raw)
 	event.Raw = append(json.RawMessage(nil), raw...)
 	return event, nil
+}
+
+func hookRuntimeContext(target, eventName string) (memory.RuntimeContext, error) {
+	return normalizeHookRuntimeContext(memory.RuntimeContext{Target: target, Event: eventName})
+}
+
+func normalizeHookRuntimeContext(runtimeContext memory.RuntimeContext) (memory.RuntimeContext, error) {
+	runtimeContext.Target = strings.TrimSpace(runtimeContext.Target)
+	if runtimeContext.Target == "" {
+		runtimeContext.Target = "codex"
+	}
+	runtimeContext.Event = strings.TrimSpace(runtimeContext.Event)
+	if runtimeContext.Event == "" {
+		runtimeContext.Event = "user_input"
+	}
+	runtimeContext.Workspace = strings.TrimSpace(runtimeContext.Workspace)
+	if runtimeContext.Workspace != "" {
+		return runtimeContext, nil
+	}
+	workspace, err := os.Getwd()
+	if err != nil {
+		return memory.RuntimeContext{}, fmt.Errorf("resolve hook working directory: %w", err)
+	}
+	runtimeContext.Workspace = workspace
+	return runtimeContext, nil
 }
 
 func promptFromRawHook(raw []byte) string {

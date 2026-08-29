@@ -6,6 +6,7 @@ import (
 
 	"github.com/pax-beehive/paxm/internal/config"
 	"github.com/pax-beehive/paxm/internal/facade"
+	"github.com/pax-beehive/paxm/internal/memory"
 	"github.com/pax-beehive/paxm/internal/tools"
 )
 
@@ -13,16 +14,17 @@ const RecallPhaseMetadataKey = "paxm_recall_phase"
 const RecallPhaseInitial = "initial"
 
 type Event struct {
-	Target    string            `json:"target,omitempty"`
-	Event     string            `json:"event,omitempty"`
-	Query     string            `json:"query,omitempty"`
-	Prompt    string            `json:"prompt,omitempty"`
-	Assistant string            `json:"assistant,omitempty"`
-	Messages  []Message         `json:"messages,omitempty"`
-	Workspace string            `json:"workspace,omitempty"`
-	Limit     int               `json:"limit,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Raw       json.RawMessage   `json:"-"`
+	Target         string                `json:"target,omitempty"`
+	Event          string                `json:"event,omitempty"`
+	Query          string                `json:"query,omitempty"`
+	Prompt         string                `json:"prompt,omitempty"`
+	Assistant      string                `json:"assistant,omitempty"`
+	Messages       []Message             `json:"messages,omitempty"`
+	Workspace      string                `json:"workspace,omitempty"`
+	Limit          int                   `json:"limit,omitempty"`
+	Metadata       map[string]string     `json:"metadata,omitempty"`
+	RuntimeContext memory.RuntimeContext `json:"-"`
+	Raw            json.RawMessage       `json:"-"`
 }
 type Message struct {
 	Role    string `json:"role,omitempty"`
@@ -63,5 +65,5 @@ func toFacadeEvent(event Event) facade.HookEvent {
 	for _, message := range event.Messages {
 		messages = append(messages, facade.HookMessage{Role: message.Role, Text: message.Text, Content: message.Content, Source: message.Source})
 	}
-	return facade.HookEvent{Target: event.Target, Event: event.Event, Query: event.Query, Prompt: event.Prompt, Assistant: event.Assistant, Messages: messages, Workspace: event.Workspace, Limit: event.Limit, Metadata: event.Metadata, Raw: event.Raw}
+	return facade.HookEvent{Target: event.Target, Event: event.Event, Query: event.Query, Prompt: event.Prompt, Assistant: event.Assistant, Messages: messages, Workspace: event.Workspace, Limit: event.Limit, Metadata: event.Metadata, RuntimeContext: event.RuntimeContext, Raw: event.Raw}
 }

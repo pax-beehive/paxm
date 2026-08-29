@@ -95,6 +95,21 @@ filters. The Mem0 and Mem0 Cloud adapters follow this rule; both still send
 the configured `user_id`, `agent_id`, and `run_id` entity scope from provider
 configuration on every request.
 
+`SearchQuery.RuntimeContext`, when present, is separate trusted hook context.
+For Codex and OpenCode it is created from installed command flags plus the
+hook process working directory before stdin is decoded. OpenCode sets that cwd
+from host `worktree || directory`. Adapters may use its
+workspace for explicit local scope policy, but must not replace it with values
+from `Metadata`, query text, or model output. Active and non-hook searches omit
+the field. Hook payload decoding cannot populate the typed field; integrations
+without a trusted host constructor omit it even when their raw payload contains
+a same-named object.
+
+Passive `MemoryItem.RuntimeContext` uses the same trusted structure. When the
+capture queue combines several lifecycle events into one episode item, it keeps
+the last contributing hook event; target and workspace remain stable because
+the queue partitions episodes by the trusted session key.
+
 ## Mem0 search scope payload compatibility
 
 The self-hosted Mem0 adapter owns the placement of provider entity scope in

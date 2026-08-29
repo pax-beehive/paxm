@@ -14,10 +14,10 @@ function textOf(parts) {
     .map((part) => typeof part.text === "string" ? part.text.trim() : "").filter(Boolean).join("\n\n").trim();
 }
 
-function runHook(event, payload) {
+function runHook(event, payload, workspace) {
   const args = paxmConfig ? ["--config", paxmConfig] : [];
   args.push("__hook", "--target", "opencode", "--event", event, "--json");
-  const result = spawnSync(paxmBinary, args, {input:JSON.stringify(payload)+"\n",encoding:"utf8",timeout:5000,maxBuffer:1024*1024});
+  const result = spawnSync(paxmBinary, args, {input:JSON.stringify(payload)+"\n",encoding:"utf8",timeout:5000,maxBuffer:1024*1024,cwd:workspace});
   return {ok: !result.error && result.status === 0, stdout: result.stdout ?? ""};
 }
 
@@ -37,7 +37,8 @@ export const PaxmPlugin = async ({client, directory, worktree}) => ({
     const marker = "Question:";
     const markerIndex = prompt.lastIndexOf(marker);
     const query = markerIndex >= 0 ? prompt.slice(markerIndex + marker.length).trim() : prompt;
-    const result = runHook("user_input", {schema_version:"paxm.opencode.user_input.v1",target:"opencode",event:"user_input",agent:"opencode",session_id:input.sessionID,workspace:worktree||directory,prompt:query,source:"opencode"});
+    const workspace = worktree || directory;
+    const result = runHook("user_input", {schema_version:"paxm.opencode.user_input.v1",target:"opencode",event:"user_input",agent:"opencode",session_id:input.sessionID,workspace,prompt:query,source:"opencode"}, workspace);
     if (!result.ok) return;
     const value = formatRecall(result.stdout);
     if (value) {
@@ -74,7 +75,8 @@ export const PaxmPlugin = async ({client, directory, worktree}) => ({
       const messages = turn.map((message) => ({role:String(message?.info?.role ?? "unknown"),text:textOf(message?.parts ?? []),source:"session.idle"}))
         .filter((message) => (message.role === "user" || message.role === "assistant") && message.text);
       if (!messages.length) return;
-      const result = runHook("turn_end", {schema_version:"paxm.opencode.turn_end.v1",target:"opencode",event:"turn_end",agent:"opencode",session_id:sessionID,workspace:worktree||directory,prompt:messages.find((message)=>message.role==="user")?.text??"",source:"opencode",trigger_event:"session.idle",messages,metadata:{message_count:String(messages.length)}});
+      const workspace = worktree || directory;
+      const result = runHook("turn_end", {schema_version:"paxm.opencode.turn_end.v1",target:"opencode",event:"turn_end",agent:"opencode",session_id:sessionID,workspace,prompt:messages.find((message)=>message.role==="user")?.text??"",source:"opencode",trigger_event:"session.idle",messages,metadata:{message_count:String(messages.length)}}, workspace);
       if (result.ok) lastFlushedMessage.set(sessionID, flushID);
     } catch {}
   }
